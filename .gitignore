@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Environment files
+.env
+.env.local
+
+# Build outputs
+.next/
+out/
+build/
+dist/
+target/
+bin/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.classpath
+.project
+.settings/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Vector database (can be regenerated)
+vector_db/
+web-app/vector_db/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Misc
+*.swp
+*.swo
+*~
