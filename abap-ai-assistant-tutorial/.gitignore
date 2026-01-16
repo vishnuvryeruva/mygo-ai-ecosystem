@@ -1,0 +1,36 @@
+# Eclipse
+.settings/
+bin/
+.metadata
+.recommenders
+RemoteSystemsTempFiles/
+
+# Java
+*.class
+*.war
+*.ear
+
+# Keep JSON library JAR but ignore other JARs
+*.jar
+!lib/org.json-*.jar
+
+# Build
+target/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+*.swp
+*.swo
+*~
+.idea/
+*.iml
+
+# Security - Never commit API keys!
+*.prefs
+**/openai_api_key.txt
+**/.env
+

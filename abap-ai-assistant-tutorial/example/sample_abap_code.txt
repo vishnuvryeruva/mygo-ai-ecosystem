@@ -1,0 +1,27 @@
+* ABAP code with .txt extension to test the enhanced plugin
+CLASS lcl_demo DEFINITION.
+  PUBLIC SECTION.
+    METHODS: process_data IMPORTING iv_input TYPE string.
+ENDCLASS.
+
+CLASS lcl_demo IMPLEMENTATION.
+  METHOD process_data.
+    DATA: lv_processed TYPE string.
+    
+    " Check if input is initial
+    IF iv_input IS INITIAL.
+      MESSAGE 'Input is empty' TYPE 'W'.
+      RETURN.
+    ENDIF.
+    
+    " Process the input
+    lv_processed = iv_input.
+    
+    " Display result
+    WRITE: / 'Processed:', lv_processed.
+  ENDMETHOD.
+ENDCLASS.
+
+START-OF-SELECTION.
+  DATA(lo_demo) = NEW lcl_demo( ).
+  lo_demo->process_data( 'Test Data' ).

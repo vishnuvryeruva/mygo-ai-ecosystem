@@ -1,0 +1,41 @@
+* Sample ABAP code without .abap extension
+REPORT z_test_program.
+
+DATA: lv_message TYPE string,
+      lt_table   TYPE TABLE OF string,
+      ls_structure TYPE char50.
+
+* Initialize variables
+lv_message = 'Hello World'.
+APPEND lv_message TO lt_table.
+
+* Loop through internal table
+LOOP AT lt_table INTO ls_structure.
+  WRITE: / ls_structure.
+ENDLOOP.
+
+* Conditional check
+IF lv_message IS NOT INITIAL.
+  MESSAGE lv_message TYPE 'I'.
+ENDIF.
+
+* Method call example
+CALL METHOD some_class->some_method
+  EXPORTING
+    param1 = lv_message
+  IMPORTING
+    result = ls_structure.
+
+* Modern ABAP syntax
+some_object->method_call( 
+  param = lv_message 
+).
+
+* Data declaration with inline
+DATA(lv_inline) = 'Inline declaration'.
+
+* SQL Select
+SELECT single *
+  FROM mara
+  INTO @DATA(ls_material)
+  WHERE matnr = 'TEST123'.

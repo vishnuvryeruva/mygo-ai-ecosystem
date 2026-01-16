@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+   <!-- Extension point for ABAP file marker -->
+   <extension
+         id="abapProblem"
+         name="ABAP Code Suggestion"
+         point="org.eclipse.core.resources.markers">
+      <super type="org.eclipse.core.resources.problemmarker"/>
+      <persistent value="true"/>
+   </extension>
+   
+   <!-- Builder for analyzing ABAP code -->
+   <extension
+         id="abapBuilder"
+         name="ABAP AI Builder"
+         point="org.eclipse.core.resources.builders">
+      <builder hasNature="true">
+         <run class="com.abap.ai.assistant.builder.AbapBuilder"/>
+      </builder>
+   </extension>
+   
+   <!-- Nature for ABAP projects -->
+   <extension
+         id="abapNature"
+         name="ABAP AI Nature"
+         point="org.eclipse.core.resources.natures">
+      <runtime>
+         <run class="com.abap.ai.assistant.nature.AbapNature"/>
+      </runtime>
+      <builder id="com.abap.ai.assistant.abapBuilder"/>
+   </extension>
+   
+   <!-- Quick Fix processor for suggestions -->
+   <extension
+         point="org.eclipse.ui.ide.markerResolution">
+      <markerResolutionGenerator
+            class="com.abap.ai.assistant.quickfix.AbapQuickFixProcessor"
+            markerType="com.abap.ai.assistant.abapProblem">
+      </markerResolutionGenerator>
+   </extension>
+   
+   <!-- Commands for manual analysis -->
+   <extension
+         point="org.eclipse.ui.commands">
+      <command
+            defaultHandler="com.abap.ai.assistant.handlers.AnalyzeCodeHandler"
+            id="com.abap.ai.assistant.analyzeCode"
+            name="Analyze ABAP Code">
+      </command>
+      <command
+            defaultHandler="com.abap.ai.assistant.handlers.RefreshPatternsHandler"
+            id="com.abap.ai.assistant.refreshPatterns"
+            name="Refresh Code Patterns">
+      </command>
+      <command
+            defaultHandler="com.abap.ai.assistant.handlers.AddNatureHandler"
+            id="com.abap.ai.assistant.addNature"
+            name="Add ABAP AI Nature">
+      </command>
+      <command
+            defaultHandler="com.abap.ai.assistant.handlers.RemoveNatureHandler"
+            id="com.abap.ai.assistant.removeNature"
+            name="Remove ABAP AI Nature">
+      </command>
+      <command
+            defaultHandler="com.abap.ai.assistant.handlers.ExplainCodeHandler"
+            id="com.abap.ai.assistant.explainCode"
+            name="Explain Code">
+      </command>
+      <command
+            defaultHandler="com.abap.ai.assistant.handlers.RefactorCodeHandler"
+            id="com.abap.ai.assistant.refactorCode"
+            name="Refactor Code">
+      </command>
+      <command
+            defaultHandler="com.abap.ai.assistant.handlers.ShowSuggestionsViewHandler"
+            id="com.abap.ai.assistant.showSuggestionsView"
+            name="Show AI Suggestions">
+      </command>
+   </extension>
+   
+   <!-- Menu contributions -->
+   <extension
+         point="org.eclipse.ui.menus">
+      <!-- Project context menu for adding/removing nature -->
+      <menuContribution
+            locationURI="popup:org.eclipse.ui.projectConfigure?after=additions">
+         <command
+               commandId="com.abap.ai.assistant.addNature"
+               label="Add ABAP AI Nature"
+               style="push">
+            <visibleWhen checkEnabled="false">
+               <with variable="selection">
+                  <count value="1"/>
+                  <iterate>
+                     <adapt type="org.eclipse.core.resources.IProject">
+                        <test property="org.eclipse.core.resources.open" value="true"/>
+                     </adapt>
+                  </iterate>
+               </with>
+            </visibleWhen>
+         </command>
+         <command
+               commandId="com.abap.ai.assistant.removeNature"
+               label="Remove ABAP AI Nature"
+               style="push">
+            <visibleWhen checkEnabled="false">
+               <with variable="selection">
+                  <count value="1"/>
+                  <iterate>
+                     <adapt type="org.eclipse.core.resources.IProject">
+                        <test property="org.eclipse.core.resources.open" value="true"/>
+                     </adapt>
+                  </iterate>
+               </with>
+            </visibleWhen>
+         </command>
+      </menuContribution>
+      
+      <!-- File context menu for analysis -->
+      <menuContribution
+            locationURI="popup:org.eclipse.ui.popup.any?after=additions">
+         <menu
+               id="com.abap.ai.assistant.menu"
+               label="ABAP AI Assistant">
+            <command
+                  commandId="com.abap.ai.assistant.analyzeCode"
+                  label="Analyze Code"
+                  style="push">
+               <visibleWhen checkEnabled="false">
+                  <with variable="selection">
+                     <count value="1"/>
+                     <iterate>
+                        <adapt type="org.eclipse.core.resources.IFile"/>
+                     </iterate>
+                  </with>
+               </visibleWhen>
+            </command>
+            <command
+                  commandId="com.abap.ai.assistant.refreshPatterns"
+                  label="Refresh Patterns"
+                  style="push">
+            </command>
+            <command
+                  commandId="com.abap.ai.assistant.explainCode"
+                  label="Explain Selected Code"
+                  style="push">
+            </command>
+            <command
+                  commandId="com.abap.ai.assistant.refactorCode"
+                  label="Refactor Selected Code"
+                  style="push">
+            </command>
+            <separator
+                  name="com.abap.ai.assistant.separator1">
+            </separator>
+            <command
+                  commandId="com.abap.ai.assistant.showSuggestionsView"
+                  label="Show AI Suggestions View"
+                  style="push">
+            </command>
+         </menu>
+      </menuContribution>
+   </extension>
+   
+   <!-- AI Suggestions View -->
+   <extension
+         point="org.eclipse.ui.views">
+      <view
+            class="com.abap.ai.assistant.views.AISuggestionsView"
+            id="com.abap.ai.assistant.views.AISuggestionsView"
+            name="AI Suggestions"
+            icon="icons/ai_suggestion.png"
+            category="com.abap.ai.assistant.category">
+      </view>
+      <category
+            id="com.abap.ai.assistant.category"
+            name="ABAP AI Assistant">
+      </category>
+   </extension>
+   
+   <!-- Perspective Extensions -->
+   <extension
+         point="org.eclipse.ui.perspectiveExtensions">
+      <perspectiveExtension
+            targetID="org.eclipse.jdt.ui.JavaPerspective">
+         <view
+               id="com.abap.ai.assistant.views.AISuggestionsView"
+               relationship="stack"
+               relative="org.eclipse.ui.views.ProblemView">
+         </view>
+      </perspectiveExtension>
+      <perspectiveExtension
+            targetID="org.eclipse.ui.resourcePerspective">
+         <view
+               id="com.abap.ai.assistant.views.AISuggestionsView"
+               relationship="stack"
+               relative="org.eclipse.ui.views.ProblemView">
+         </view>
+      </perspectiveExtension>
+   </extension>
+
+   <!-- Preferences -->
+   <extension
+         point="org.eclipse.ui.preferencePages">
+      <page
+            class="com.abap.ai.assistant.preferences.AbapAssistantPreferencePage"
+            id="com.abap.ai.assistant.preferences"
+            name="ABAP AI Assistant">
+      </page>
+   </extension>
+
+   <!-- Keyboard Shortcuts (Key Bindings) -->
+   <extension
+         point="org.eclipse.ui.bindings">
+      <!-- Explain Code: Cmd/Ctrl + Shift + E -->
+      <key
+            commandId="com.abap.ai.assistant.explainCode"
+            contextId="org.eclipse.ui.contexts.window"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
+            sequence="M1+M2+E">
+      </key>
+      <!-- Refactor Code: Cmd/Ctrl + Shift + R -->
+      <key
+            commandId="com.abap.ai.assistant.refactorCode"
+            contextId="org.eclipse.ui.contexts.window"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
+            sequence="M1+M2+R">
+      </key>
+      <!-- Analyze Code: Cmd/Ctrl + Shift + A -->
+      <key
+            commandId="com.abap.ai.assistant.analyzeCode"
+            contextId="org.eclipse.ui.contexts.window"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
+            sequence="M1+M2+A">
+      </key>
+      <!-- Show AI Panel: Cmd/Ctrl + Shift + I -->
+      <key
+            commandId="com.abap.ai.assistant.showSuggestionsView"
+            contextId="org.eclipse.ui.contexts.window"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
+            sequence="M1+M2+I">
+      </key>
+   </extension>
+</plugin>
+

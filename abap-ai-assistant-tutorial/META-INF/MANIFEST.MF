@@ -1,0 +1,28 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: ABAP AI Assistant
+Bundle-SymbolicName: com.abap.ai.assistant;singleton:=true
+Bundle-Version: 1.0.0.qualifier
+Bundle-Activator: com.abap.ai.assistant.Activator
+Bundle-Vendor: ABAP AI Team
+Require-Bundle: org.eclipse.ui,
+ org.eclipse.core.runtime,
+ org.eclipse.core.resources,
+ org.eclipse.jface.text,
+ org.eclipse.ui.editors,
+ org.eclipse.ui.workbench.texteditor,
+ org.eclipse.ui.ide,
+ org.eclipse.jdt.core,
+ org.eclipse.ltk.core.refactoring,
+ org.eclipse.ltk.ui.refactoring
+Bundle-RequiredExecutionEnvironment: JavaSE-21
+Automatic-Module-Name: com.abap.ai.assistant
+Bundle-ActivationPolicy: lazy
+Bundle-ClassPath: .,
+ lib/org.json-20240303.jar
+Export-Package: com.abap.ai.assistant,
+ com.abap.ai.assistant.analyzer,
+ com.abap.ai.assistant.ai,
+ com.abap.ai.assistant.suggestions,
+ com.abap.ai.assistant.ui
+
