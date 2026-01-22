@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import axios from 'axios'
-import LoadingSpinner from '../LoadingSpinner'
 
 interface ExplainCodeModalProps {
   onClose: () => void
@@ -36,40 +35,35 @@ export default function ExplainCodeModal({ onClose }: ExplainCodeModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-200 flex justify-between items-center">
-          <h2 className="text-2xl font-bold text-gray-900">Explain Code</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal max-w-4xl" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 className="modal-title flex items-center gap-2">
+            <span className="text-2xl">💻</span>
+            Explain Code
+          </h2>
+          <button onClick={onClose} className="modal-close">✕</button>
         </div>
 
-        <div className="p-6">
+        <div className="modal-body">
           <form onSubmit={handleExplain}>
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Program/Class/Function Name (Optional)
-              </label>
+            <div className="input-group">
+              <label className="input-label">Program/Class/Function Name (Optional)</label>
               <input
                 type="text"
                 value={programName}
                 onChange={(e) => setProgramName(e.target.value)}
                 placeholder="e.g., Z_MY_PROGRAM"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                className="input"
               />
             </div>
 
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Code Type
-              </label>
+            <div className="input-group">
+              <label className="input-label">Code Type</label>
               <select
                 value={codeType}
                 onChange={(e) => setCodeType(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                className="input select"
               >
                 <option value="ABAP">ABAP</option>
                 <option value="Python">Python</option>
@@ -77,32 +71,36 @@ export default function ExplainCodeModal({ onClose }: ExplainCodeModalProps) {
               </select>
             </div>
 
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Code
-              </label>
+            <div className="input-group">
+              <label className="input-label">Code</label>
               <textarea
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 placeholder="Paste your code here or enter program name to fetch from SAP..."
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg font-mono text-sm"
+                className="input font-mono text-sm"
                 rows={12}
+                style={{ resize: 'vertical' }}
               />
             </div>
 
             <button
               type="submit"
               disabled={loading || (!code.trim() && !programName.trim())}
-              className="w-full px-6 py-3 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50"
+              className="btn btn-primary w-full"
             >
-              {loading ? <LoadingSpinner size="sm" text="Explaining..." /> : 'Explain Code'}
+              {loading ? (
+                <span className="flex items-center gap-2">
+                  <span className="spinner w-4 h-4" />
+                  Explaining...
+                </span>
+              ) : 'Explain Code'}
             </button>
           </form>
 
           {explanation && (
-            <div className="mt-6 bg-gray-50 rounded-lg p-4">
-              <h3 className="font-semibold text-gray-900 mb-2">Explanation:</h3>
-              <div className="text-gray-700 whitespace-pre-wrap">{explanation}</div>
+            <div className="mt-6 glass-subtle p-4">
+              <h3 className="font-semibold text-white mb-3">📖 Explanation:</h3>
+              <div className="text-gray-300 whitespace-pre-wrap text-sm">{explanation}</div>
             </div>
           )}
         </div>
@@ -110,4 +108,3 @@ export default function ExplainCodeModal({ onClose }: ExplainCodeModalProps) {
     </div>
   )
 }
-

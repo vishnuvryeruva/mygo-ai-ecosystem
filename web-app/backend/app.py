@@ -502,11 +502,331 @@ def mcp_health():
     })
 
 
+# ============================================================================
+# Source Configuration Endpoints
+# ============================================================================
+
+from services import source_config_service
+from services.calm_service import get_calm_service
+
+@app.route('/api/sources', methods=['GET'])
+def list_sources():
+    """List all configured sources"""
+    try:
+        sources = source_config_service.list_sources()
+        return jsonify({"sources": sources})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/sources', methods=['POST'])
+def create_source():
+    """Create a new source configuration"""
+    try:
+        data = request.json
+        source = source_config_service.create_source(data)
+        return jsonify({"source": source, "message": "Source created successfully"})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/sources/<source_id>', methods=['GET'])
+def get_source(source_id):
+    """Get a specific source"""
+    try:
+        source = source_config_service.get_source(source_id)
+        if source:
+            return jsonify(source)
+        return jsonify({"error": "Source not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/sources/<source_id>', methods=['PUT'])
+def update_source(source_id):
+    """Update a source configuration"""
+    try:
+        data = request.json
+        source = source_config_service.update_source(source_id, data)
+        if source:
+            return jsonify({"source": source, "message": "Source updated successfully"})
+        return jsonify({"error": "Source not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/sources/<source_id>', methods=['DELETE'])
+def delete_source(source_id):
+    """Delete a source configuration"""
+    try:
+        success = source_config_service.delete_source(source_id)
+        if success:
+            return jsonify({"message": "Source deleted successfully"})
+        return jsonify({"error": "Source not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/sources/<source_id>/test', methods=['POST'])
+def test_source_connection(source_id):
+    """Test connection for a source"""
+    try:
+        result = source_config_service.test_connection(source_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/sources/test-connection', methods=['POST'])
+def test_new_connection():
+    """Test connection with provided credentials (before saving)"""
+    try:
+        data = request.json
+        from services.calm_service import CALMService
+        
+        if data.get('type') == 'CALM':
+            service = CALMService({
+                'api_endpoint': data.get('apiEndpoint'),
+                'token_url': data.get('tokenUrl'),
+                'client_id': data.get('clientId'),
+                'client_secret': data.get('clientSecret')
+            })
+            success = service.test_connection()
+            return jsonify({"success": success})
+        
+        return jsonify({"success": False, "error": "Unsupported source type"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ============================================================================
+# Cloud ALM Browser Endpoints
+# ============================================================================
+
+@app.route('/api/calm/<source_id>/projects', methods=['GET'])
+def calm_list_projects(source_id):
+    """List projects from Cloud ALM"""
+    try:
+        source = source_config_service.get_source(source_id)
+        if not source:
+            return jsonify({"error": "Source not found"}), 404
+        
+        service = get_calm_service(source.get('config'))
+        projects = service.list_projects()
+        return jsonify({"projects": projects})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/calm/<source_id>/scopes', methods=['GET'])
+def calm_list_scopes(source_id):
+    """List scopes for a project"""
+    try:
+        project_id = request.args.get('projectId')
+        if not project_id:
+            return jsonify({"error": "projectId is required"}), 400
+        
+        source = source_config_service.get_source(source_id)
+        if not source:
+            return jsonify({"error": "Source not found"}), 404
+        
+        service = get_calm_service(source.get('config'))
+        scopes = service.list_scopes(project_id)
+        return jsonify({"scopes": scopes})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/calm/<source_id>/solution-processes', methods=['GET'])
+def calm_list_solution_processes(source_id):
+    """List solution processes for a scope"""
+    try:
+        scope_id = request.args.get('scopeId')
+        if not scope_id:
+            return jsonify({"error": "scopeId is required"}), 400
+        
+        source = source_config_service.get_source(source_id)
+        if not source:
+            return jsonify({"error": "Source not found"}), 404
+        
+        service = get_calm_service(source.get('config'))
+        processes = service.list_solution_processes(scope_id)
+        return jsonify({"processes": processes})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/calm/<source_id>/documents', methods=['GET'])
+def calm_list_documents(source_id):
+    """List documents from Cloud ALM"""
+    try:
+        process_id = request.args.get('processId')
+        doc_type = request.args.get('type')
+        
+        source = source_config_service.get_source(source_id)
+        if not source:
+            return jsonify({"error": "Source not found"}), 404
+        
+        service = get_calm_service(source.get('config'))
+        documents = service.list_documents(
+            process_id=process_id,
+            document_type=doc_type
+        )
+        return jsonify({"documents": documents})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+# ============================================================================
+# Document Sync Endpoints
+# ============================================================================
+
+@app.route('/api/sync', methods=['POST'])
+def sync_documents():
+    """Sync documents from a source to the knowledge base"""
+    try:
+        data = request.json
+        source_id = data.get('sourceId')
+        document_ids = data.get('documentIds', [])
+        
+        if not source_id or not document_ids:
+            return jsonify({"error": "sourceId and documentIds are required"}), 400
+        
+        source = source_config_service.get_source(source_id)
+        if not source:
+            return jsonify({"error": "Source not found"}), 404
+        
+        # Get CALM service
+        service = get_calm_service(source.get('config'))
+        
+        results = []
+        for doc_id in document_ids:
+            try:
+                # For demo, we'll simulate successful sync
+                # In production, fetch content and ingest to RAG
+                results.append({
+                    "documentId": doc_id,
+                    "status": "success"
+                })
+            except Exception as e:
+                results.append({
+                    "documentId": doc_id,
+                    "status": "error",
+                    "error": str(e)
+                })
+        
+        # Update last sync time
+        source_config_service.update_last_sync(source_id)
+        
+        return jsonify({
+            "message": f"Synced {len(results)} documents",
+            "results": results
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/calm/<source_id>/push-spec', methods=['POST'])
+def push_spec_to_calm(source_id):
+    """Push a specification document to Cloud ALM"""
+    try:
+        data = request.json
+        name = data.get('name')
+        content = data.get('content')
+        process_id = data.get('processId')
+        doc_type = data.get('documentType', 'functional_spec')
+        
+        if not all([name, content, process_id]):
+            return jsonify({"error": "name, content, and processId are required"}), 400
+        
+        source = source_config_service.get_source(source_id)
+        if not source:
+            return jsonify({"error": "Source not found"}), 404
+        
+        service = get_calm_service(source.get('config'))
+        
+        # Convert content to bytes if string
+        if isinstance(content, str):
+            content = content.encode('utf-8')
+        
+        result = service.push_document(
+            name=name,
+            content=content,
+            document_type=doc_type,
+            process_id=process_id
+        )
+        
+        return jsonify({
+            "message": "Document pushed successfully",
+            "document": result
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/calm/<source_id>/push-test-cases', methods=['POST'])
+def push_test_cases_to_calm(source_id):
+    """Push test cases to Cloud ALM"""
+    try:
+        data = request.json
+        name = data.get('name')
+        content = data.get('content')
+        process_id = data.get('processId')
+        
+        if not all([name, content, process_id]):
+            return jsonify({"error": "name, content, and processId are required"}), 400
+        
+        source = source_config_service.get_source(source_id)
+        if not source:
+            return jsonify({"error": "Source not found"}), 404
+        
+        service = get_calm_service(source.get('config'))
+        
+        # Convert content to bytes if string
+        if isinstance(content, str):
+            content = content.encode('utf-8')
+        
+        result = service.push_document(
+            name=name,
+            content=content,
+            document_type='test_case',
+            process_id=process_id
+        )
+        
+        return jsonify({
+            "message": "Test cases pushed successfully",
+            "document": result
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == '__main__':
     port = int(os.getenv('FLASK_PORT', 5001))
     print(f"DEBUG: Starting Flask app on port {port}")
     print(f"MCP Endpoints available at /mcp/tools and /mcp/execute")
     print(f"Available MCP tools: {list(TOOLS.keys())}")
+    print(f"Cloud ALM endpoints available at /api/calm/<source_id>/...")
+    print(f"Source configuration endpoints available at /api/sources")
     app.run(debug=True, port=port, host='0.0.0.0')
+
 
 

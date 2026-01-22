@@ -97,34 +97,34 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     }
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
-                <div className="p-6 border-b border-gray-200 flex justify-between items-center sticky top-0 bg-white z-10">
-                    <h2 className="text-2xl font-bold text-gray-900">Settings - AI Prompts</h2>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal max-w-6xl" onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                    <h2 className="modal-title flex items-center gap-2">
+                        <span className="text-2xl">⚙️</span>
+                        Settings - AI Prompts
+                    </h2>
+                    <button onClick={onClose} className="modal-close">✕</button>
                 </div>
 
                 {loading ? (
-                    <div className="p-6 text-center">
-                        <p className="text-gray-500">Loading prompts...</p>
+                    <div className="modal-body text-center py-12">
+                        <div className="spinner w-8 h-8 mx-auto mb-4" />
+                        <p className="text-gray-400">Loading prompts...</p>
                     </div>
                 ) : (
-                    <div className="flex">
+                    <div className="flex" style={{ maxHeight: 'calc(90vh - 80px)' }}>
                         {/* Sidebar - Scenario List */}
-                        <div className="w-1/3 border-r border-gray-200 p-4 bg-gray-50">
-                            <h3 className="font-semibold text-gray-900 mb-4">AI Scenarios</h3>
+                        <div className="w-1/3 border-r border-white/10 p-4 bg-black/20 overflow-y-auto">
+                            <h3 className="font-semibold text-white mb-4">AI Scenarios</h3>
                             <ul className="space-y-2">
                                 {Object.entries(prompts).map(([key, config]) => (
                                     <li key={key}>
                                         <button
                                             onClick={() => handleScenarioChange(key)}
-                                            className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${selectedScenario === key
-                                                    ? 'bg-teal-600 text-white'
-                                                    : 'bg-white text-gray-700 hover:bg-gray-100'
+                                            className={`w-full text-left px-4 py-3 rounded-xl transition-all ${selectedScenario === key
+                                                ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg'
+                                                : 'glass-subtle text-gray-300 hover:bg-white/10'
                                                 }`}
                                         >
                                             <div className="font-medium">{config.name}</div>
@@ -136,75 +136,78 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
                         </div>
 
                         {/* Main Content - Prompt Editor */}
-                        <div className="w-2/3 p-6">
+                        <div className="w-2/3 p-6 overflow-y-auto">
                             {selectedScenario && (
                                 <>
                                     <div className="mb-6">
-                                        <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                                        <h3 className="text-lg font-semibold text-white mb-2">
                                             {prompts[selectedScenario].name}
                                         </h3>
-                                        <p className="text-sm text-gray-600">
+                                        <p className="text-sm text-gray-400">
                                             {prompts[selectedScenario].description}
                                         </p>
                                     </div>
 
                                     {/* System Prompt */}
-                                    <div className="mb-6">
-                                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                                            System Prompt
-                                        </label>
+                                    <div className="input-group">
+                                        <label className="input-label">System Prompt</label>
                                         <p className="text-xs text-gray-500 mb-2">
                                             This defines the AI's role and behavior for this scenario.
                                         </p>
                                         <textarea
                                             value={editingPrompt}
                                             onChange={(e) => setEditingPrompt(e.target.value)}
-                                            className="w-full px-4 py-3 border border-gray-300 rounded-lg font-mono text-sm"
+                                            className="input font-mono text-sm"
                                             rows={8}
                                             placeholder="Enter system prompt..."
+                                            style={{ resize: 'vertical' }}
                                         />
                                     </div>
 
                                     {/* User Template (if exists) */}
                                     {prompts[selectedScenario].user_template && (
-                                        <div className="mb-6">
-                                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                User Prompt Template
-                                            </label>
+                                        <div className="input-group">
+                                            <label className="input-label">User Prompt Template</label>
                                             <p className="text-xs text-gray-500 mb-2">
                                                 Template for user prompts. Use {'{'}variable{'}'} for dynamic values.
                                             </p>
                                             <textarea
                                                 value={editingTemplate}
                                                 onChange={(e) => setEditingTemplate(e.target.value)}
-                                                className="w-full px-4 py-3 border border-gray-300 rounded-lg font-mono text-sm"
+                                                className="input font-mono text-sm"
                                                 rows={10}
                                                 placeholder="Enter user prompt template..."
+                                                style={{ resize: 'vertical' }}
                                             />
                                         </div>
                                     )}
 
                                     {/* Action Buttons */}
-                                    <div className="flex gap-3">
+                                    <div className="flex gap-3 mb-6">
                                         <button
                                             onClick={handleSave}
                                             disabled={saving}
-                                            className="px-6 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50"
+                                            className="btn btn-primary"
                                         >
-                                            {saving ? 'Saving...' : 'Save Changes'}
+                                            {saving ? (
+                                                <span className="flex items-center gap-2">
+                                                    <span className="spinner w-4 h-4" />
+                                                    Saving...
+                                                </span>
+                                            ) : 'Save Changes'}
                                         </button>
                                         <button
                                             onClick={handleReset}
-                                            className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                                            className="btn btn-secondary"
                                         >
                                             Reset to Saved
                                         </button>
                                     </div>
 
                                     {/* Info Box */}
-                                    <div className="mt-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                                        <h4 className="font-medium text-yellow-900 mb-2">⚠️ Note</h4>
-                                        <p className="text-sm text-yellow-800">
+                                    <div className="glass-subtle p-4 border-l-4 border-yellow-500">
+                                        <h4 className="font-medium text-yellow-300 mb-2">⚠️ Note</h4>
+                                        <p className="text-sm text-gray-400">
                                             Changes to prompts are stored in memory and will be reset when the backend restarts.
                                             For persistent changes, modify the prompts in the backend configuration file.
                                         </p>

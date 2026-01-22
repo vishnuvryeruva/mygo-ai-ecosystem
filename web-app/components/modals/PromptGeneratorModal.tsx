@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import axios from 'axios'
-import LoadingSpinner from '../LoadingSpinner'
 import RichTextResponse from '../RichTextResponse'
 
 interface PromptGeneratorModalProps {
@@ -84,34 +83,31 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-        <div className="p-6 border-b border-gray-200 flex justify-between items-center">
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal max-w-4xl" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900">⚡ Prompt Generator</h2>
+            <h2 className="modal-title flex items-center gap-2">
+              <span className="text-2xl">⚡</span>
+              Prompt Generator
+            </h2>
             {refinementMode && (
-              <p className="text-sm text-gray-500 mt-1">Conversational mode - refine your prompt</p>
+              <p className="text-sm text-gray-400 mt-1">Conversational mode - refine your prompt</p>
             )}
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <button onClick={onClose} className="modal-close">✕</button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="modal-body">
           {!refinementMode ? (
             // Initial form
             <form onSubmit={handleGenerate}>
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Programming Language / Framework
-                </label>
+              <div className="input-group">
+                <label className="input-label">Programming Language / Framework</label>
                 <select
                   value={language}
                   onChange={(e) => setLanguage(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  className="input select"
                 >
                   <optgroup label="SAP Technologies">
                     <option value="ABAP">ABAP (Traditional)</option>
@@ -128,38 +124,41 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
                 </select>
               </div>
 
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Task Description
-                </label>
+              <div className="input-group">
+                <label className="input-label">Task Description</label>
                 <textarea
                   value={taskDescription}
                   onChange={(e) => setTaskDescription(e.target.value)}
                   placeholder="Describe the code generation task..."
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  className="input"
                   rows={4}
+                  style={{ resize: 'vertical' }}
                 />
               </div>
 
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Additional Context (Optional)
-                </label>
+              <div className="input-group">
+                <label className="input-label">Additional Context (Optional)</label>
                 <textarea
                   value={context}
                   onChange={(e) => setContext(e.target.value)}
                   placeholder="Add any additional context or requirements..."
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  className="input"
                   rows={3}
+                  style={{ resize: 'vertical' }}
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={loading || !taskDescription.trim()}
-                className="w-full px-6 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="btn btn-primary w-full"
               >
-                {loading ? <LoadingSpinner size="sm" text="Generating..." /> : 'Generate Prompt'}
+                {loading ? (
+                  <span className="flex items-center gap-2">
+                    <span className="spinner w-4 h-4" />
+                    Generating...
+                  </span>
+                ) : 'Generate Prompt'}
               </button>
             </form>
           ) : (
@@ -171,9 +170,9 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
                   {refinementHistory.map((msg, index) => (
                     <div
                       key={index}
-                      className={`p-3 rounded-lg text-sm ${msg.role === 'user'
-                          ? 'bg-orange-100 text-orange-800 ml-8'
-                          : 'bg-gray-100 text-gray-800 mr-8'
+                      className={`p-3 rounded-xl text-sm ${msg.role === 'user'
+                        ? 'bg-gradient-to-r from-indigo-500/20 to-purple-500/20 border border-indigo-500/30 text-indigo-200 ml-8'
+                        : 'bg-white/5 border border-white/10 text-gray-300 mr-8'
                         }`}
                     >
                       <strong>{msg.role === 'user' ? 'You: ' : 'Assistant: '}</strong>
@@ -184,17 +183,19 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
               )}
 
               {/* Generated Prompt */}
-              <RichTextResponse
-                content={prompt}
-                title="Generated Prompt"
-                showCopy={true}
-                showDownload={false}
-                collapsible={false}
-              />
+              <div className="glass-subtle p-4">
+                <RichTextResponse
+                  content={prompt}
+                  title="Generated Prompt"
+                  showCopy={true}
+                  showDownload={false}
+                  collapsible={false}
+                />
+              </div>
 
               {/* Refinement suggestions */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <h4 className="font-medium text-blue-900 mb-2">💡 Refinement Suggestions</h4>
+              <div className="glass-subtle p-4">
+                <h4 className="font-medium text-indigo-300 mb-3">💡 Refinement Suggestions</h4>
                 <div className="flex flex-wrap gap-2">
                   {[
                     'Add more context about the data model',
@@ -206,7 +207,7 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
                     <button
                       key={i}
                       onClick={() => setRefinementInput(suggestion)}
-                      className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm hover:bg-blue-200 transition-colors"
+                      className="px-3 py-1.5 bg-indigo-500/10 text-indigo-300 rounded-full text-sm hover:bg-indigo-500/20 border border-indigo-500/30 transition-colors"
                     >
                       {suggestion}
                     </button>
@@ -221,7 +222,7 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
                   setPrompt('')
                   setRefinementHistory([])
                 }}
-                className="text-gray-500 hover:text-gray-700 text-sm underline"
+                className="text-gray-500 hover:text-gray-300 text-sm underline"
               >
                 ← Start over with new task
               </button>
@@ -231,23 +232,23 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
 
         {/* Refinement Input (only in refinement mode) */}
         {refinementMode && (
-          <div className="p-4 border-t border-gray-200 bg-gray-50">
-            <div className="flex gap-3">
+          <div className="modal-footer">
+            <div className="flex gap-3 w-full">
               <input
                 type="text"
                 value={refinementInput}
                 onChange={(e) => setRefinementInput(e.target.value)}
                 onKeyPress={handleKeyPress}
                 placeholder="Ask for improvements or provide additional inputs..."
-                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                className="input flex-1"
                 disabled={loading}
               />
               <button
                 onClick={handleRefinement}
                 disabled={loading || !refinementInput.trim()}
-                className="px-6 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="btn btn-primary"
               >
-                {loading ? <LoadingSpinner size="sm" /> : 'Refine'}
+                {loading ? <span className="spinner w-4 h-4" /> : 'Refine'}
               </button>
             </div>
           </div>

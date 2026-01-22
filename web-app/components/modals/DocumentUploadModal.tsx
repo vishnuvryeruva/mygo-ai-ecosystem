@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import axios from 'axios'
-import LoadingSpinner, { LoadingOverlay } from '../LoadingSpinner'
 
 interface DocumentUploadModalProps {
     onClose: () => void
@@ -147,108 +146,102 @@ export default function DocumentUploadModal({ onClose }: DocumentUploadModalProp
         }
     }
 
+    const getDocIcon = (type: string) => {
+        const icons: Record<string, string> = {
+            'PDF': '📄',
+            'Word': '📝',
+            'Text': '📃',
+            'Python': '🐍',
+            'JavaScript': '📜',
+            'ABAP': '💠'
+        }
+        return icons[type] || '📁'
+    }
+
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-                <div className="p-6 border-b border-gray-200 flex justify-between items-center">
-                    <h2 className="text-2xl font-bold text-gray-900">Document Upload & Management</h2>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal max-w-4xl" onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                    <h2 className="modal-title flex items-center gap-2">
+                        <span className="text-2xl">📤</span>
+                        Document Upload & Management
+                    </h2>
+                    <button onClick={onClose} className="modal-close">✕</button>
                 </div>
 
-                <div className="p-6">
+                <div className="modal-body">
                     {/* File Upload */}
                     <div className="mb-6">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Upload Documents to Knowledge Base
-                        </label>
-                        <p className="text-sm text-gray-500 mb-4">
+                        <label className="input-label">Upload Documents to Knowledge Base</label>
+                        <p className="text-sm text-gray-400 mb-4">
                             Upload PDF, DOCX, TXT files, or a ZIP archive (max 250KB) containing project files.
                         </p>
-                        <input
-                            type="file"
-                            multiple
-                            accept=".pdf,.docx,.txt,.zip,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,application/zip"
-                            onChange={handleFileUpload}
-                            disabled={uploading}
-                            className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100 disabled:opacity-50"
-                        />
+                        <div className="glass-subtle p-6 text-center border-2 border-dashed border-white/20 hover:border-indigo-500/50 transition-colors cursor-pointer">
+                            <input
+                                type="file"
+                                multiple
+                                accept=".pdf,.docx,.txt,.zip,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,application/zip"
+                                onChange={handleFileUpload}
+                                disabled={uploading}
+                                className="hidden"
+                                id="file-upload"
+                            />
+                            <label htmlFor="file-upload" className="cursor-pointer">
+                                <div className="text-4xl mb-3">📂</div>
+                                <p className="text-gray-300 font-medium">Click to browse or drag files here</p>
+                                <p className="text-sm text-gray-500 mt-1">PDF, DOCX, TXT, ZIP</p>
+                            </label>
+                        </div>
                         {uploading && (
-                            <div className="mt-2 flex items-center gap-2 text-sm text-gray-600">
-                                <LoadingSpinner size="sm" color="orange" />
+                            <div className="mt-3 flex items-center gap-2 text-sm text-indigo-400">
+                                <span className="spinner w-4 h-4" />
                                 <span>Uploading documents...</span>
                             </div>
                         )}
                     </div>
 
                     {/* Document List */}
-                    <div className="border rounded-lg p-4 bg-gray-50 relative">
-                        <h4 className="font-medium text-gray-900 mb-4">Knowledge Base Documents</h4>
+                    <div className="glass-subtle p-4">
+                        <h4 className="font-medium text-white mb-4">📚 Knowledge Base Documents</h4>
                         {loadingDocs ? (
-                            <div className="flex items-center justify-center py-8">
-                                <LoadingSpinner size="md" color="orange" text="Loading documents..." />
+                            <div className="flex items-center justify-center py-8 text-gray-400">
+                                <span className="spinner w-5 h-5 mr-2" />
+                                Loading documents...
                             </div>
                         ) : documents.length === 0 ? (
-                            <p className="text-sm text-gray-500">No documents found. Upload files above to get started.</p>
+                            <p className="text-sm text-gray-500 py-4 text-center">No documents found. Upload files above to get started.</p>
                         ) : (
-                            <div className="overflow-x-auto">
-                                <table className="min-w-full divide-y divide-gray-200">
-                                    <thead className="bg-gray-100">
+                            <div className="table-container">
+                                <table className="table">
+                                    <thead>
                                         <tr>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Document Name
-                                            </th>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Type
-                                            </th>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Size
-                                            </th>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Chunks
-                                            </th>
-                                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Actions
-                                            </th>
+                                            <th>Document Name</th>
+                                            <th>Type</th>
+                                            <th>Size</th>
+                                            <th>Chunks</th>
+                                            <th className="text-right">Actions</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="bg-white divide-y divide-gray-200">
+                                    <tbody>
                                         {documents.map((doc: any, index: number) => (
-                                            <tr key={index} className="hover:bg-gray-50">
-                                                <td className="px-4 py-3 text-sm text-gray-900">
-                                                    <div className="flex items-center">
-                                                        <span className="mr-2">
-                                                            {doc.type === 'PDF' && '📄'}
-                                                            {doc.type === 'Word' && '📝'}
-                                                            {doc.type === 'Text' && '📃'}
-                                                            {doc.type === 'Python' && '🐍'}
-                                                            {doc.type === 'JavaScript' && '📜'}
-                                                            {doc.type === 'ABAP' && '💠'}
-                                                            {!['PDF', 'Word', 'Text', 'Python', 'JavaScript', 'ABAP'].includes(doc.type) && '📁'}
-                                                        </span>
+                                            <tr key={index}>
+                                                <td>
+                                                    <div className="flex items-center gap-2">
+                                                        <span>{getDocIcon(doc.type)}</span>
                                                         <span className="truncate max-w-xs" title={doc.name}>
                                                             {doc.name}
                                                         </span>
                                                     </div>
                                                 </td>
-                                                <td className="px-4 py-3 text-sm text-gray-500">
-                                                    <span className="px-2 py-1 bg-gray-100 rounded text-xs font-medium">
-                                                        {doc.type}
-                                                    </span>
+                                                <td>
+                                                    <span className="badge badge-info">{doc.type}</span>
                                                 </td>
-                                                <td className="px-4 py-3 text-sm text-gray-500">
-                                                    {doc.size}
-                                                </td>
-                                                <td className="px-4 py-3 text-sm text-gray-500">
-                                                    {doc.chunks}
-                                                </td>
-                                                <td className="px-4 py-3 text-sm text-right">
+                                                <td className="text-gray-400">{doc.size}</td>
+                                                <td className="text-gray-400">{doc.chunks}</td>
+                                                <td className="text-right">
                                                     <button
                                                         onClick={() => handleDeleteDocument(doc.name)}
-                                                        className="text-red-600 hover:text-red-800 font-medium"
+                                                        className="btn btn-ghost text-red-400 hover:text-red-300 text-sm"
                                                     >
                                                         Delete
                                                     </button>
@@ -262,9 +255,9 @@ export default function DocumentUploadModal({ onClose }: DocumentUploadModalProp
                     </div>
 
                     {/* Info Box */}
-                    <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-                        <h4 className="font-medium text-blue-900 mb-2">ℹ️ How it works</h4>
-                        <p className="text-sm text-blue-800">
+                    <div className="mt-6 glass-subtle p-4">
+                        <h4 className="font-medium text-indigo-300 mb-2">ℹ️ How it works</h4>
+                        <p className="text-sm text-gray-400">
                             Documents uploaded here are processed and added to a vector database. When you use "Ask Yoda",
                             the system searches through these documents to find relevant information and provides AI-powered answers.
                         </p>
@@ -274,25 +267,23 @@ export default function DocumentUploadModal({ onClose }: DocumentUploadModalProp
 
             {/* Duplicate Dialog */}
             {duplicateDialog.show && (
-                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60]">
-                    <div className="bg-white rounded-lg max-w-md w-full p-6">
-                        <h3 className="text-lg font-bold text-gray-900 mb-4">Duplicate Document Detected</h3>
-                        <p className="text-gray-700 mb-6">
-                            A document named <strong>{duplicateDialog.filename}</strong> already exists in the knowledge base.
-                            Would you like to overwrite it or skip this upload?
-                        </p>
-                        <div className="flex gap-3">
-                            <button
-                                onClick={handleDuplicateOverwrite}
-                                className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700"
-                            >
-                                Overwrite
-                            </button>
-                            <button
-                                onClick={handleDuplicateSkip}
-                                className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
-                            >
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
+                    <div className="modal max-w-md">
+                        <div className="modal-header">
+                            <h3 className="modal-title">⚠️ Duplicate Document Detected</h3>
+                        </div>
+                        <div className="modal-body">
+                            <p className="text-gray-300">
+                                A document named <strong className="text-white">{duplicateDialog.filename}</strong> already exists in the knowledge base.
+                                Would you like to overwrite it or skip this upload?
+                            </p>
+                        </div>
+                        <div className="modal-footer">
+                            <button onClick={handleDuplicateSkip} className="btn btn-secondary">
                                 Skip
+                            </button>
+                            <button onClick={handleDuplicateOverwrite} className="btn btn-primary">
+                                Overwrite
                             </button>
                         </div>
                     </div>

@@ -56,7 +56,6 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
 
         try {
             if (currentStep === 'requirements') {
-                // Step 1: Gather requirements
                 setRequirements(userMessage)
                 const response = await axios.post('/api/solution-advisor/requirements', {
                     requirements: userMessage
@@ -67,15 +66,12 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                     content: response.data.clarifications || "Thank you for the requirements. Let me generate a solution proposal for you."
                 }])
 
-                // If AI has clarifying questions, stay in requirements step
                 if (response.data.needs_clarification) {
                     // Stay in requirements step
                 } else {
-                    // Move to solution generation
                     await generateSolution(userMessage)
                 }
             } else if (currentStep === 'solution') {
-                // User is providing feedback on the solution
                 const response = await axios.post('/api/solution-advisor/refine', {
                     requirements,
                     current_solution: generatedSolution,
@@ -87,7 +83,6 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                     content: "I've updated the solution based on your feedback. Would you like to search for similar existing solutions in your knowledge base, or continue refining?"
                 }])
             } else if (currentStep === 'improvise') {
-                // User is improvising based on similar solutions
                 const response = await axios.post('/api/solution-advisor/improvise', {
                     requirements,
                     current_solution: generatedSolution,
@@ -197,59 +192,61 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
     }
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal max-w-5xl" onClick={e => e.stopPropagation()}>
                 {/* Header */}
-                <div className="p-6 border-b border-gray-200 flex justify-between items-center bg-gradient-to-r from-orange-50 to-amber-50">
+                <div className="modal-header">
                     <div>
-                        <h2 className="text-2xl font-bold text-gray-900">💡 Solution Advisor</h2>
-                        <p className="text-sm text-gray-600 mt-1">Conversational solution discovery and refinement</p>
+                        <h2 className="modal-title flex items-center gap-2">
+                            <span className="text-2xl">💡</span>
+                            Solution Advisor
+                        </h2>
+                        <p className="text-sm text-gray-400 mt-1">Conversational solution discovery and refinement</p>
                     </div>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
+                    <button onClick={onClose} className="modal-close">✕</button>
                 </div>
 
                 {/* Progress Steps */}
-                <div className="px-6 py-3 bg-gray-50 border-b border-gray-200">
+                <div className="px-6 py-4 border-b border-white/10 bg-black/20">
                     <div className="flex justify-between items-center">
                         {(['requirements', 'solution', 'search', 'improvise', 'complete'] as Step[]).map((step, index) => (
                             <div key={step} className="flex items-center">
-                                <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium ${currentStep === step
-                                        ? 'bg-orange-500 text-white'
-                                        : index < ['requirements', 'solution', 'search', 'improvise', 'complete'].indexOf(currentStep)
-                                            ? 'bg-green-500 text-white'
-                                            : 'bg-gray-200 text-gray-600'
+                                <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium transition-all ${currentStep === step
+                                    ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-500/30'
+                                    : index < ['requirements', 'solution', 'search', 'improvise', 'complete'].indexOf(currentStep)
+                                        ? 'bg-green-500/20 text-green-400 border border-green-500/50'
+                                        : 'bg-white/5 text-gray-500 border border-white/10'
                                     }`}>
                                     {index < ['requirements', 'solution', 'search', 'improvise', 'complete'].indexOf(currentStep) ? '✓' : index + 1}
                                 </div>
-                                <span className={`ml-2 text-sm ${currentStep === step ? 'font-medium text-orange-600' : 'text-gray-500'}`}>
+                                <span className={`ml-2 text-sm hidden md:inline ${currentStep === step ? 'font-medium text-indigo-400' : 'text-gray-500'}`}>
                                     {stepLabels[step]}
                                 </span>
-                                {index < 4 && <div className="w-12 h-0.5 mx-3 bg-gray-200" />}
+                                {index < 4 && <div className="w-8 lg:w-12 h-0.5 mx-2 bg-white/10" />}
                             </div>
                         ))}
                     </div>
                 </div>
 
                 {/* Chat Messages */}
-                <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                <div className="modal-body space-y-4" style={{ maxHeight: '400px' }}>
                     {messages.map((message, index) => (
                         <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`max-w-[80%] rounded-lg p-4 ${message.role === 'user'
-                                    ? 'bg-orange-500 text-white'
-                                    : 'bg-gray-100 text-gray-800'
+                            <div className={`max-w-[80%] rounded-2xl p-4 ${message.role === 'user'
+                                ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white'
+                                : 'bg-white/5 border border-white/10 text-gray-200'
                                 }`}>
-                                <div className="whitespace-pre-wrap">{message.content}</div>
+                                <div className="whitespace-pre-wrap text-sm">{message.content}</div>
                             </div>
                         </div>
                     ))}
                     {loading && (
                         <div className="flex justify-start">
-                            <div className="bg-gray-100 rounded-lg p-4">
-                                <LoadingSpinner size="sm" text="Thinking..." />
+                            <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+                                <div className="flex items-center gap-2 text-gray-400">
+                                    <div className="spinner w-4 h-4" />
+                                    <span className="text-sm">Thinking...</span>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -257,10 +254,10 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
 
                 {/* Generated Solution Preview (if available) */}
                 {generatedSolution && currentStep !== 'requirements' && (
-                    <div className="px-6 py-3 border-t border-gray-200 bg-blue-50">
+                    <div className="px-6 py-3 border-t border-white/10 bg-indigo-500/10">
                         <details className="cursor-pointer">
-                            <summary className="text-sm font-medium text-blue-800">📋 Current Solution (click to expand)</summary>
-                            <div className="mt-2 text-sm text-blue-900 whitespace-pre-wrap max-h-40 overflow-y-auto">
+                            <summary className="text-sm font-medium text-indigo-300">📋 Current Solution (click to expand)</summary>
+                            <div className="mt-2 text-sm text-gray-300 whitespace-pre-wrap max-h-40 overflow-y-auto p-3 bg-black/20 rounded-lg">
                                 {finalSolution || generatedSolution}
                             </div>
                         </details>
@@ -269,18 +266,18 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
 
                 {/* Action Buttons */}
                 {currentStep === 'solution' && (
-                    <div className="px-6 py-3 border-t border-gray-200 bg-gray-50 flex gap-3">
+                    <div className="px-6 py-4 border-t border-white/10 bg-black/20 flex gap-3">
                         <button
                             onClick={handleSearchSimilar}
                             disabled={loading}
-                            className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50"
+                            className="btn btn-secondary"
                         >
                             🔍 Search Similar Solutions
                         </button>
                         <button
                             onClick={handleProceedToSpec}
                             disabled={loading}
-                            className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50"
+                            className="btn btn-primary"
                         >
                             ➡️ Proceed to Spec
                         </button>
@@ -288,10 +285,10 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                 )}
 
                 {currentStep === 'complete' && (
-                    <div className="px-6 py-3 border-t border-gray-200 bg-green-50 flex gap-3">
+                    <div className="px-6 py-4 border-t border-white/10 bg-green-500/10 flex gap-3">
                         <button
                             onClick={handleCreateFunctionalSpec}
-                            className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
+                            className="btn btn-success"
                         >
                             📄 Create Functional Spec
                         </button>
@@ -300,9 +297,10 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
 
                 {/* Input Area */}
                 {currentStep !== 'complete' && (
-                    <div className="p-4 border-t border-gray-200">
-                        <div className="flex gap-3">
-                            <textarea
+                    <div className="modal-footer">
+                        <div className="flex gap-3 w-full">
+                            <input
+                                type="text"
                                 value={inputValue}
                                 onChange={(e) => setInputValue(e.target.value)}
                                 onKeyPress={handleKeyPress}
@@ -311,14 +309,13 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                                         ? "Describe your requirements or answer the questions..."
                                         : "Provide feedback or ask questions..."
                                 }
-                                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent resize-none"
-                                rows={2}
+                                className="input flex-1"
                                 disabled={loading}
                             />
                             <button
                                 onClick={handleSendMessage}
                                 disabled={loading || !inputValue.trim()}
-                                className="px-6 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="btn btn-primary"
                             >
                                 Send
                             </button>
