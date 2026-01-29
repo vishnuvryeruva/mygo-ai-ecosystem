@@ -173,10 +173,10 @@ export default function DocumentUploadModal({ onClose }: DocumentUploadModalProp
                     {/* File Upload */}
                     <div className="mb-6">
                         <label className="input-label">Upload Documents to Knowledge Base</label>
-                        <p className="text-sm text-gray-400 mb-4">
+                        <p className="text-sm text-muted mb-4">
                             Upload PDF, DOCX, TXT files, or a ZIP archive (max 250KB) containing project files.
                         </p>
-                        <div className="glass-subtle p-6 text-center border-2 border-dashed border-white/20 hover:border-indigo-500/50 transition-colors cursor-pointer">
+                        <div className="glass-subtle p-6 text-center border-2 border-dashed border-[var(--glass-border)] hover:border-indigo-500/50 transition-colors cursor-pointer">
                             <input
                                 type="file"
                                 multiple
@@ -188,8 +188,8 @@ export default function DocumentUploadModal({ onClose }: DocumentUploadModalProp
                             />
                             <label htmlFor="file-upload" className="cursor-pointer">
                                 <div className="text-4xl mb-3">📂</div>
-                                <p className="text-gray-300 font-medium">Click to browse or drag files here</p>
-                                <p className="text-sm text-gray-500 mt-1">PDF, DOCX, TXT, ZIP</p>
+                                <p className="text-heading font-medium">Click to browse or drag files here</p>
+                                <p className="text-sm text-muted mt-1">PDF, DOCX, TXT, ZIP</p>
                             </label>
                         </div>
                         {uploading && (
@@ -202,14 +202,14 @@ export default function DocumentUploadModal({ onClose }: DocumentUploadModalProp
 
                     {/* Document List */}
                     <div className="glass-subtle p-4">
-                        <h4 className="font-medium text-white mb-4">📚 Knowledge Base Documents</h4>
+                        <h4 className="font-medium text-heading mb-4">📚 Knowledge Base Documents</h4>
                         {loadingDocs ? (
-                            <div className="flex items-center justify-center py-8 text-gray-400">
+                            <div className="flex items-center justify-center py-8 text-muted">
                                 <span className="spinner w-5 h-5 mr-2" />
                                 Loading documents...
                             </div>
                         ) : documents.length === 0 ? (
-                            <p className="text-sm text-gray-500 py-4 text-center">No documents found. Upload files above to get started.</p>
+                            <p className="text-sm text-muted py-4 text-center">No documents found. Upload files above to get started.</p>
                         ) : (
                             <div className="table-container">
                                 <table className="table">
@@ -236,8 +236,8 @@ export default function DocumentUploadModal({ onClose }: DocumentUploadModalProp
                                                 <td>
                                                     <span className="badge badge-info">{doc.type}</span>
                                                 </td>
-                                                <td className="text-gray-400">{doc.size}</td>
-                                                <td className="text-gray-400">{doc.chunks}</td>
+                                                <td className="text-muted">{doc.size}</td>
+                                                <td className="text-muted">{doc.chunks}</td>
                                                 <td className="text-right">
                                                     <button
                                                         onClick={() => handleDeleteDocument(doc.name)}
@@ -257,7 +257,7 @@ export default function DocumentUploadModal({ onClose }: DocumentUploadModalProp
                     {/* Info Box */}
                     <div className="mt-6 glass-subtle p-4">
                         <h4 className="font-medium text-indigo-300 mb-2">ℹ️ How it works</h4>
-                        <p className="text-sm text-gray-400">
+                        <p className="text-sm text-muted">
                             Documents uploaded here are processed and added to a vector database. When you use "Ask Yoda",
                             the system searches through these documents to find relevant information and provides AI-powered answers.
                         </p>
@@ -273,8 +273,8 @@ export default function DocumentUploadModal({ onClose }: DocumentUploadModalProp
                             <h3 className="modal-title">⚠️ Duplicate Document Detected</h3>
                         </div>
                         <div className="modal-body">
-                            <p className="text-gray-300">
-                                A document named <strong className="text-white">{duplicateDialog.filename}</strong> already exists in the knowledge base.
+                            <p className="text-main">
+                                A document named <strong className="text-heading">{duplicateDialog.filename}</strong> already exists in the knowledge base.
                                 Would you like to overwrite it or skip this upload?
                             </p>
                         </div>

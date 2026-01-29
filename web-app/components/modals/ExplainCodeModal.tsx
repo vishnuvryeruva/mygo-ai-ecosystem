@@ -99,8 +99,8 @@ export default function ExplainCodeModal({ onClose }: ExplainCodeModalProps) {
 
           {explanation && (
             <div className="mt-6 glass-subtle p-4">
-              <h3 className="font-semibold text-white mb-3">📖 Explanation:</h3>
-              <div className="text-gray-300 whitespace-pre-wrap text-sm">{explanation}</div>
+              <h3 className="font-semibold text-heading mb-3">📖 Explanation:</h3>
+              <div className="text-muted whitespace-pre-wrap text-sm">{explanation}</div>
             </div>
           )}
         </div>

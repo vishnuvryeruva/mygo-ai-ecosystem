@@ -139,12 +139,12 @@ export default function ChatbotWidget({
                 </div>
 
                 {/* Messages Area */}
-                <div className="h-96 overflow-y-auto p-4 space-y-4" style={{ background: 'rgba(10, 10, 15, 0.95)' }}>
+                <div className="h-96 overflow-y-auto p-4 space-y-4" style={{ background: 'var(--bg-sidebar)' }}>
                     {messages.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-full text-center px-4">
                             <div className="text-6xl mb-4">🧠</div>
-                            <h4 className="text-white font-semibold mb-2">Welcome to Ask Yoda!</h4>
-                            <p className="text-gray-400 text-sm">
+                            <h4 className="text-heading font-semibold mb-2">Welcome to Ask Yoda!</h4>
+                            <p className="text-muted text-sm">
                                 Query historical blueprints, specs, tickets, and test cases. Ask me anything!
                             </p>
                             <div className="mt-4 glass-subtle p-3 text-xs text-indigo-300">
@@ -161,12 +161,12 @@ export default function ChatbotWidget({
                                     <div
                                         className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${message.type === 'user'
                                             ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white'
-                                            : 'glass-subtle text-gray-200'
+                                            : 'glass-subtle text-heading'
                                             }`}
                                     >
                                         <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
                                         <p
-                                            className={`text-xs mt-1 ${message.type === 'user' ? 'text-indigo-100' : 'text-gray-500'
+                                            className={`text-xs mt-1 ${message.type === 'user' ? 'text-indigo-100' : 'text-muted'
                                                 }`}
                                         >
                                             {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -191,7 +191,7 @@ export default function ChatbotWidget({
                 </div>
 
                 {/* Input Area */}
-                <div className="p-4 border-t border-white/10" style={{ background: 'rgba(18, 18, 26, 0.95)' }}>
+                <div className="p-4 border-t border-white/10" style={{ background: 'var(--bg-sidebar)' }}>
                     <form onSubmit={handleSubmit} className="flex items-end space-x-2">
                         <input
                             type="text"

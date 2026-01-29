@@ -1,0 +1,16 @@
+[
+  {
+    "id": "dc7c5979-f4a1-4374-a2ce-22edee9f6cdc",
+    "name": "Source1",
+    "type": "CALM",
+    "status": "error",
+    "lastSync": null,
+    "createdAt": "2026-01-28T10:06:41.872629",
+    "config": {
+      "apiEndpoint": "",
+      "tokenUrl": "",
+      "clientId": "",
+      "clientSecret": ""
+    }
+  }
+]

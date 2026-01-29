@@ -109,17 +109,17 @@ export default function CodeAdvisorModal({ onClose }: CodeAdvisorModalProps) {
               {/* Anti-patterns */}
               {analysis.anti_patterns && analysis.anti_patterns.length > 0 && (
                 <div>
-                  <h3 className="font-semibold text-red-400 mb-3">⚠️ Anti-patterns Found:</h3>
+                  <h3 className="font-semibold text-red-600 dark:text-red-400 mb-3">⚠️ Anti-patterns Found:</h3>
                   <div className="space-y-3">
                     {analysis.anti_patterns.map((ap, idx) => (
                       <div key={idx} className="glass-subtle p-4 border-l-4 border-red-500">
                         <div className="flex justify-between items-start">
                           <div>
-                            <p className="font-semibold text-red-300">{ap.pattern}</p>
-                            <p className="text-sm text-gray-400 mt-1">{ap.description}</p>
-                            <p className="text-sm text-red-300/80 mt-2">💡 {ap.suggestion}</p>
+                            <p className="font-semibold text-heading">{ap.pattern}</p>
+                            <p className="text-sm text-muted mt-1">{ap.description}</p>
+                            <p className="text-sm text-red-600/80 dark:text-red-300/80 mt-2">💡 {ap.suggestion}</p>
                           </div>
-                          <span className="text-xs bg-red-500/20 text-red-300 px-2 py-1 rounded border border-red-500/30">
+                          <span className="text-xs bg-red-500/10 text-red-600 dark:text-red-300 px-2 py-1 rounded border border-red-500/30">
                             Line {ap.line} • {ap.severity}
                           </span>
                         </div>
@@ -132,26 +132,26 @@ export default function CodeAdvisorModal({ onClose }: CodeAdvisorModalProps) {
               {/* Suggestions */}
               {analysis.suggestions && analysis.suggestions.length > 0 && (
                 <div>
-                  <h3 className="font-semibold text-indigo-400 mb-3">💡 Improvement Suggestions:</h3>
+                  <h3 className="font-semibold text-indigo-600 dark:text-indigo-400 mb-3">💡 Improvement Suggestions:</h3>
                   <div className="space-y-4">
                     {analysis.suggestions.map((suggestion, idx) => (
                       <div key={idx} className="glass-subtle p-4">
                         <div className="flex justify-between items-start mb-2">
-                          <span className="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-1 rounded border border-indigo-500/30">
+                          <span className="text-xs bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 px-2 py-1 rounded border border-indigo-500/30">
                             Line {suggestion.line} • {suggestion.type}
                           </span>
                         </div>
                         <div className="grid grid-cols-2 gap-4 mt-3">
                           <div>
-                            <p className="text-xs font-semibold text-gray-400 mb-1">Current:</p>
-                            <pre className="bg-black/30 p-2 rounded text-xs overflow-x-auto text-red-300 border border-red-500/20">{suggestion.current}</pre>
+                            <p className="text-xs font-semibold text-muted mb-1">Current:</p>
+                            <pre className="bg-gray-100 dark:bg-black/30 p-2 rounded text-xs overflow-x-auto text-red-600 dark:text-red-300 border border-red-500/20">{suggestion.current}</pre>
                           </div>
                           <div>
-                            <p className="text-xs font-semibold text-gray-400 mb-1">Suggested:</p>
-                            <pre className="bg-black/30 p-2 rounded text-xs overflow-x-auto text-green-300 border border-green-500/20">{suggestion.suggested}</pre>
+                            <p className="text-xs font-semibold text-muted mb-1">Suggested:</p>
+                            <pre className="bg-gray-100 dark:bg-black/30 p-2 rounded text-xs overflow-x-auto text-green-600 dark:text-green-300 border border-green-500/20">{suggestion.suggested}</pre>
                           </div>
                         </div>
-                        <p className="text-sm text-gray-400 mt-3">{suggestion.reason}</p>
+                        <p className="text-sm text-muted mt-3">{suggestion.reason}</p>
                       </div>
                     ))}
                   </div>
@@ -161,16 +161,16 @@ export default function CodeAdvisorModal({ onClose }: CodeAdvisorModalProps) {
               {/* Improvements */}
               {analysis.improvements && analysis.improvements.length > 0 && (
                 <div>
-                  <h3 className="font-semibold text-white mb-3">📋 General Improvements:</h3>
+                  <h3 className="font-semibold text-heading mb-3">📋 General Improvements:</h3>
                   <div className="space-y-2">
                     {analysis.improvements.map((imp, idx) => (
                       <div key={idx} className="glass-subtle p-3">
                         <div className="flex justify-between items-start">
                           <div>
-                            <p className="font-semibold text-white">{imp.category}</p>
-                            <p className="text-sm text-gray-400 mt-1">{imp.description}</p>
+                            <p className="font-semibold text-heading">{imp.category}</p>
+                            <p className="text-sm text-muted mt-1">{imp.description}</p>
                           </div>
-                          <span className="text-xs bg-white/10 text-gray-300 px-2 py-1 rounded border border-white/10">
+                          <span className="text-xs glass-subtle text-muted px-2 py-1 rounded">
                             {imp.priority}
                           </span>
                         </div>

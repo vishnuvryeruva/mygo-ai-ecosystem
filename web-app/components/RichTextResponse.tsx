@@ -118,22 +118,22 @@ export default function RichTextResponse({
     // Custom components for ReactMarkdown
     const markdownComponents = {
         h1: ({ children }: any) => (
-            <h1 className="text-xl font-bold text-gray-900 mt-4 mb-2 pb-2 border-b border-gray-200">
+            <h1 className="text-xl font-bold text-heading mt-4 mb-2 pb-2 border-b border-white/10">
                 {children}
             </h1>
         ),
         h2: ({ children }: any) => (
-            <h2 className="text-lg font-semibold text-gray-800 mt-3 mb-2">
+            <h2 className="text-lg font-semibold text-heading mt-3 mb-2">
                 {children}
             </h2>
         ),
         h3: ({ children }: any) => (
-            <h3 className="text-base font-semibold text-gray-700 mt-2 mb-1">
+            <h3 className="text-base font-semibold text-heading mt-2 mb-1">
                 {children}
             </h3>
         ),
         p: ({ children }: any) => (
-            <p className="text-gray-700 mb-2 leading-relaxed">
+            <p className="text-main mb-2 leading-relaxed">
                 {children}
             </p>
         ),
@@ -148,13 +148,13 @@ export default function RichTextResponse({
             </ol>
         ),
         li: ({ children }: any) => (
-            <li className="text-gray-700">
+            <li className="text-main">
                 {children}
             </li>
         ),
         code: ({ inline, children }: any) => (
             inline ? (
-                <code className="bg-gray-100 text-orange-600 px-1.5 py-0.5 rounded text-sm font-mono">
+                <code className="bg-white/10 text-orange-400 px-1.5 py-0.5 rounded text-sm font-mono">
                     {children}
                 </code>
             ) : (
@@ -174,12 +174,12 @@ export default function RichTextResponse({
             </blockquote>
         ),
         strong: ({ children }: any) => (
-            <strong className="font-semibold text-gray-900">
+            <strong className="font-semibold text-heading">
                 {children}
             </strong>
         ),
         em: ({ children }: any) => (
-            <em className="italic text-gray-700">
+            <em className="italic text-main">
                 {children}
             </em>
         ),
@@ -204,14 +204,14 @@ export default function RichTextResponse({
             </th>
         ),
         td: ({ children }: any) => (
-            <td className="px-4 py-2 text-sm text-gray-700 border-b border-gray-200">
+            <td className="px-4 py-2 text-sm text-main border-b border-gray-200">
                 {children}
             </td>
         ),
     }
 
     return (
-        <div className={`bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden ${className}`}>
+        <div className={`glass-card rounded-xl shadow-lg border border-white/10 overflow-hidden ${className}`}>
             {/* Header */}
             <div className="bg-gradient-to-r from-orange-500 to-orange-600 px-6 py-4">
                 <div className="flex items-center justify-between">
@@ -329,7 +329,7 @@ export default function RichTextResponse({
                                     onClick={() => toggleSection(section.id)}
                                     className="w-full px-4 py-3 bg-gray-50 hover:bg-gray-100 flex items-center justify-between transition-colors"
                                 >
-                                    <span className={`font-medium text-gray-800 ${section.level === 1 ? 'text-base' : 'text-sm'}`}>
+                                    <span className={`font-medium text-heading ${section.level === 1 ? 'text-base' : 'text-sm'}`}>
                                         {section.title}
                                     </span>
                                     <svg
@@ -347,7 +347,7 @@ export default function RichTextResponse({
                                     className={`overflow-hidden transition-all duration-300 ease-in-out ${isSectionExpanded(section.id) ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'
                                         }`}
                                 >
-                                    <div className="px-4 py-3 bg-white border-t border-gray-100">
+                                    <div className="px-4 py-3 bg-transparent border-t border-white/5">
                                         <ReactMarkdown
                                             remarkPlugins={[remarkGfm]}
                                             components={markdownComponents}

@@ -52,6 +52,35 @@ class RAGService:
             print(f"ERROR: Failed to create embedding: {e}")
             raise
     
+    def add_placeholder_document(self, doc_metadata):
+        """Add a placeholder document to the database (for synced external files)"""
+        try:
+            filename = doc_metadata.get('name', 'unknown')
+            doc_type = doc_metadata.get('type', 'unknown')
+            
+            # Check for duplicates
+            if self.check_duplicate(filename):
+                return {"status": "skipped", "message": "Document already exists"}
+            
+            # Create a placeholder chunk
+            placeholder_text = f"External document synced from Cloud ALM. Type: {doc_type}. This is a placeholder for metadata purposes."
+            
+            # Create embedding
+            embedding = self._create_embedding(placeholder_text)
+            
+            # Add to collection
+            self.collection.add(
+                embeddings=[embedding],
+                documents=[placeholder_text],
+                ids=[f"{filename}_0"],  # chunk 0
+                metadatas=[{"source": "CALM", "type": doc_type}]
+            )
+            
+            return {"status": "success", "message": "Placeholder added"}
+        except Exception as e:
+            print(f"Error adding placeholder: {e}")
+            return {"status": "error", "error": str(e)}
+
     def ingest_documents(self, files, max_zip_size=256000):
         """Ingest documents into the vector database
         

@@ -7,6 +7,7 @@ interface CALMBrowserPageProps {
     sourceId: string
     sourceName: string
     onBack: () => void
+    onSaveConfiguration?: (config: any) => void
 }
 
 interface Project {
@@ -46,6 +47,8 @@ export default function CALMBrowserPage({ sourceId, sourceName, onBack }: CALMBr
     const [selectedScope, setSelectedScope] = useState<string>('')
     const [selectedProcess, setSelectedProcess] = useState<string>('')
     const [selectedDocType, setSelectedDocType] = useState<string>('all')
+    const [showSaveModal, setShowSaveModal] = useState(false)
+    const [configName, setConfigName] = useState('')
 
     const [loadingProjects, setLoadingProjects] = useState(true)
     const [loadingScopes, setLoadingScopes] = useState(false)
@@ -189,7 +192,7 @@ export default function CALMBrowserPage({ sourceId, sourceName, onBack }: CALMBr
             // Actual sync call
             await axios.post('/api/sync', {
                 sourceId,
-                documentIds: selectedDocs.map(d => d.id)
+                documents: selectedDocs
             })
 
             alert(`Successfully synced ${selectedDocs.length} documents to Yoda Knowledge Base!`)
@@ -215,6 +218,20 @@ export default function CALMBrowserPage({ sourceId, sourceName, onBack }: CALMBr
         return icons[type] || '📄'
     }
 
+    const handleSaveConfig = () => {
+        if (!onSaveConfiguration || !configName.trim()) return
+
+        onSaveConfiguration({
+            name: configName,
+            projectId: selectedProject,
+            scopeId: selectedScope,
+            processId: selectedProcess,
+            docType: selectedDocType
+        })
+        setShowSaveModal(false)
+        setConfigName('')
+    }
+
     return (
         <div>
             {/* Back Button */}
@@ -232,15 +249,15 @@ export default function CALMBrowserPage({ sourceId, sourceName, onBack }: CALMBr
                         ☁️
                     </div>
                     <div>
-                        <h2 className="text-xl font-bold text-white">{sourceName}</h2>
-                        <p className="text-gray-400">Cloud ALM Document Browser</p>
+                        <h2 className="text-xl font-bold text-heading">{sourceName}</h2>
+                        <p className="text-muted">Cloud ALM Document Browser</p>
                     </div>
                 </div>
             </div>
 
             {/* Filters */}
             <div className="glass-card p-6 mb-6">
-                <h3 className="text-sm font-semibold text-gray-300 mb-4 uppercase tracking-wider">
+                <h3 className="text-sm font-semibold text-muted mb-4 uppercase tracking-wider">
                     🔍 Filter Documents
                 </h3>
 
@@ -323,6 +340,15 @@ export default function CALMBrowserPage({ sourceId, sourceName, onBack }: CALMBr
                             <>🔍 Load Documents</>
                         )}
                     </button>
+                    {onSaveConfiguration && (
+                        <button
+                            className="btn btn-secondary ml-2"
+                            onClick={() => setShowSaveModal(true)}
+                            disabled={!selectedScope}
+                        >
+                            💾 Save Config
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -330,10 +356,10 @@ export default function CALMBrowserPage({ sourceId, sourceName, onBack }: CALMBr
             {documents.length > 0 && (
                 <div className="glass-card overflow-hidden mb-6">
                     <div className="p-4 border-b border-white/10 flex items-center justify-between">
-                        <h3 className="font-semibold text-white">
+                        <h3 className="font-semibold text-heading">
                             📁 Documents ({documents.length})
                         </h3>
-                        <div className="text-sm text-gray-400">
+                        <div className="text-sm text-muted">
                             {selectedDocs.length} selected
                         </div>
                     </div>
@@ -376,8 +402,8 @@ export default function CALMBrowserPage({ sourceId, sourceName, onBack }: CALMBr
                                         <td>
                                             <span className="badge badge-info">{doc.type}</span>
                                         </td>
-                                        <td className="text-gray-400">{doc.size}</td>
-                                        <td className="text-gray-400">{doc.lastUpdated}</td>
+                                        <td className="text-muted">{doc.size}</td>
+                                        <td className="text-muted">{doc.lastUpdated}</td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -391,10 +417,10 @@ export default function CALMBrowserPage({ sourceId, sourceName, onBack }: CALMBr
                 <div className="glass-card p-6">
                     <div className="flex items-center justify-between mb-4">
                         <div>
-                            <h3 className="font-semibold text-white">
+                            <h3 className="font-semibold text-heading">
                                 Ready to Sync {selectedDocs.length} Document{selectedDocs.length > 1 ? 's' : ''}
                             </h3>
-                            <p className="text-sm text-gray-400">
+                            <p className="text-sm text-muted">
                                 Documents will be processed and added to Yoda Knowledge Base
                             </p>
                         </div>
@@ -435,10 +461,47 @@ export default function CALMBrowserPage({ sourceId, sourceName, onBack }: CALMBr
             {documents.length === 0 && selectedProcess && !loadingDocs && (
                 <div className="glass-card p-12 text-center">
                     <div className="text-4xl mb-4">📭</div>
-                    <h3 className="text-xl font-semibold text-white mb-2">No Documents Found</h3>
-                    <p className="text-gray-400">
+                    <h3 className="text-xl font-semibold text-heading mb-2">No Documents Found</h3>
+                    <p className="text-muted">
                         No documents match your filter criteria. Try selecting different options.
                     </p>
+                </div>
+            )}
+            {/* Save Config Modal */}
+            {showSaveModal && (
+                <div className="modal-overlay" onClick={() => setShowSaveModal(false)}>
+                    <div className="modal" onClick={e => e.stopPropagation()}>
+                        <div className="modal-header">
+                            <h3 className="modal-title">Save Configuration as Source</h3>
+                            <button className="modal-close" onClick={() => setShowSaveModal(false)}>✕</button>
+                        </div>
+                        <div className="modal-body">
+                            <p className="text-sm text-muted mb-4">
+                                Save these filters as a new Source for quick access in Document Upload.
+                            </p>
+                            <div className="input-group">
+                                <label className="input-label">Configuration Name</label>
+                                <input
+                                    type="text"
+                                    className="input"
+                                    placeholder="e.g., Wave 2 functional Specs"
+                                    value={configName}
+                                    onChange={e => setConfigName(e.target.value)}
+                                    autoFocus
+                                />
+                            </div>
+                        </div>
+                        <div className="modal-footer">
+                            <button className="btn btn-secondary" onClick={() => setShowSaveModal(false)}>Cancel</button>
+                            <button
+                                className="btn btn-primary"
+                                onClick={handleSaveConfig}
+                                disabled={!configName.trim()}
+                            >
+                                Save Source
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

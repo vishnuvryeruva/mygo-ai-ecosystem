@@ -92,7 +92,7 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
               Prompt Generator
             </h2>
             {refinementMode && (
-              <p className="text-sm text-gray-400 mt-1">Conversational mode - refine your prompt</p>
+              <p className="text-sm text-muted mt-1">Conversational mode - refine your prompt</p>
             )}
           </div>
           <button onClick={onClose} className="modal-close">✕</button>
@@ -172,7 +172,7 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
                       key={index}
                       className={`p-3 rounded-xl text-sm ${msg.role === 'user'
                         ? 'bg-gradient-to-r from-indigo-500/20 to-purple-500/20 border border-indigo-500/30 text-indigo-200 ml-8'
-                        : 'bg-white/5 border border-white/10 text-gray-300 mr-8'
+                        : 'bg-white/5 border border-white/10 text-muted mr-8'
                         }`}
                     >
                       <strong>{msg.role === 'user' ? 'You: ' : 'Assistant: '}</strong>
@@ -222,7 +222,7 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
                   setPrompt('')
                   setRefinementHistory([])
                 }}
-                className="text-gray-500 hover:text-gray-300 text-sm underline"
+                className="text-muted hover:text-main text-sm underline"
               >
                 ← Start over with new task
               </button>

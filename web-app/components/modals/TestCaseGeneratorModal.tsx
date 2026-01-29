@@ -134,7 +134,7 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
           {testCases && (
             <div className="mt-6">
               {downloadLoading && (
-                <div className="mb-4 flex items-center justify-center text-gray-400">
+                <div className="mb-4 flex items-center justify-center text-muted">
                   <span className="spinner w-4 h-4 mr-2" />
                   Preparing download...
                 </div>

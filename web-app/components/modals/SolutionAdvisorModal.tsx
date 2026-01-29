@@ -201,25 +201,25 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                             <span className="text-2xl">💡</span>
                             Solution Advisor
                         </h2>
-                        <p className="text-sm text-gray-400 mt-1">Conversational solution discovery and refinement</p>
+                        <p className="text-sm text-muted mt-1">Conversational solution discovery and refinement</p>
                     </div>
                     <button onClick={onClose} className="modal-close">✕</button>
                 </div>
 
                 {/* Progress Steps */}
-                <div className="px-6 py-4 border-b border-white/10 bg-black/20">
+                <div className="px-6 py-4 border-b border-[var(--glass-border)] bg-gray-50/50 dark:bg-black/20">
                     <div className="flex justify-between items-center">
                         {(['requirements', 'solution', 'search', 'improvise', 'complete'] as Step[]).map((step, index) => (
                             <div key={step} className="flex items-center">
                                 <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium transition-all ${currentStep === step
                                     ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-500/30'
                                     : index < ['requirements', 'solution', 'search', 'improvise', 'complete'].indexOf(currentStep)
-                                        ? 'bg-green-500/20 text-green-400 border border-green-500/50'
-                                        : 'bg-white/5 text-gray-500 border border-white/10'
+                                        ? 'bg-green-500/10 text-green-500 border border-green-500/20'
+                                        : 'bg-white dark:bg-white/5 text-muted border border-gray-200 dark:border-white/10'
                                     }`}>
                                     {index < ['requirements', 'solution', 'search', 'improvise', 'complete'].indexOf(currentStep) ? '✓' : index + 1}
                                 </div>
-                                <span className={`ml-2 text-sm hidden md:inline ${currentStep === step ? 'font-medium text-indigo-400' : 'text-gray-500'}`}>
+                                <span className={`ml-2 text-sm hidden md:inline ${currentStep === step ? 'font-medium text-indigo-400' : 'text-muted'}`}>
                                     {stepLabels[step]}
                                 </span>
                                 {index < 4 && <div className="w-8 lg:w-12 h-0.5 mx-2 bg-white/10" />}
@@ -234,7 +234,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                         <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                             <div className={`max-w-[80%] rounded-2xl p-4 ${message.role === 'user'
                                 ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white'
-                                : 'bg-white/5 border border-white/10 text-gray-200'
+                                : 'glass-subtle text-heading'
                                 }`}>
                                 <div className="whitespace-pre-wrap text-sm">{message.content}</div>
                             </div>
@@ -242,8 +242,8 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                     ))}
                     {loading && (
                         <div className="flex justify-start">
-                            <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
-                                <div className="flex items-center gap-2 text-gray-400">
+                            <div className="glass-subtle rounded-2xl p-4">
+                                <div className="flex items-center gap-2 text-muted">
                                     <div className="spinner w-4 h-4" />
                                     <span className="text-sm">Thinking...</span>
                                 </div>
@@ -254,10 +254,10 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
 
                 {/* Generated Solution Preview (if available) */}
                 {generatedSolution && currentStep !== 'requirements' && (
-                    <div className="px-6 py-3 border-t border-white/10 bg-indigo-500/10">
+                    <div className="px-6 py-3 border-t border-[var(--glass-border)] bg-indigo-500/10">
                         <details className="cursor-pointer">
-                            <summary className="text-sm font-medium text-indigo-300">📋 Current Solution (click to expand)</summary>
-                            <div className="mt-2 text-sm text-gray-300 whitespace-pre-wrap max-h-40 overflow-y-auto p-3 bg-black/20 rounded-lg">
+                            <summary className="text-sm font-medium text-indigo-400">📋 Current Solution (click to expand)</summary>
+                            <div className="mt-2 text-sm text-muted whitespace-pre-wrap max-h-40 overflow-y-auto p-3 glass-subtle rounded-lg">
                                 {finalSolution || generatedSolution}
                             </div>
                         </details>
@@ -266,7 +266,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
 
                 {/* Action Buttons */}
                 {currentStep === 'solution' && (
-                    <div className="px-6 py-4 border-t border-white/10 bg-black/20 flex gap-3">
+                    <div className="px-6 py-4 border-t border-[var(--glass-border)] bg-gray-50/50 dark:bg-black/20 flex gap-3">
                         <button
                             onClick={handleSearchSimilar}
                             disabled={loading}
@@ -285,7 +285,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                 )}
 
                 {currentStep === 'complete' && (
-                    <div className="px-6 py-4 border-t border-white/10 bg-green-500/10 flex gap-3">
+                    <div className="px-6 py-4 border-t border-[var(--glass-border)] bg-green-500/10 flex gap-3">
                         <button
                             onClick={handleCreateFunctionalSpec}
                             className="btn btn-success"

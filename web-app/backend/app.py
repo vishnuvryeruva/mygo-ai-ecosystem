@@ -699,32 +699,47 @@ def sync_documents():
     try:
         data = request.json
         source_id = data.get('sourceId')
+        # Support both 'documents' (full objects) and 'documentIds' (legacy)
+        documents = data.get('documents', [])
         document_ids = data.get('documentIds', [])
         
-        if not source_id or not document_ids:
-            return jsonify({"error": "sourceId and documentIds are required"}), 400
+        if not source_id:
+            return jsonify({"error": "sourceId is required"}), 400
+            
+        if not documents and not document_ids:
+             return jsonify({"error": "No documents provided to sync"}), 400
         
         source = source_config_service.get_source(source_id)
         if not source:
             return jsonify({"error": "Source not found"}), 404
         
-        # Get CALM service
-        service = get_calm_service(source.get('config'))
-        
         results = []
-        for doc_id in document_ids:
-            try:
-                # For demo, we'll simulate successful sync
-                # In production, fetch content and ingest to RAG
+        
+        # Process full document objects
+        if documents:
+            for doc in documents:
+                try:
+                    # Add placeholder to RAG service
+                    result = rag_service.add_placeholder_document(doc)
+                    results.append({
+                        "documentId": doc.get('id'),
+                        "status": result.get('status'),
+                        "message": result.get('message', ''),
+                        "error": result.get('error')
+                    })
+                except Exception as e:
+                    results.append({
+                        "documentId": doc.get('id'),
+                        "status": "error",
+                        "error": str(e)
+                    })
+        # Legacy fallback
+        elif document_ids:
+             for doc_id in document_ids:
                 results.append({
                     "documentId": doc_id,
-                    "status": "success"
-                })
-            except Exception as e:
-                results.append({
-                    "documentId": doc_id,
-                    "status": "error",
-                    "error": str(e)
+                    "status": "skipped",
+                    "message": "Metadata required for sync. Update client."
                 })
         
         # Update last sync time

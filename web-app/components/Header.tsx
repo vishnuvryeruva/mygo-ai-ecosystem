@@ -17,17 +17,17 @@ export default function Header({ onSettingsClick }: HeaderProps) {
             className="object-contain"
           />
           <div className="flex flex-col">
-            <h1 className="text-xl font-bold bg-gradient-to-r from-orange-500 to-teal-500 bg-clip-text text-transparent">
+            <h1 className="text-xl font-bold bg-gradient-to-r from-mygo-orange to-mygo-teal bg-clip-text text-transparent">
               AI Ecosystem
             </h1>
-            <span className="text-xs text-gray-500">Intelligent SAP Development Suite</span>
+            <span className="text-xs text-muted">Intelligent SAP Development Suite</span>
           </div>
         </div>
 
         {onSettingsClick && (
           <button
             onClick={onSettingsClick}
-            className="text-gray-600 hover:text-gray-900 p-2"
+            className="text-muted hover:text-main p-2"
             title="Settings"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

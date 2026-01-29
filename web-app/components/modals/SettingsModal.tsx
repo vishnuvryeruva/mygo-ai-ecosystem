@@ -110,13 +110,14 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
                 {loading ? (
                     <div className="modal-body text-center py-12">
                         <div className="spinner w-8 h-8 mx-auto mb-4" />
-                        <p className="text-gray-400">Loading prompts...</p>
+                        <p className="text-muted">Loading prompts...</p>
                     </div>
                 ) : (
                     <div className="flex" style={{ maxHeight: 'calc(90vh - 80px)' }}>
                         {/* Sidebar - Scenario List */}
-                        <div className="w-1/3 border-r border-white/10 p-4 bg-black/20 overflow-y-auto">
-                            <h3 className="font-semibold text-white mb-4">AI Scenarios</h3>
+                        {/* Sidebar - Scenario List */}
+                        <div className="w-1/3 border-r border-[var(--glass-border)] p-4 bg-gray-50/50 dark:bg-black/20 overflow-y-auto">
+                            <h3 className="font-semibold text-heading mb-4">AI Scenarios</h3>
                             <ul className="space-y-2">
                                 {Object.entries(prompts).map(([key, config]) => (
                                     <li key={key}>
@@ -124,7 +125,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
                                             onClick={() => handleScenarioChange(key)}
                                             className={`w-full text-left px-4 py-3 rounded-xl transition-all ${selectedScenario === key
                                                 ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg'
-                                                : 'glass-subtle text-gray-300 hover:bg-white/10'
+                                                : 'glass-subtle text-muted hover:bg-white/10'
                                                 }`}
                                         >
                                             <div className="font-medium">{config.name}</div>
@@ -140,10 +141,10 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
                             {selectedScenario && (
                                 <>
                                     <div className="mb-6">
-                                        <h3 className="text-lg font-semibold text-white mb-2">
+                                        <h3 className="text-lg font-semibold text-heading mb-2">
                                             {prompts[selectedScenario].name}
                                         </h3>
-                                        <p className="text-sm text-gray-400">
+                                        <p className="text-sm text-muted">
                                             {prompts[selectedScenario].description}
                                         </p>
                                     </div>
@@ -151,7 +152,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
                                     {/* System Prompt */}
                                     <div className="input-group">
                                         <label className="input-label">System Prompt</label>
-                                        <p className="text-xs text-gray-500 mb-2">
+                                        <p className="text-xs text-muted mb-2">
                                             This defines the AI's role and behavior for this scenario.
                                         </p>
                                         <textarea
@@ -168,7 +169,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
                                     {prompts[selectedScenario].user_template && (
                                         <div className="input-group">
                                             <label className="input-label">User Prompt Template</label>
-                                            <p className="text-xs text-gray-500 mb-2">
+                                            <p className="text-xs text-muted mb-2">
                                                 Template for user prompts. Use {'{'}variable{'}'} for dynamic values.
                                             </p>
                                             <textarea
@@ -206,8 +207,8 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
 
                                     {/* Info Box */}
                                     <div className="glass-subtle p-4 border-l-4 border-yellow-500">
-                                        <h4 className="font-medium text-yellow-300 mb-2">⚠️ Note</h4>
-                                        <p className="text-sm text-gray-400">
+                                        <h4 className="font-medium text-yellow-600 dark:text-yellow-300 mb-2">⚠️ Note</h4>
+                                        <p className="text-sm text-muted">
                                             Changes to prompts are stored in memory and will be reset when the backend restarts.
                                             For persistent changes, modify the prompts in the backend configuration file.
                                         </p>
