@@ -33,6 +33,8 @@ class CALMService:
         
         self._access_token = None
         self._token_expiry = None
+        self._using_demo_data = False  # Track if using demo data
+        self._last_error = None  # Track last connection error
     
     def _get_access_token(self) -> str:
         """
@@ -125,20 +127,23 @@ class CALMService:
     # Project API
     # =========================================================================
     
-    def list_projects(self) -> List[Dict]:
+    def list_projects(self) -> Dict:
         """
         List all projects from Cloud ALM
         
         Returns:
-            List of project objects
+            Dict with 'projects' list and 'isDemo' boolean
         """
         try:
+            self._using_demo_data = False
             response = self._make_request('GET', '/api/calm-projects/v1/projects')
-            return response.get('value', response.get('projects', []))
+            projects = response.get('value', response.get('projects', []))
+            return {'projects': projects, 'isDemo': False}
         except Exception as e:
-            print(f"Error listing projects: {e}")
-            # Return demo data for development
-            return self._get_demo_projects()
+            self._using_demo_data = True
+            self._last_error = str(e)
+            print(f"Error listing projects (using demo data): {e}")
+            return {'projects': self._get_demo_projects(), 'isDemo': True, 'error': str(e)}
     
     def get_project(self, project_id: str) -> Dict:
         """
@@ -216,7 +221,7 @@ class CALMService:
         process_id: Optional[str] = None,
         document_type: Optional[str] = None,
         project_id: Optional[str] = None
-    ) -> List[Dict]:
+    ) -> Dict:
         """
         List documents with optional filters
         
@@ -226,9 +231,10 @@ class CALMService:
             project_id: Filter by project ID
             
         Returns:
-            List of document objects
+            Dict with 'documents' list and 'isDemo' boolean
         """
         try:
+            self._using_demo_data = False
             params = {}
             if process_id:
                 params['solutionProcessId'] = process_id
@@ -242,10 +248,13 @@ class CALMService:
                 '/api/calm-documents/v1/documents',
                 params=params
             )
-            return response.get('value', response.get('documents', []))
+            documents = response.get('value', response.get('documents', []))
+            return {'documents': documents, 'isDemo': False}
         except Exception as e:
-            print(f"Error listing documents: {e}")
-            return self._get_demo_documents()
+            self._using_demo_data = True
+            self._last_error = str(e)
+            print(f"Error listing documents (using demo data): {e}")
+            return {'documents': self._get_demo_documents(), 'isDemo': True, 'error': str(e)}
     
     def get_document_content(self, document_id: str) -> bytes:
         """

@@ -616,8 +616,8 @@ def calm_list_projects(source_id):
             return jsonify({"error": "Source not found"}), 404
         
         service = get_calm_service(source.get('config'))
-        projects = service.list_projects()
-        return jsonify({"projects": projects})
+        result = service.list_projects()  # Returns {projects, isDemo, error?}
+        return jsonify(result)
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -678,11 +678,11 @@ def calm_list_documents(source_id):
             return jsonify({"error": "Source not found"}), 404
         
         service = get_calm_service(source.get('config'))
-        documents = service.list_documents(
+        result = service.list_documents(  # Returns {documents, isDemo, error?}
             process_id=process_id,
             document_type=doc_type
         )
-        return jsonify({"documents": documents})
+        return jsonify(result)
     except Exception as e:
         import traceback
         traceback.print_exc()

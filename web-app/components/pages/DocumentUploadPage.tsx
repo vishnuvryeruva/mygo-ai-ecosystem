@@ -10,11 +10,11 @@ interface DocumentInfo {
     size: string
     chunks: number
     uploadDate: string
-    // New Fields
-    source: string
-    updatedBy: string
-    project: string
-    scope: string
+    // Optional fields - may come from synced documents
+    source?: string
+    updatedBy?: string
+    project?: string
+    scope?: string
 }
 
 export default function DocumentUploadPage() {
@@ -39,61 +39,21 @@ export default function DocumentUploadPage() {
             setDocuments(response.data.documents || [])
         } catch (error) {
             console.error('Error fetching documents:', error)
-            // Mock Data with new fields
-            setDocuments([
-                {
-                    name: 'FIN_FSpec_GeneralLedger_V1.2.docx',
-                    type: 'Word',
-                    size: '108 KB',
-                    chunks: 10,
-                    uploadDate: new Date().toISOString(),
-                    source: 'CALM',
-                    updatedBy: 'Vishnu Yeruva',
-                    project: 'S4HANA EWM Implementation',
-                    scope: 'Finance'
-                },
-                {
-                    name: 'SCM_TSpec_InventoryManagement_API.pdf',
-                    type: 'PDF',
-                    size: '107 KB',
-                    chunks: 15,
-                    uploadDate: new Date(Date.now() - 86400000).toISOString(),
-                    source: 'CALM',
-                    updatedBy: 'Vishnu Yeruva',
-                    project: 'S4HANA EWM Implementation',
-                    scope: 'Logistics'
-                },
-                {
-                    name: 'Testing_Strategy_Q1.docx',
-                    type: 'Word',
-                    size: '205 KB',
-                    chunks: 5,
-                    uploadDate: new Date(Date.now() - 172800000).toISOString(),
-                    source: 'SharePoint',
-                    updatedBy: 'Jane Doe',
-                    project: 'Enhancement Project',
-                    scope: 'Testing'
-                },
-                {
-                    name: 'Z_CUSTOM_REPORT.abap',
-                    type: 'Code',
-                    size: '12 KB',
-                    chunks: 1,
-                    uploadDate: new Date(Date.now() - 260000000).toISOString(),
-                    source: 'Local File',
-                    updatedBy: 'Vishnu Yeruva',
-                    project: 'S4HANA Conversion',
-                    scope: 'Custom Code'
-                }
-            ])
+            // Don't show mock data - let empty state appear
+            setDocuments([])
         } finally {
             setLoadingDocs(false)
         }
     }
 
-    const handleSyncComplete = (newDocs: DocumentInfo[]) => {
-        // Optimistically add the new docs to the list
-        setDocuments(prevDocs => [...newDocs, ...prevDocs]) // Add new ones to top
+    const handleSyncComplete = (newDocs?: DocumentInfo[]) => {
+        // If new docs provided, optimistically add them to the list
+        if (newDocs && newDocs.length > 0) {
+            setDocuments(prevDocs => [...newDocs, ...prevDocs])
+        } else {
+            // Refresh documents from API
+            fetchDocuments()
+        }
         setShowAddModal(false)
     }
 
@@ -123,9 +83,9 @@ export default function DocumentUploadPage() {
 
     // Filter Logic
     const filteredDocuments = documents.filter(doc => {
-        if (filterSource && !doc.source.toLowerCase().includes(filterSource.toLowerCase())) return false
+        if (filterSource && !(doc.source || '').toLowerCase().includes(filterSource.toLowerCase())) return false
         if (filterType && !doc.type.toLowerCase().includes(filterType.toLowerCase())) return false
-        if (filterProject && !doc.project.toLowerCase().includes(filterProject.toLowerCase())) return false
+        if (filterProject && !(doc.project || '').toLowerCase().includes(filterProject.toLowerCase())) return false
         if (filterDate && !doc.uploadDate.startsWith(filterDate)) return false
         return true
     })

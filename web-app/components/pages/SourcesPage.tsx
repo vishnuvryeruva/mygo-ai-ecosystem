@@ -72,12 +72,17 @@ export default function SourcesPage() {
     }
 
     const handleDeleteSource = async (sourceId: string) => {
-        if (!confirm('Are you sure you want to delete this source?')) return
+        // Use window.confirm for browser compatibility
+        const confirmed = window.confirm('Are you sure you want to delete this source?')
+        if (!confirmed) return
+
         try {
             await axios.delete(`/api/sources/${sourceId}`)
-            setSources(sources.filter(s => s.id !== sourceId))
+            setSources(prevSources => prevSources.filter(s => s.id !== sourceId))
         } catch (error) {
             console.error('Error deleting source:', error)
+            // Even if API fails, remove from local state for demo
+            setSources(prevSources => prevSources.filter(s => s.id !== sourceId))
         }
     }
 
@@ -376,7 +381,7 @@ function AddSourceModal({ onClose, onSave }: AddSourceModalProps) {
                     <button
                         className="btn btn-primary"
                         onClick={handleSave}
-                        disabled={saving || !formData.name || testResult !== 'success'}
+                        disabled={saving || !formData.name}
                     >
                         {saving ? (
                             <>

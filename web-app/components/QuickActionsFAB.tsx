@@ -39,9 +39,9 @@ export default function QuickActionsFAB({ onAction }: QuickActionsFABProps) {
     ]
 
     return (
-        <div ref={menuRef} className="fixed bottom-6 right-6 z-[60] flex flex-col items-end gap-4">
+        <div ref={menuRef} className="fixed bottom-6 right-6 z-[60] flex flex-col items-end gap-4 pointer-events-none">
             {/* Menu Items */}
-            <div className={`flex flex-col items-end gap-3 transition-all duration-300 ${isOpen ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}`}>
+            <div className={`flex flex-col items-end gap-3 transition-all duration-300 ${isOpen ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-4 pointer-events-none'}`}>
                 {actions.map((action, index) => (
                     <button
                         key={action.id}
@@ -62,7 +62,7 @@ export default function QuickActionsFAB({ onAction }: QuickActionsFABProps) {
             {/* Main Trigger Button */}
             <button
                 onClick={() => setIsOpen(!isOpen)}
-                className={`w-14 h-14 rounded-full bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center text-white shadow-xl shadow-teal-500/30 hover:scale-110 active:scale-95 transition-all duration-300 ${isOpen ? 'rotate-90' : 'rotate-0'}`}
+                className={`w-14 h-14 rounded-full bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center text-white shadow-xl shadow-teal-500/30 hover:scale-110 active:scale-95 transition-all duration-300 pointer-events-auto ${isOpen ? 'rotate-90' : 'rotate-0'}`}
             >
                 {isOpen ? (
                     <span className="text-3xl font-light">✕</span>

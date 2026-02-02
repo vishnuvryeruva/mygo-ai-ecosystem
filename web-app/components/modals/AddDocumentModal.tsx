@@ -5,7 +5,7 @@ import axios from 'axios'
 
 interface AddDocumentModalProps {
     onClose: () => void
-    onSyncComplete: () => void
+    onSyncComplete: (newDocs?: DocumentInfo[]) => void
 }
 
 interface DocumentInfo {
@@ -14,6 +14,11 @@ interface DocumentInfo {
     size: string
     chunks: number
     uploadDate: string
+    // Additional fields for synced documents
+    source?: string
+    updatedBy?: string
+    project?: string
+    scope?: string
 }
 
 interface Source {
@@ -41,6 +46,10 @@ export default function AddDocumentModal({ onClose, onSyncComplete }: AddDocumen
     const [selectedStagingDocs, setSelectedStagingDocs] = useState<string[]>([])
     const [isFetchingStaging, setIsFetchingStaging] = useState(false)
 
+    // Demo data indicator
+    const [isUsingDemoData, setIsUsingDemoData] = useState(false)
+    const [demoError, setDemoError] = useState<string | null>(null)
+
     useEffect(() => {
         fetchSources()
     }, [])
@@ -62,15 +71,25 @@ export default function AddDocumentModal({ onClose, onSyncComplete }: AddDocumen
         setStagingDocs([])
         setSelectedStagingDocs([])
         setSelectedProject('')
+        setIsUsingDemoData(false)
+        setDemoError(null)
 
-        // Mock Fetching Projects for CALM
+        // Fetch real projects from CALM API
         const source = sources.find(s => s.id === sourceId)
         if (source && source.type === 'CALM') {
-            // Simulate API call to list projects
-            setProjects([
-                { id: 'proj-1', name: 'S/4HANA Implementation Wave 2' },
-                { id: 'proj-2', name: 'Finance Transformation' }
-            ])
+            try {
+                const response = await axios.get(`/api/calm/${sourceId}/projects`)
+                setProjects(response.data.projects || [])
+
+                // Check if using demo data
+                if (response.data.isDemo) {
+                    setIsUsingDemoData(true)
+                    setDemoError(response.data.error || 'Could not connect to Cloud ALM API')
+                }
+            } catch (error) {
+                console.error('Error fetching projects:', error)
+                setProjects([])
+            }
         } else {
             setProjects([])
         }
@@ -96,22 +115,27 @@ export default function AddDocumentModal({ onClose, onSyncComplete }: AddDocumen
         setIsFetchingStaging(true)
         setStagingDocs([])
         try {
-            await new Promise(resolve => setTimeout(resolve, 1000))
+            // Build query params
+            const params = new URLSearchParams()
+            if (selectedProject) params.append('projectId', selectedProject)
+            if (selectedDocType !== 'All') params.append('type', selectedDocType)
 
-            // Mock data filtered by Type
-            let newDocs = [
-                { name: 'S4HANA_Finance_Spec.pdf', type: 'PDF', size: '2.4 MB', chunks: 0, uploadDate: new Date().toISOString() },
-                { name: 'O2C_Process_Flow.docx', type: 'Word', size: '1.1 MB', chunks: 0, uploadDate: new Date().toISOString() },
-                { name: 'Inventory_API_Config.txt', type: 'Text', size: '45 KB', chunks: 0, uploadDate: new Date().toISOString() },
-                { name: 'Legacy_Code_Export.java', type: 'Code', size: '120 KB', chunks: 0, uploadDate: new Date().toISOString() },
-                { name: 'Custom_Report_ZREP.abap', type: 'ABAP', size: '15 KB', chunks: 0, uploadDate: new Date().toISOString() }
-            ]
+            const response = await axios.get(`/api/calm/${selectedSourceId}/documents?${params.toString()}`)
+            const docs = response.data.documents || []
 
-            if (selectedDocType !== 'All') {
-                newDocs = newDocs.filter(d => d.type === selectedDocType)
-            }
-            // If project is selected, we assume backend filters by project. 
-            // For UI feedback, we just show the docs.
+            // Map API response to our DocumentInfo format
+            const newDocs = docs.map((doc: any) => ({
+                id: doc.id,
+                name: doc.name,
+                type: doc.type || 'Document',
+                size: doc.size || 'Unknown',
+                chunks: 0,
+                uploadDate: doc.lastUpdated || new Date().toISOString(),
+                // Store additional metadata for sync
+                projectId: selectedProject,
+                projectName: projects.find(p => p.id === selectedProject)?.name || '',
+                source: source.type
+            }))
 
             setStagingDocs(newDocs)
         } catch (error) {
@@ -134,9 +158,29 @@ export default function AddDocumentModal({ onClose, onSyncComplete }: AddDocumen
         if (selectedStagingDocs.length === 0) return
         setUploading(true)
         try {
-            await new Promise(resolve => setTimeout(resolve, 1500))
-            alert(`Synced ${selectedStagingDocs.length} documents to Knowledge Base!`)
-            onSyncComplete()
+            const source = sources.find(s => s.id === selectedSourceId)
+
+            // Get full document objects for selected docs
+            const docsToSync = stagingDocs
+                .filter(doc => selectedStagingDocs.includes(doc.name))
+                .map(doc => ({
+                    id: (doc as any).id,
+                    name: doc.name,
+                    type: doc.type,
+                    size: doc.size,
+                    source: source?.type || 'Unknown',
+                    project: (doc as any).projectName || '',
+                    updatedBy: 'System',
+                    uploadDate: doc.uploadDate
+                }))
+
+            await axios.post('/api/sync', {
+                sourceId: selectedSourceId,
+                documents: docsToSync
+            })
+
+            // Pass synced docs back to parent
+            onSyncComplete(docsToSync as any)
             onClose()
         } catch (error) {
             console.error('Error syncing documents:', error)
@@ -168,6 +212,26 @@ export default function AddDocumentModal({ onClose, onSyncComplete }: AddDocumen
                 </div>
 
                 <div className="modal-body max-h-[70vh] overflow-y-auto">
+                    {/* Demo Data Warning */}
+                    {isUsingDemoData && (
+                        <div className="mb-4 p-3 rounded-lg" style={{
+                            backgroundColor: 'rgba(255, 166, 0, 0.15)',
+                            border: '1px solid rgba(255, 166, 0, 0.5)',
+                            color: '#ffa600'
+                        }}>
+                            <div className="flex items-start gap-2">
+                                <span className="text-lg">⚠️</span>
+                                <div>
+                                    <strong>Using Demo Data</strong>
+                                    <p className="text-sm mt-1 opacity-80">
+                                        Could not connect to Cloud ALM API. Showing sample data for demonstration.
+                                        {demoError && <span className="block mt-1 text-xs opacity-60">Error: {demoError}</span>}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Source Selector */}
                     <div className="input-group mb-6">
                         <label className="input-label">Source</label>
