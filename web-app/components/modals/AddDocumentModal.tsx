@@ -30,6 +30,7 @@ interface Source {
 
 // Mock Data Types
 interface Project { id: string; name: string }
+interface Scope { id: string; name: string }
 
 export default function AddDocumentModal({ onClose, onSyncComplete }: AddDocumentModalProps) {
     const [uploading, setUploading] = useState(false)
@@ -39,7 +40,8 @@ export default function AddDocumentModal({ onClose, onSyncComplete }: AddDocumen
     // Ingestion Filters
     const [projects, setProjects] = useState<Project[]>([])
     const [selectedProject, setSelectedProject] = useState('')
-    const [selectedDocType, setSelectedDocType] = useState('All')
+    const [scopes, setScopes] = useState<Scope[]>([])
+    const [selectedScope, setSelectedScope] = useState('')
 
     // Staging Area State
     const [stagingDocs, setStagingDocs] = useState<DocumentInfo[]>([])
@@ -49,6 +51,7 @@ export default function AddDocumentModal({ onClose, onSyncComplete }: AddDocumen
     // Demo data indicator
     const [isUsingDemoData, setIsUsingDemoData] = useState(false)
     const [demoError, setDemoError] = useState<string | null>(null)
+    const [isLoadingProjects, setIsLoadingProjects] = useState(false)
 
     useEffect(() => {
         fetchSources()
@@ -71,12 +74,16 @@ export default function AddDocumentModal({ onClose, onSyncComplete }: AddDocumen
         setStagingDocs([])
         setSelectedStagingDocs([])
         setSelectedProject('')
+        setScopes([])
+        setSelectedScope('')
         setIsUsingDemoData(false)
         setDemoError(null)
+        setProjects([])
 
         // Fetch real projects from CALM API
         const source = sources.find(s => s.id === sourceId)
         if (source && source.type === 'CALM') {
+            setIsLoadingProjects(true)
             try {
                 const response = await axios.get(`/api/calm/${sourceId}/projects`)
                 setProjects(response.data.projects || [])
@@ -89,9 +96,30 @@ export default function AddDocumentModal({ onClose, onSyncComplete }: AddDocumen
             } catch (error) {
                 console.error('Error fetching projects:', error)
                 setProjects([])
+            } finally {
+                setIsLoadingProjects(false)
             }
         } else {
             setProjects([])
+            setScopes([])
+        }
+    }
+
+    const handleProjectChange = async (projectId: string) => {
+        setSelectedProject(projectId)
+        setSelectedScope('')
+        setScopes([])
+        setStagingDocs([])
+        setSelectedStagingDocs([])
+
+        if (projectId && selectedSourceId !== 'local') {
+            try {
+                const response = await axios.get(`/api/calm/${selectedSourceId}/scopes?projectId=${projectId}`)
+                setScopes(response.data.scopes || [])
+            } catch (error) {
+                console.error('Error fetching scopes:', error)
+                setScopes([])
+            }
         }
     }
 
@@ -118,7 +146,7 @@ export default function AddDocumentModal({ onClose, onSyncComplete }: AddDocumen
             // Build query params
             const params = new URLSearchParams()
             if (selectedProject) params.append('projectId', selectedProject)
-            if (selectedDocType !== 'All') params.append('type', selectedDocType)
+            if (selectedScope) params.append('scopeId', selectedScope)
 
             const response = await axios.get(`/api/calm/${selectedSourceId}/documents?${params.toString()}`)
             const docs = response.data.documents || []
@@ -134,6 +162,8 @@ export default function AddDocumentModal({ onClose, onSyncComplete }: AddDocumen
                 // Store additional metadata for sync
                 projectId: selectedProject,
                 projectName: projects.find(p => p.id === selectedProject)?.name || '',
+                scopeId: selectedScope,
+                scopeName: scopes.find(s => s.id === selectedScope)?.name || '',
                 source: source.type
             }))
 
@@ -273,37 +303,51 @@ export default function AddDocumentModal({ onClose, onSyncComplete }: AddDocumen
                                 <h4 className="text-sm font-semibold text-heading mb-4">Ingestion Configuration</h4>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                                    {/* Project Selector (for CALM) */}
-                                    {projects.length > 0 && (
-                                        <div className="input-group">
-                                            <label className="input-label">Project</label>
-                                            <select
-                                                className="input select"
-                                                value={selectedProject}
-                                                onChange={e => setSelectedProject(e.target.value)}
-                                            >
-                                                <option value="">Select Project</option>
-                                                {projects.map(p => (
-                                                    <option key={p.id} value={p.id}>{p.name}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                    )}
-
-                                    {/* Document Type Selector */}
+                                    {/* Project Selector */}
                                     <div className="input-group">
-                                        <label className="input-label">Document Type</label>
+                                        <label className="input-label">Project</label>
                                         <select
                                             className="input select"
-                                            value={selectedDocType}
-                                            onChange={e => setSelectedDocType(e.target.value)}
+                                            value={selectedProject}
+                                            onChange={e => handleProjectChange(e.target.value)}
+                                            disabled={isLoadingProjects}
                                         >
-                                            <option value="All">All Types</option>
-                                            <option value="PDF">PDF</option>
-                                            <option value="Word">Word</option>
-                                            <option value="Text">Text</option>
-                                            <option value="Code">Code</option>
-                                            <option value="ABAP">ABAP</option>
+                                            {isLoadingProjects ? (
+                                                <option value="">Loading projects...</option>
+                                            ) : projects.length === 0 ? (
+                                                <option value="">No projects available</option>
+                                            ) : (
+                                                <>
+                                                    <option value="">Select Project</option>
+                                                    {projects.map(p => (
+                                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                                    ))}
+                                                </>
+                                            )}
+                                        </select>
+                                    </div>
+
+                                    {/* Scope Selector */}
+                                    <div className="input-group">
+                                        <label className="input-label">Scope</label>
+                                        <select
+                                            className="input select"
+                                            value={selectedScope}
+                                            onChange={e => setSelectedScope(e.target.value)}
+                                            disabled={!selectedProject || scopes.length === 0}
+                                        >
+                                            {!selectedProject ? (
+                                                <option value="">Select a project first</option>
+                                            ) : scopes.length === 0 ? (
+                                                <option value="">Loading scopes...</option>
+                                            ) : (
+                                                <>
+                                                    <option value="">Select Scope</option>
+                                                    {scopes.map(s => (
+                                                        <option key={s.id} value={s.id}>{s.name}</option>
+                                                    ))}
+                                                </>
+                                            )}
                                         </select>
                                     </div>
                                 </div>
@@ -311,7 +355,7 @@ export default function AddDocumentModal({ onClose, onSyncComplete }: AddDocumen
                                 <button
                                     className="btn btn-primary w-full"
                                     onClick={handleLoadFromSource}
-                                    disabled={isFetchingStaging || uploading || (projects.length > 0 && !selectedProject)}
+                                    disabled={isFetchingStaging || uploading || !selectedProject || !selectedScope}
                                 >
                                     {isFetchingStaging ? (
                                         <span className="flex items-center gap-2 justify-center">
