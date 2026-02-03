@@ -58,10 +58,17 @@ export default function SourcesPage() {
     const handleTestConnection = async (sourceId: string) => {
         setTestingConnection(sourceId)
         try {
-            await axios.post(`/api/sources/${sourceId}/test`)
-            setSources(sources.map(s =>
-                s.id === sourceId ? { ...s, status: 'connected' as const } : s
-            ))
+            const response = await axios.post(`/api/sources/${sourceId}/test`)
+            console.log(response.data)
+            if (response.data.success) {
+                setSources(sources.map(s =>
+                    s.id === sourceId ? { ...s, status: 'connected' as const } : s
+                ))
+            } else {
+                setSources(sources.map(s =>
+                    s.id === sourceId ? { ...s, status: 'error' as const } : s
+                ))
+            }
         } catch (error) {
             setSources(sources.map(s =>
                 s.id === sourceId ? { ...s, status: 'error' as const } : s
@@ -244,8 +251,13 @@ function AddSourceModal({ onClose, onSave }: AddSourceModalProps) {
         setTesting(true)
         setTestResult(null)
         try {
-            await axios.post('/api/sources/test-connection', formData)
-            setTestResult('success')
+            const response = await axios.post('/api/sources/test-connection', formData)
+            console.log(response.data)
+            if (response.data.success) {
+                setTestResult('success')
+            } else {
+                setTestResult('error')
+            }
         } catch (error) {
             // For demo, treat error as success to show UI
             setTestResult('success')
@@ -349,6 +361,28 @@ function AddSourceModal({ onClose, onSave }: AddSourceModalProps) {
                                 onChange={e => setFormData({ ...formData, tokenUrl: e.target.value })}
                             />
                         </div>
+
+                        <div className="input-group">
+                            <label className="input-label">Client ID</label>
+                            <input
+                                type="text"
+                                className="input"
+                                placeholder="client_id"
+                                value={formData.clientId}
+                                onChange={e => setFormData({ ...formData, clientId: e.target.value })}
+                            />
+                        </div>
+
+                        <div className="input-group">
+                            <label className="input-label">Client Secret</label>
+                            <input
+                                type="text"
+                                className="input"
+                                placeholder="client_secret"
+                                value={formData.clientSecret}
+                                onChange={e => setFormData({ ...formData, clientSecret: e.target.value })}
+                            />
+                        </div>
                         {/* Hidden sensitive fields or keep them if needed for real api */}
                     </div>
 
@@ -370,6 +404,11 @@ function AddSourceModal({ onClose, onSave }: AddSourceModalProps) {
                     {testResult === 'success' && (
                         <div className="flex items-center gap-2 text-green-400 bg-green-500/10 p-3 rounded-xl mb-4">
                             ✅ Connection successful!
+                        </div>
+                    )}
+                    {testResult === 'error' && (
+                        <div className="flex items-center gap-2 text-red-400 bg-red-500/10 p-3 rounded-xl mb-4">
+                            ❌ Connection failed!
                         </div>
                     )}
                 </div>

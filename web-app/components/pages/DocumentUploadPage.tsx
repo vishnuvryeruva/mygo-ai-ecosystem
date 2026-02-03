@@ -135,15 +135,21 @@ export default function DocumentUploadPage() {
                     <div className="input-group">
                         <label className="input-label mb-1">Updated On</label>
                         <input
-                            type="date"
-                            className="input h-10 w-full"
-                            value={filterDate}
+                            type={filterDate ? "date" : "text"}
+                            placeholder="Select date"
+                            className="input h-10 w-full text-gray-400 focus:text-gray-900"
+                            value={filterDate ?? ""}
+                            onFocus={e => e.target.type = "date"}
+                            onBlur={e => {
+                                if (!filterDate) e.target.type = "text";
+                            }}
                             onChange={e => setFilterDate(e.target.value)}
                         />
                     </div>
                 </div>
 
-                <div className="flex-none pt-4 md:pt-0">
+                <div className="flex-none pt-4 md:pt-0 self-center mt-2">
+                    {/* <label className="input-label mb-1"></label> */}
                     <button
                         className="btn btn-primary h-10 px-6 flex items-center gap-2 whitespace-nowrap w-full md:w-auto justify-center"
                         onClick={() => setShowAddModal(true)}
