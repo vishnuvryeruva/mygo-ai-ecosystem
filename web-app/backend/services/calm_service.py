@@ -20,10 +20,10 @@ class CALMService:
             config: Optional configuration dict. If not provided, uses environment variables.
         """
         if config:
-            self.api_endpoint = config.get('api_endpoint', '')
-            self.token_url = config.get('token_url', '')
-            self.client_id = config.get('client_id', '')
-            self.client_secret = config.get('client_secret', '')
+            self.api_endpoint = config.get('apiEndpoint', '')
+            self.token_url = config.get('tokenUrl', '')
+            self.client_id = config.get('clientId', '')
+            self.client_secret = config.get('clientSecret', '')
         else:
             # Load from environment
             self.api_endpoint = os.getenv('CALM_API_ENDPOINT', '')
