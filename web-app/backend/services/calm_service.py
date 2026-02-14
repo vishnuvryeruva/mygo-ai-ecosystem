@@ -17,24 +17,26 @@ class CALMService:
         Initialize CALM Service with configuration
         
         Args:
-            config: Optional configuration dict. If not provided, uses environment variables.
+            config: Optional configuration dict. If not provided or keys missing, uses environment variables.
         """
-        if config:
-            self.api_endpoint = config.get('apiEndpoint', '')
-            self.token_url = config.get('tokenUrl', '')
-            self.client_id = config.get('clientId', '')
-            self.client_secret = config.get('clientSecret', '')
-        else:
-            # Load from environment
-            self.api_endpoint = os.getenv('CALM_API_ENDPOINT', '')
-            self.token_url = os.getenv('CALM_TOKEN_URL', '')
-            self.client_id = os.getenv('CALM_CLIENT_ID', '')
-            self.client_secret = os.getenv('CALM_CLIENT_SECRET', '')
+        config = config or {}
+        
+        # Helper to get value from config, then env var, then default
+        def get_conf(key, env_var, default=''):
+            val = config.get(key)
+            if val and str(val).strip(): # If value exists and is not empty/whitespace
+                return val
+            return os.getenv(env_var, default)
+
+        self.api_endpoint = get_conf('apiEndpoint', 'CALM_API_ENDPOINT')
+        self.token_url = get_conf('tokenUrl', 'CALM_TOKEN_URL')
+        self.client_id = get_conf('clientId', 'CALM_CLIENT_ID')
+        self.client_secret = get_conf('clientSecret', 'CALM_CLIENT_SECRET')
         
         self._access_token = None
         self._token_expiry = None
-        self._using_demo_data = False  # Track if using demo data
-        self._last_error = None  # Track last connection error
+        self._using_demo_data = False
+        self._last_error = None
     
     def _get_access_token(self) -> str:
         """
@@ -51,6 +53,7 @@ class CALMService:
             raise ValueError("CALM credentials not configured")
         
         try:
+            # Use basic auth for client credentials if needed, or form data
             response = requests.post(
                 self.token_url,
                 data={
@@ -76,6 +79,8 @@ class CALMService:
             
         except requests.exceptions.RequestException as e:
             print(f"Error getting CALM access token: {e}")
+            if hasattr(e.response, 'text'):
+                print(f"Response: {e.response.text}")
             raise
     
     def _make_request(self, method: str, endpoint: str, **kwargs) -> Dict:
@@ -96,6 +101,8 @@ class CALMService:
         headers['Authorization'] = f'Bearer {token}'
         headers['Content-Type'] = 'application/json'
         
+        # Determine base URL based on API type
+        # Some APIs might be on different subdomains, but assuming api_endpoint is the API gateway
         url = f"{self.api_endpoint}{endpoint}"
         
         response = requests.request(
@@ -123,6 +130,18 @@ class CALMService:
             print(f"CALM connection test failed: {e}")
             return False
     
+    def _get_project_url(self, project_id: str) -> str:
+        """
+        Generate deep link to project in Cloud ALM Launchpad
+        """
+        # Base URL format: https://<tenant>.launchpad.cfapps.<region>.hana.ondemand.com/site?siteId=...
+        # Or simpler: https://<tenant>.alm.cloud.sap/launchpad#project-display?sap-app-origin-hint=&...
+        
+        base_domain = self.api_endpoint.replace('https://', '').split('/')[0]
+        # Remove -api suffix if present in endpoint, though endpoint usually doesn't have it for CALM
+        
+        return f"https://{base_domain}/launchpad#project-display?sap-app-origin-hint=&/projects/{project_id}/setup/generalInfo"
+
     # =========================================================================
     # Project API
     # =========================================================================
@@ -138,6 +157,12 @@ class CALMService:
             self._using_demo_data = False
             response = self._make_request('GET', '/api/calm-projects/v1/projects')
             projects = response.get('value', response.get('projects', []))
+            
+            # Enrich with deep links
+            for p in projects:
+                if 'id' in p:
+                    p['webUrl'] = self._get_project_url(p['id'])
+            
             return {'projects': projects, 'isDemo': False}
         except Exception as e:
             self._using_demo_data = True
@@ -157,6 +182,8 @@ class CALMService:
         """
         try:
             response = self._make_request('GET', f'/api/calm-projects/v1/projects/{project_id}')
+            if response:
+                 response['webUrl'] = self._get_project_url(project_id)
             return response
         except Exception as e:
             print(f"Error getting project: {e}")
@@ -356,17 +383,20 @@ class CALMService:
             {
                 'id': 'proj-1',
                 'name': 'S/4HANA Implementation Wave 2',
-                'description': 'Main implementation project for S/4HANA migration'
+                'description': 'Main implementation project for S/4HANA migration',
+                'webUrl': 'https://mygoconsultinginc-cloudalm.us10.alm.cloud.sap/launchpad#project-display?sap-app-origin-hint=&/projects/proj-1/setup/generalInfo'
             },
             {
                 'id': 'proj-2',
                 'name': 'Finance Transformation',
-                'description': 'Core finance module implementation'
+                'description': 'Core finance module implementation',
+                 'webUrl': 'https://mygoconsultinginc-cloudalm.us10.alm.cloud.sap/launchpad#project-display?sap-app-origin-hint=&/projects/proj-2/setup/generalInfo'
             },
             {
                 'id': 'proj-3',
                 'name': 'Supply Chain Optimization',
-                'description': 'SCM process improvements and automation'
+                'description': 'SCM process improvements and automation',
+                 'webUrl': 'https://mygoconsultinginc-cloudalm.us10.alm.cloud.sap/launchpad#project-display?sap-app-origin-hint=&/projects/proj-3/setup/generalInfo'
             }
         ]
     

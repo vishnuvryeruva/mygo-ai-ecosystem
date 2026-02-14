@@ -51,7 +51,7 @@ def list_sources() -> List[Dict]:
     if not sources:
         default_source = {
             'id': 'default-calm',
-            'name': 'Mygo Cloud ALM',
+            'name': 'Mygo Cloud ALM (Env)',
             'type': 'CALM',
             'status': 'connected',
             'lastSync': None,
@@ -88,7 +88,7 @@ def get_source(source_id: str) -> Optional[Dict]:
     if source_id == 'default-calm':
         return {
             'id': 'default-calm',
-            'name': 'Mygo Cloud ALM',
+            'name': 'Mygo Cloud ALM (Env)',
             'type': 'CALM',
             'status': 'connected',
             'lastSync': None,

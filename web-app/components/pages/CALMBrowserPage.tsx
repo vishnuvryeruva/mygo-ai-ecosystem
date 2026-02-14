@@ -37,7 +37,7 @@ interface Document {
     selected?: boolean
 }
 
-export default function CALMBrowserPage({ sourceId, sourceName, onBack }: CALMBrowserPageProps) {
+export default function CALMBrowserPage({ sourceId, sourceName, onBack, onSaveConfiguration }: CALMBrowserPageProps) {
     const [projects, setProjects] = useState<Project[]>([])
     const [scopes, setScopes] = useState<Scope[]>([])
     const [solutionProcesses, setSolutionProcesses] = useState<SolutionProcess[]>([])

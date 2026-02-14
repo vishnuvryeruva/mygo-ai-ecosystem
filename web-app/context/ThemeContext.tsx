@@ -12,24 +12,18 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-    const [theme, setTheme] = useState<Theme>('dark')
+    // Force light mode
+    const [theme] = useState<Theme>('light')
 
     useEffect(() => {
-        // Check localStorage or system preference
-        const savedTheme = localStorage.getItem('theme') as Theme
-        if (savedTheme) {
-            setTheme(savedTheme)
-        }
+        // Enforce light mode attribute
+        document.documentElement.setAttribute('data-theme', 'light')
+        localStorage.setItem('theme', 'light')
     }, [])
 
-    useEffect(() => {
-        // Update document attribute and localStorage
-        document.documentElement.setAttribute('data-theme', theme)
-        localStorage.setItem('theme', theme)
-    }, [theme])
-
     const toggleTheme = () => {
-        setTheme(prev => prev === 'dark' ? 'light' : 'dark')
+        // Disabled
+        console.log('Theme toggle is disabled (Light Mode Only)')
     }
 
     return (

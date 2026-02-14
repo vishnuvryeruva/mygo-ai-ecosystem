@@ -10,9 +10,77 @@ interface Message {
     timestamp: Date
 }
 
+interface AgentContext {
+    id: string
+    name: string
+    description: string
+    icon: string
+    gradient: string
+}
+
+const agentContextMap: Record<string, AgentContext> = {
+    'ask-yoda': {
+        id: 'ask-yoda',
+        name: 'Ask Yoda',
+        description: 'AI-Powered Knowledge Assistant',
+        icon: '🧠',
+        gradient: 'linear-gradient(135deg, #034354, #26464C)',
+    },
+    'solution-advisor': {
+        id: 'solution-advisor',
+        name: 'Solution Advisor',
+        description: 'AI-Powered Solution Recommendations',
+        icon: '💡',
+        gradient: 'linear-gradient(135deg, #0891b2, #06b6d4)',
+    },
+    'spec-assistant': {
+        id: 'spec-assistant',
+        name: 'Spec Agent',
+        description: 'Auto-generate Specifications',
+        icon: '📄',
+        gradient: 'linear-gradient(135deg, #7e22ce, #a855f7)',
+    },
+    'prompt-generator': {
+        id: 'prompt-generator',
+        name: 'Prompt Generator',
+        description: 'Generate Workflow Prompts',
+        icon: '⚡',
+        gradient: 'linear-gradient(135deg, #ea580c, #f97316)',
+    },
+    'test-case-generator': {
+        id: 'test-case-generator',
+        name: 'Test Case Generator',
+        description: 'Generate Test Cases',
+        icon: '🧪',
+        gradient: 'linear-gradient(135deg, #16a34a, #22c55e)',
+    },
+    'explain-code': {
+        id: 'explain-code',
+        name: 'Explain Code',
+        description: 'Intelligent Code Explanations',
+        icon: '💻',
+        gradient: 'linear-gradient(135deg, #2563eb, #3b82f6)',
+    },
+    'code-advisor': {
+        id: 'code-advisor',
+        name: 'Code Advisor',
+        description: 'Code Quality Analysis',
+        icon: '🛡️',
+        gradient: 'linear-gradient(135deg, #059669, #10b981)',
+    },
+    'sync-documents': {
+        id: 'sync-documents',
+        name: 'Sync Documents',
+        description: 'Sync from All Sources',
+        icon: '🔄',
+        gradient: 'linear-gradient(135deg, #034354, #0891b2)',
+    },
+}
+
 interface ChatbotWidgetProps {
     isOpen: boolean
     isMinimized: boolean
+    activeAgent?: string | null
     onToggleOpen: () => void
     onToggleMinimize: () => void
     onClose: () => void
@@ -21,6 +89,7 @@ interface ChatbotWidgetProps {
 export default function ChatbotWidget({
     isOpen,
     isMinimized,
+    activeAgent,
     onToggleOpen,
     onToggleMinimize,
     onClose
@@ -29,6 +98,8 @@ export default function ChatbotWidget({
     const [input, setInput] = useState('')
     const [loading, setLoading] = useState(false)
     const messagesEndRef = useRef<HTMLDivElement>(null)
+
+    const agent = activeAgent ? agentContextMap[activeAgent] || agentContextMap['ask-yoda'] : agentContextMap['ask-yoda']
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -63,7 +134,7 @@ export default function ChatbotWidget({
             }
             setMessages(prev => [...prev, assistantMessage])
         } catch (error) {
-            console.error('Error asking Yoda:', error)
+            console.error('Error:', error)
             const errorMessage: Message = {
                 id: `error-${Date.now()}`,
                 type: 'assistant',
@@ -76,28 +147,25 @@ export default function ChatbotWidget({
         }
     }
 
-    // Don't render anything if completely closed
     if (!isOpen && !isMinimized) return null
 
-    // Minimized bubble state
+    // Minimized state - show Yoda agent icon
     if (isMinimized) {
         return (
             <div className="fixed bottom-6 right-6 z-40">
                 <button
                     onClick={onToggleMinimize}
-                    className="group relative bg-gradient-to-r from-indigo-500 to-purple-500 text-white rounded-full p-4 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-110"
-                    title="Open Ask Yoda"
-                    style={{ boxShadow: '0 0 30px rgba(99, 102, 241, 0.5)' }}
+                    className="yoda-mini-btn"
+                    title={agent.name}
+                    style={{ background: agent.gradient }}
                 >
-                    <div className="text-3xl">🧠</div>
+                    <div className="yoda-mini-icon">{agent.icon}</div>
+                    <div className="yoda-mini-pulse" />
                     {messages.length > 0 && (
-                        <div className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
+                        <div className="yoda-mini-badge">
                             {messages.filter(m => m.type === 'assistant').length}
                         </div>
                     )}
-                    <div className="absolute bottom-full right-0 mb-2 bg-gray-800 text-white text-sm px-3 py-2 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap">
-                        Ask Yoda
-                    </div>
                 </button>
             </div>
         )
@@ -105,32 +173,24 @@ export default function ChatbotWidget({
 
     // Expanded chat state
     return (
-        <div className="fixed bottom-6 right-6 z-40 w-96 max-w-[calc(100vw-3rem)] animate-slideInUp">
-            <div className="glass rounded-2xl shadow-2xl overflow-hidden border border-white/10" style={{ boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4), 0 0 60px rgba(99, 102, 241, 0.2)' }}>
+        <div className="chatbot-container">
+            <div className="chatbot-panel">
                 {/* Header */}
-                <div className="bg-gradient-to-r from-indigo-500 to-purple-500 p-4 flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                        <div className="text-2xl">🧠</div>
+                <div className="chatbot-header" style={{ background: agent.gradient }}>
+                    <div className="chatbot-header-info">
+                        <div className="chatbot-header-icon">{agent.icon}</div>
                         <div>
-                            <h3 className="text-white font-semibold text-lg">Ask Yoda</h3>
-                            <p className="text-indigo-100 text-xs">AI-Powered Knowledge Assistant</p>
+                            <h3 className="chatbot-header-title">{agent.name}</h3>
+                            <p className="chatbot-header-desc">{agent.description}</p>
                         </div>
                     </div>
-                    <div className="flex items-center space-x-2">
-                        <button
-                            onClick={onToggleMinimize}
-                            className="text-white/80 hover:text-white hover:bg-white/10 rounded-lg p-1.5 transition-colors"
-                            title="Minimize"
-                        >
+                    <div className="chatbot-header-actions">
+                        <button onClick={onToggleMinimize} className="chatbot-header-btn" title="Minimize">
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                             </svg>
                         </button>
-                        <button
-                            onClick={onClose}
-                            className="text-white/80 hover:text-white hover:bg-white/10 rounded-lg p-1.5 transition-colors"
-                            title="Close"
-                        >
+                        <button onClick={onClose} className="chatbot-header-btn" title="Close">
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                             </svg>
@@ -138,17 +198,15 @@ export default function ChatbotWidget({
                     </div>
                 </div>
 
-                {/* Messages Area */}
-                <div className="h-96 overflow-y-auto p-4 space-y-4" style={{ background: 'var(--bg-sidebar)' }}>
+                {/* Messages */}
+                <div className="chatbot-messages">
                     {messages.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full text-center px-4">
-                            <div className="text-6xl mb-4">🧠</div>
-                            <h4 className="text-heading font-semibold mb-2">Welcome to Ask Yoda!</h4>
-                            <p className="text-muted text-sm">
-                                Query historical blueprints, specs, tickets, and test cases. Ask me anything!
-                            </p>
-                            <div className="mt-4 glass-subtle p-3 text-xs text-indigo-300">
-                                💡 Tip: Upload documents via the <strong>Document Upload</strong> tile to expand my knowledge base.
+                        <div className="chatbot-welcome">
+                            <div className="chatbot-welcome-icon">{agent.icon}</div>
+                            <h4>Welcome to {agent.name}!</h4>
+                            <p>{agent.description}</p>
+                            <div className="chatbot-welcome-tip">
+                                💡 Tip: Ask me anything about your SAP projects and knowledge base.
                             </div>
                         </div>
                     ) : (
@@ -156,31 +214,23 @@ export default function ChatbotWidget({
                             {messages.map((message) => (
                                 <div
                                     key={message.id}
-                                    className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
+                                    className={`chatbot-msg ${message.type === 'user' ? 'chatbot-msg-user' : 'chatbot-msg-assistant'}`}
                                 >
-                                    <div
-                                        className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${message.type === 'user'
-                                            ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white'
-                                            : 'glass-subtle text-heading'
-                                            }`}
-                                    >
-                                        <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
-                                        <p
-                                            className={`text-xs mt-1 ${message.type === 'user' ? 'text-indigo-100' : 'text-muted'
-                                                }`}
-                                        >
+                                    <div className={`chatbot-msg-bubble ${message.type === 'user' ? 'chatbot-msg-bubble-user' : 'chatbot-msg-bubble-assistant'}`}>
+                                        <p>{message.content}</p>
+                                        <span className="chatbot-msg-time">
                                             {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                        </p>
+                                        </span>
                                     </div>
                                 </div>
                             ))}
                             {loading && (
-                                <div className="flex justify-start">
-                                    <div className="glass-subtle rounded-2xl px-4 py-3">
-                                        <div className="flex items-center space-x-2">
-                                            <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                                            <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                                            <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                                <div className="chatbot-msg chatbot-msg-assistant">
+                                    <div className="chatbot-msg-bubble chatbot-msg-bubble-assistant">
+                                        <div className="chatbot-typing">
+                                            <div className="chatbot-typing-dot" style={{ animationDelay: '0ms' }} />
+                                            <div className="chatbot-typing-dot" style={{ animationDelay: '150ms' }} />
+                                            <div className="chatbot-typing-dot" style={{ animationDelay: '300ms' }} />
                                         </div>
                                     </div>
                                 </div>
@@ -190,9 +240,9 @@ export default function ChatbotWidget({
                     )}
                 </div>
 
-                {/* Input Area */}
-                <div className="p-4 border-t border-white/10" style={{ background: 'var(--bg-sidebar)' }}>
-                    <form onSubmit={handleSubmit} className="flex items-end space-x-2">
+                {/* Input */}
+                <div className="chatbot-input-area">
+                    <form onSubmit={handleSubmit} className="chatbot-input-form">
                         <input
                             type="text"
                             value={input}
@@ -203,14 +253,14 @@ export default function ChatbotWidget({
                                     handleSubmit(e)
                                 }
                             }}
-                            placeholder="Ask a question..."
-                            className="input flex-1"
+                            placeholder={`Ask ${agent.name}...`}
+                            className="chatbot-input"
                             disabled={loading}
                         />
                         <button
                             type="submit"
                             disabled={loading || !input.trim()}
-                            className="btn btn-primary px-4"
+                            className="chatbot-send-btn"
                         >
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
@@ -219,24 +269,6 @@ export default function ChatbotWidget({
                     </form>
                 </div>
             </div>
-
-            {/* Custom animations */}
-            <style jsx>{`
-        @keyframes slideInUp {
-          from {
-            transform: translateY(100%);
-            opacity: 0;
-          }
-          to {
-            transform: translateY(0);
-            opacity: 1;
-          }
-        }
-
-        .animate-slideInUp {
-          animation: slideInUp 0.3s ease-out;
-        }
-      `}</style>
         </div>
     )
 }
