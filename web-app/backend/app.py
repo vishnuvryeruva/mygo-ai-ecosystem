@@ -672,6 +672,7 @@ def calm_list_documents(source_id):
     try:
         process_id = request.args.get('processId')
         doc_type = request.args.get('type')
+        project_id = request.args.get('projectId')
         
         source = source_config_service.get_source(source_id)
         if not source:
@@ -680,7 +681,8 @@ def calm_list_documents(source_id):
         service = get_calm_service(source.get('config'))
         result = service.list_documents(  # Returns {documents, isDemo, error?}
             process_id=process_id,
-            document_type=doc_type
+            document_type=doc_type,
+            project_id=project_id
         )
         return jsonify(result)
     except Exception as e:

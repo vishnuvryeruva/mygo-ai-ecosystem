@@ -1,26 +1,35 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import axios from 'axios'
 import AIAgentsDropdown from '@/components/AIAgentsDropdown'
 
 interface DocumentHubPageProps {
     onAgentSelect: (agentId: string) => void
 }
 
-const sampleDocuments = [
-    { id: '1', source: 'CALM', type: 'Solution Document', name: 'S4HANA Migration Strategy v2.1', updatedBy: 'Ankit Sharma', updatedOn: '2026-02-05', project: 'Project Phoenix' },
-    { id: '2', source: 'SharePoint', type: 'Technical Spec', name: 'API Gateway Architecture', updatedBy: 'Priya Patel', updatedOn: '2026-02-04', project: 'Project Atlas' },
-    { id: '3', source: 'Jira', type: 'Change document', name: 'CR-4521 Middleware Update', updatedBy: 'David Chen', updatedOn: '2026-02-03', project: 'Project Phoenix' },
-    { id: '4', source: 'Solman', type: 'Decision Paper', name: 'Cloud vs On-Prem Assessment', updatedBy: 'Sarah Kim', updatedOn: '2026-02-02', project: 'Project Nebula' },
-    { id: '5', source: 'CALM', type: 'Functional Spec', name: 'User Auth Module FS', updatedBy: 'Marco Rossi', updatedOn: '2026-02-01', project: 'Project Atlas' },
-    { id: '6', source: 'SharePoint', type: 'Technical Spec', name: 'Data Pipeline Architecture', updatedBy: 'Ankit Sharma', updatedOn: '2026-01-30', project: 'Project Nebula' },
-    { id: '7', source: 'Jira', type: 'Change document', name: 'CR-4587 Auth Service Refactor', updatedBy: 'Priya Patel', updatedOn: '2026-01-28', project: 'Project Phoenix' },
-    { id: '8', source: 'CALM', type: 'Solution Document', name: 'Integration Testing Framework', updatedBy: 'Anna Müller', updatedOn: '2026-01-28', project: 'Project Phoenix' },
-    { id: '9', source: 'Solman', type: 'Functional Spec', name: 'Payment Gateway Module', updatedBy: 'David Chen', updatedOn: '2026-01-27', project: 'Project Atlas' },
-    { id: '10', source: 'SharePoint', type: 'Decision Paper', name: 'Microservices vs Monolith', updatedBy: 'Sarah Kim', updatedOn: '2026-01-25', project: 'Project Nebula' },
-    { id: '11', source: 'CALM', type: 'Technical Spec', name: 'CI/CD Pipeline Design', updatedBy: 'Marco Rossi', updatedOn: '2026-01-24', project: 'Project Atlas' },
-    { id: '12', source: 'Jira', type: 'Change document', name: 'CR-4602 Performance Tuning', updatedBy: 'Anna Müller', updatedOn: '2026-01-22', project: 'Project Phoenix' },
-]
+interface Source {
+    id: string
+    name: string
+    type: string
+}
+
+interface Project {
+    id: string
+    name: string
+    webUrl?: string
+}
+
+interface Document {
+    id: string
+    name: string
+    type: string
+    source: string
+    project: string
+    updatedBy: string
+    updatedOn: string
+    webUrl?: string
+}
 
 const sourceColors: Record<string, { bg: string; text: string }> = {
     CALM: { bg: '#dbeafe', text: '#1e40af' },
@@ -30,11 +39,145 @@ const sourceColors: Record<string, { bg: string; text: string }> = {
 }
 
 export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps) {
+    const [documents, setDocuments] = useState<Document[]>([])
+    const [isLoading, setIsLoading] = useState(true)
+
+    // Filters
     const [sourceFilter, setSourceFilter] = useState('All Sources')
     const [typeFilter, setTypeFilter] = useState('All Types')
     const [projectFilter, setProjectFilter] = useState('All Projects')
 
-    const filteredDocs = sampleDocuments.filter(doc => {
+    // Sync Modal State
+    const [showSyncModal, setShowSyncModal] = useState(false)
+    const [syncStep, setSyncStep] = useState(1) // 1: Source, 2: Project, 3: Fetching/Confirm, 4: Result
+
+    // Sync Data State
+    const [sources, setSources] = useState<Source[]>([])
+    const [selectedSource, setSelectedSource] = useState('')
+
+    const [projects, setProjects] = useState<Project[]>([])
+    const [selectedProject, setSelectedProject] = useState('')
+
+    const [docsToSync, setDocsToSync] = useState<any[]>([])
+    const [isSyncing, setIsSyncing] = useState(false)
+    const [syncResult, setSyncResult] = useState<{ message: string; count: number } | null>(null)
+
+    // Load initial documents
+    useEffect(() => {
+        fetchDocuments()
+    }, [])
+
+    // Load sources when modal opens
+    useEffect(() => {
+        if (showSyncModal && sources.length === 0) {
+            fetchSources()
+        }
+    }, [showSyncModal])
+
+    // Load projects when source selected
+    useEffect(() => {
+        if (selectedSource && syncStep === 2) {
+            fetchProjects(selectedSource)
+        }
+    }, [selectedSource, syncStep])
+
+    const fetchDocuments = async () => {
+        setIsLoading(true)
+        try {
+            const res = await axios.get('http://localhost:5001/api/documents')
+            // Map backend docs to frontend format if needed
+            // Assuming backend returns a list of docs with source, project etc.
+            // If backend docs are from RAG, they might have metadata
+            const mappedDocs = res.data.documents.map((doc: any) => ({
+                id: doc.id || doc.name || doc.filename, // Fallback
+                name: doc.name || doc.metadata?.name || doc.filename,
+                type: doc.type || doc.metadata?.documentType || 'Document',
+                source: doc.source || doc.metadata?.source || 'File Upload',
+                project: doc.project || doc.metadata?.project || 'N/A',
+                updatedBy: doc.updatedBy || doc.metadata?.updatedBy || 'System',
+                updatedOn: doc.updatedOn || (doc.metadata?.updatedAt ? new Date(doc.metadata.updatedAt).toLocaleDateString() : 'N/A'),
+                webUrl: doc.webUrl || doc.metadata?.webUrl
+            }))
+            setDocuments(mappedDocs)
+        } catch (err) {
+            console.error('Failed to fetch documents:', err)
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    const fetchSources = async () => {
+        try {
+            const res = await axios.get('http://localhost:5001/api/sources')
+            setSources(res.data.sources || [])
+        } catch (err) {
+            console.error('Failed to fetch sources:', err)
+        }
+    }
+
+    const fetchProjects = async (sourceId: string) => {
+        setProjects([]) // Clear previous
+        try {
+            const res = await axios.get(`http://localhost:5001/api/calm/${sourceId}/projects`)
+            setProjects(res.data.projects || [])
+        } catch (err) {
+            console.error('Failed to fetch projects:', err)
+        }
+    }
+
+    const handleSyncNext = async () => {
+        if (syncStep === 1 && selectedSource) {
+            setSyncStep(2)
+        } else if (syncStep === 2 && selectedProject) {
+            setSyncStep(3)
+            // Fetch potential docs to sync
+            setIsSyncing(true)
+            try {
+                const res = await axios.get(`http://localhost:5001/api/calm/${selectedSource}/documents?projectId=${selectedProject}`)
+                setDocsToSync(res.data.documents || [])
+            } catch (err) {
+                console.error('Failed to fetch docs from source:', err)
+            } finally {
+                setIsSyncing(false)
+            }
+        } else if (syncStep === 3) {
+            // Perform actual sync
+            setIsSyncing(true)
+            try {
+                const res = await axios.post('http://localhost:5001/api/sync', {
+                    sourceId: selectedSource,
+                    documents: docsToSync.map(doc => ({
+                        ...doc,
+                        metadata: {
+                            ...doc,
+                            source: sources.find(s => s.id === selectedSource)?.type || 'CALM',
+                            project: projects.find(p => p.id === selectedProject)?.name || 'Unknown Project'
+                        }
+                    }))
+                })
+                setSyncResult({ message: res.data.message, count: res.data.results?.length || 0 })
+                setSyncStep(4)
+                fetchDocuments() // Refresh main list
+            } catch (err) {
+                console.error('Sync failed:', err)
+                alert('Sync failed. Check console.')
+            } finally {
+                setIsSyncing(false)
+            }
+        }
+    }
+
+    const handleResetSync = () => {
+        setShowSyncModal(false)
+        setSyncStep(1)
+        setSelectedSource('')
+        setSelectedProject('')
+        setSyncResult(null)
+        setDocsToSync([])
+    }
+
+    // Filter Logic
+    const filteredDocs = documents.filter(doc => {
         if (sourceFilter !== 'All Sources' && doc.source !== sourceFilter) return false
         if (typeFilter !== 'All Types' && doc.type !== typeFilter) return false
         if (projectFilter !== 'All Projects' && doc.project !== projectFilter) return false
@@ -60,7 +203,18 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                         <p className="doc-hub-subtitle">Manage and explore your project documents across all sources</p>
                     </div>
                 </div>
-                <AIAgentsDropdown onAgentSelect={onAgentSelect} />
+                <div className="flex gap-3">
+                    <button className="btn btn-primary" onClick={() => setShowSyncModal(true)}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 8 }}>
+                            <path d="M21 2v6h-6" />
+                            <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                            <path d="M3 22v-6h6" />
+                            <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                        </svg>
+                        Sync Source
+                    </button>
+                    <AIAgentsDropdown onAgentSelect={onAgentSelect} />
+                </div>
             </div>
 
             {/* Filters */}
@@ -110,47 +264,192 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
 
             {/* Document Table */}
             <div className="doc-hub-table-wrapper">
-                <table className="doc-hub-table">
-                    <thead>
-                        <tr>
-                            <th>SOURCE</th>
-                            <th>TYPE</th>
-                            <th>DOCUMENT NAME</th>
-                            <th>UPDATED BY</th>
-                            <th>UPDATED ON</th>
-                            <th>PROJECT</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {filteredDocs.map((doc) => (
-                            <tr key={doc.id}>
-                                <td>
-                                    <span
-                                        className="doc-source-badge"
-                                        style={{
-                                            backgroundColor: sourceColors[doc.source]?.bg || '#f1f5f9',
-                                            color: sourceColors[doc.source]?.text || '#475569',
-                                        }}
-                                    >
-                                        {doc.source}
-                                    </span>
-                                </td>
-                                <td className="doc-type-cell">{doc.type}</td>
-                                <td className="doc-name-cell">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                                        <polyline points="14 2 14 8 20 8" />
-                                    </svg>
-                                    <span>{doc.name}</span>
-                                </td>
-                                <td>{doc.updatedBy}</td>
-                                <td>{doc.updatedOn}</td>
-                                <td>{doc.project}</td>
+                {isLoading ? (
+                    <div className="p-8 text-center text-gray-500">Loading documents...</div>
+                ) : (
+                    <table className="doc-hub-table">
+                        <thead>
+                            <tr>
+                                <th>SOURCE</th>
+                                <th>TYPE</th>
+                                <th>DOCUMENT NAME</th>
+                                <th>UPDATED BY</th>
+                                <th>UPDATED ON</th>
+                                <th>PROJECT</th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            {filteredDocs.map((doc) => (
+                                <tr key={doc.id}>
+                                    <td>
+                                        <span
+                                            className="doc-source-badge"
+                                            style={{
+                                                backgroundColor: sourceColors[doc.source]?.bg || '#f1f5f9',
+                                                color: sourceColors[doc.source]?.text || '#475569',
+                                            }}
+                                        >
+                                            {doc.source}
+                                        </span>
+                                    </td>
+                                    <td className="doc-type-cell">{doc.type}</td>
+                                    <td className="doc-name-cell">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                                            <polyline points="14 2 14 8 20 8" />
+                                        </svg>
+                                        {doc.webUrl ? (
+                                            <a href={doc.webUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                                                {doc.name}
+                                            </a>
+                                        ) : (
+                                            <span>{doc.name}</span>
+                                        )}
+                                    </td>
+                                    <td>{doc.updatedBy}</td>
+                                    <td>{doc.updatedOn}</td>
+                                    <td>{doc.project}</td>
+                                </tr>
+                            ))}
+                            {filteredDocs.length === 0 && (
+                                <tr>
+                                    <td colSpan={6} className="text-center p-8 text-gray-400">
+                                        No documents found. Try adjusting filters or syncing a source.
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                )}
             </div>
+
+            {/* Sync Modal */}
+            {showSyncModal && (
+                <div className="settings-modal-overlay" onClick={() => setShowSyncModal(false)}>
+                    <div className="settings-modal sync-modal" onClick={e => e.stopPropagation()}>
+                        <div className="settings-modal-header">
+                            <div>
+                                <h3 className="settings-modal-title">Sync From Source</h3>
+                                <p className="settings-modal-desc">Step {syncStep} of 3: {
+                                    syncStep === 1 ? 'Select Source' :
+                                        syncStep === 2 ? 'Select Project' :
+                                            syncStep === 3 ? 'Confirm Sync' : 'Complete'
+                                }</p>
+                            </div>
+                            <button className="settings-modal-close" onClick={() => setShowSyncModal(false)}>×</button>
+                        </div>
+
+                        <div className="settings-modal-body">
+                            {syncStep === 1 && (
+                                <div className="settings-form-group">
+                                    <label>Select Source</label>
+                                    <select
+                                        value={selectedSource}
+                                        onChange={e => setSelectedSource(e.target.value)}
+                                        className="w-full p-2 border rounded-lg"
+                                    >
+                                        <option value="">-- Choose a source --</option>
+                                        {sources.map(s => (
+                                            <option key={s.id} value={s.id}>{s.name} ({s.type})</option>
+                                        ))}
+                                    </select>
+                                    {sources.length === 0 && (
+                                        <p className="text-sm text-gray-500 mt-2">No sources configured. Go to Settings to add one.</p>
+                                    )}
+                                </div>
+                            )}
+
+                            {syncStep === 2 && (
+                                <div className="settings-form-group">
+                                    <label>Select Project</label>
+                                    {projects.length === 0 ? (
+                                        <p>Loading projects...</p>
+                                    ) : (
+                                        <select
+                                            value={selectedProject}
+                                            onChange={e => setSelectedProject(e.target.value)}
+                                            className="w-full p-2 border rounded-lg"
+                                        >
+                                            <option value="">-- Choose a project --</option>
+                                            {projects.map(p => (
+                                                <option key={p.id} value={p.id}>{p.name}</option>
+                                            ))}
+                                        </select>
+                                    )}
+                                </div>
+                            )}
+
+                            {syncStep === 3 && (
+                                <div>
+                                    {isSyncing ? (
+                                        <div className="text-center p-4">
+                                            <div className="animate-spin h-8 w-8 border-4 border-blue-500 rounded-full border-t-transparent mx-auto mb-4"></div>
+                                            <p>Fetching documents...</p>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <p className="mb-4">Found <strong>{docsToSync.length}</strong> documents in this project.</p>
+                                            <div className="max-h-60 overflow-y-auto border rounded p-2 bg-gray-50">
+                                                {docsToSync.map(doc => (
+                                                    <div key={doc.id} className="text-sm py-1 border-b last:border-0 flex justify-between">
+                                                        <span>{doc.name}</span>
+                                                        <span className="text-gray-500 text-xs">{doc.documentType || doc.type}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <p className="mt-4 text-sm text-gray-600">Click Sync to import these documents into the Knowledge Base.</p>
+                                        </>
+                                    )}
+                                </div>
+                            )}
+
+                            {syncStep === 4 && (
+                                <div className="text-center p-8">
+                                    <div className="text-green-500 text-4xl mb-4">✓</div>
+                                    <h3 className="text-xl font-bold mb-2">Sync Complete!</h3>
+                                    <p>{syncResult?.message}</p>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="settings-modal-footer">
+                            {syncStep < 4 && (
+                                <button className="btn btn-secondary" onClick={() => {
+                                    if (syncStep > 1) setSyncStep(syncStep - 1)
+                                    else setShowSyncModal(false)
+                                }}>Back</button>
+                            )}
+
+                            {syncStep < 3 && (
+                                <button
+                                    className="btn btn-primary"
+                                    onClick={handleSyncNext}
+                                    disabled={
+                                        (syncStep === 1 && !selectedSource) ||
+                                        (syncStep === 2 && !selectedProject)
+                                    }
+                                >
+                                    Next
+                                </button>
+                            )}
+
+                            {syncStep === 3 && (
+                                <button
+                                    className="btn btn-primary"
+                                    onClick={handleSyncNext}
+                                    disabled={isSyncing}
+                                >
+                                    {isSyncing ? 'Syncing...' : 'Sync Now'}
+                                </button>
+                            )}
+
+                            {syncStep === 4 && (
+                                <button className="btn btn-primary" onClick={handleResetSync}>Close</button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

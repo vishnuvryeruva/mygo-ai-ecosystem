@@ -55,15 +55,23 @@ class RAGService:
     def add_placeholder_document(self, doc_metadata):
         """Add a placeholder document to the database (for synced external files)"""
         try:
-            filename = doc_metadata.get('name', 'unknown')
-            doc_type = doc_metadata.get('type', 'unknown')
+            # Handle nested metadata if present (frontend sends it nested)
+            meta = doc_metadata.get('metadata', doc_metadata)
+            
+            filename = meta.get('name', doc_metadata.get('name', 'unknown'))
+            doc_type = meta.get('type') or meta.get('documentType') or 'Document'
+            source = meta.get('source', 'CALM')
+            project = meta.get('project', 'N/A')
+            updated_by = meta.get('updatedBy', 'System')
+            updated_on = meta.get('updatedOn', meta.get('lastModified', 'N/A'))
+            web_url = meta.get('webUrl', '')
             
             # Check for duplicates
             if self.check_duplicate(filename):
                 return {"status": "skipped", "message": "Document already exists"}
             
             # Create a placeholder chunk
-            placeholder_text = f"External document synced from Cloud ALM. Type: {doc_type}. This is a placeholder for metadata purposes."
+            placeholder_text = f"External document synced from {source}. Project: {project}. Type: {doc_type}. This is a placeholder for metadata purposes."
             
             # Create embedding
             embedding = self._create_embedding(placeholder_text)
@@ -73,7 +81,15 @@ class RAGService:
                 embeddings=[embedding],
                 documents=[placeholder_text],
                 ids=[f"{filename}_0"],  # chunk 0
-                metadatas=[{"source": "CALM", "type": doc_type}]
+                metadatas=[{
+                    "source": source,
+                    "type": doc_type,
+                    "project": project,
+                    "updatedBy": updated_by,
+                    "updatedOn": str(updated_on),
+                    "webUrl": web_url,
+                    "is_placeholder": True
+                }]
             )
             
             return {"status": "success", "message": "Placeholder added"}
@@ -138,7 +154,14 @@ class RAGService:
                     self.collection.add(
                         embeddings=[embedding],
                         documents=[chunk],
-                        ids=[f"{file.filename}_{i}"]
+                        ids=[f"{file.filename}_{i}"],
+                        metadatas=[{
+                            "source": "File Upload",
+                            "type": self._get_file_type(file.filename),
+                            "project": "N/A",
+                            "updatedBy": "System", 
+                            "updatedOn": "N/A"
+                        }]
                     )
                 
                 results.append({
@@ -148,6 +171,8 @@ class RAGService:
                     "was_duplicate": is_duplicate
                 })
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 results.append({
                     "filename": file.filename,
                     "status": "error",
@@ -229,6 +254,7 @@ Please provide a comprehensive answer based on the context above."""
             result = self.collection.get()
             ids = result['ids']
             documents = result.get('documents', [])
+            metadatas = result.get('metadatas', [])
             
             # Extract unique filenames and count chunks
             file_info = {}
@@ -237,17 +263,25 @@ Please provide a comprehensive answer based on the context above."""
                 parts = id.rsplit('_', 1)
                 if len(parts) > 0:
                     filename = parts[0]
+                    metadata = metadatas[i] if metadatas and i < len(metadatas) else {}
+                    
                     if filename not in file_info:
                         file_info[filename] = {
                             'name': filename,
-                            'type': self._get_file_type(filename),
+                            'type': metadata.get('type') or self._get_file_type(filename),
+                            'source': metadata.get('source', 'File Upload'),
+                            'project': metadata.get('project', 'N/A'),
+                            'updatedBy': metadata.get('updatedBy', 'System'),
+                            'updatedOn': metadata.get('updatedOn', 'N/A'),
+                            'webUrl': metadata.get('webUrl'),
                             'chunks': 0,
                             'estimated_size': 0
                         }
                     file_info[filename]['chunks'] += 1
                     # Estimate size from document content
                     if i < len(documents):
-                        file_info[filename]['estimated_size'] += len(documents[i])
+                        doc_len = len(documents[i]) if documents[i] else 0
+                        file_info[filename]['estimated_size'] += doc_len
             
             # Convert to list with formatted size
             doc_list = []
@@ -256,16 +290,20 @@ Please provide a comprehensive answer based on the context above."""
                 doc_list.append({
                     'name': info['name'],
                     'type': info['type'],
+                    'source': info['source'],
+                    'project': info['project'],
+                    'updatedBy': info['updatedBy'],
+                    'updatedOn': info['updatedOn'],
+                    'webUrl': info.get('webUrl'),
                     'size': f"{size_kb:.1f} KB" if size_kb >= 1 else f"{info['estimated_size']} bytes",
-                    'chunks': info['chunks'],
-                    # Note: ChromaDB doesn't store upload timestamp, so we can't provide actual dates
-                    # In a production system, you'd store this in metadata during ingest
-                    'uploadDate': 'N/A'
+                    'chunks': info['chunks']
                 })
             
             return doc_list
         except Exception as e:
             print(f"Error listing documents: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def _get_file_type(self, filename):
