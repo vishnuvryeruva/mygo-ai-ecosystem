@@ -156,7 +156,12 @@ class CALMService:
         try:
             self._using_demo_data = False
             response = self._make_request('GET', '/api/calm-projects/v1/projects')
-            projects = response.get('value', response.get('projects', []))
+            
+            # Handle both list and dict responses
+            if isinstance(response, list):
+                projects = response
+            else:
+                projects = response.get('value', response.get('projects', []))
             
             # Enrich with deep links
             for p in projects:
