@@ -109,6 +109,9 @@ export default function SettingsPage() {
     const [showAddConnection, setShowAddConnection] = useState(false)
     const [connectionForm, setConnectionForm] = useState<ConnectionForm>(emptyConnection)
     const [isLoadingSources, setIsLoadingSources] = useState(false)
+    const [isTestingConnection, setIsTestingConnection] = useState(false)
+    const [isSavingConnection, setIsSavingConnection] = useState(false)
+    const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
 
     /* Roles state */
     const [roles, setRoles] = useState<Role[]>(defaultRoles)
@@ -125,6 +128,13 @@ export default function SettingsPage() {
         }
     }, [activeTab])
 
+    useEffect(() => {
+        if (!showAddConnection) {
+            setConnectionForm(emptyConnection)
+            setTestResult(null)
+        }
+    }, [showAddConnection])
+
     const refreshSources = async () => {
         setIsLoadingSources(true)
         try {
@@ -138,9 +148,47 @@ export default function SettingsPage() {
     }
 
     /* ── Helpers ────────────────────────────────────────── */
-    const handleAddSource = async () => {
-        if (!connectionForm.sourceName || !connectionForm.apiEndpoint) return
+    const handleTestConnection = async () => {
+        if (!connectionForm.apiEndpoint || !connectionForm.tokenUrl || !connectionForm.clientId || !connectionForm.clientSecret) {
+            setTestResult({ success: false, message: 'Please fill in all required fields' })
+            return
+        }
 
+        setIsTestingConnection(true)
+        setTestResult(null)
+
+        try {
+            const response = await axios.post('http://localhost:5001/api/sources/test-connection', {
+                type: 'CALM',
+                apiEndpoint: connectionForm.apiEndpoint,
+                tokenUrl: connectionForm.tokenUrl,
+                clientId: connectionForm.clientId,
+                clientSecret: connectionForm.clientSecret
+            })
+
+            if (response.data.success) {
+                setTestResult({ success: true, message: 'Connection successful! You can now save this source.' })
+            } else {
+                setTestResult({ success: false, message: response.data.error || 'Connection failed' })
+            }
+        } catch (err: any) {
+            console.error('Test connection error:', err)
+            setTestResult({ 
+                success: false, 
+                message: err.response?.data?.error || 'Failed to test connection. Please check your credentials.' 
+            })
+        } finally {
+            setIsTestingConnection(false)
+        }
+    }
+
+    const handleAddSource = async () => {
+        if (!connectionForm.sourceName || !connectionForm.apiEndpoint) {
+            alert('Please fill in at least Source Name and API Endpoint')
+            return
+        }
+
+        setIsSavingConnection(true)
         try {
             await axios.post('http://localhost:5001/api/sources', {
                 name: connectionForm.sourceName,
@@ -154,10 +202,13 @@ export default function SettingsPage() {
 
             await refreshSources()
             setConnectionForm(emptyConnection)
+            setTestResult(null)
             setShowAddConnection(false)
-        } catch (err) {
+        } catch (err: any) {
             console.error('Failed to add source:', err)
-            alert('Failed to add source. Please check the console.')
+            alert(err.response?.data?.error || 'Failed to add source. Please check the console.')
+        } finally {
+            setIsSavingConnection(false)
         }
     }
 
@@ -319,14 +370,20 @@ export default function SettingsPage() {
 
                         {/* Add Connection Modal */}
                         {showAddConnection && (
-                            <div className="settings-modal-overlay" onClick={() => setShowAddConnection(false)}>
+                            <div className="settings-modal-overlay" onClick={() => {
+                                setShowAddConnection(false)
+                                setTestResult(null)
+                            }}>
                                 <div className="settings-modal" onClick={e => e.stopPropagation()}>
                                     <div className="settings-modal-header">
                                         <div>
                                             <h3 className="settings-modal-title">Add Connection</h3>
                                             <p className="settings-modal-desc">Configure the source connection details</p>
                                         </div>
-                                        <button className="settings-modal-close" onClick={() => setShowAddConnection(false)}>×</button>
+                                        <button className="settings-modal-close" onClick={() => {
+                                            setShowAddConnection(false)
+                                            setTestResult(null)
+                                        }}>×</button>
                                     </div>
                                     <div className="settings-modal-body">
                                         <div className="settings-form-group">
@@ -384,10 +441,32 @@ export default function SettingsPage() {
                                                 onChange={e => setConnectionForm({ ...connectionForm, clientSecret: e.target.value })}
                                             />
                                         </div>
+
+                                        {/* Test Result Display */}
+                                        {testResult && (
+                                            <div className={`settings-test-result ${testResult.success ? 'success' : 'error'}`}>
+                                                <span className="settings-test-icon">
+                                                    {testResult.success ? '✓' : '✗'}
+                                                </span>
+                                                <span>{testResult.message}</span>
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="settings-modal-footer">
-                                        <button className="btn btn-primary" onClick={handleAddSource}>Save Connection</button>
-                                        <button className="btn btn-secondary">Test</button>
+                                        <button 
+                                            className="btn btn-primary" 
+                                            onClick={handleAddSource}
+                                            disabled={isSavingConnection}
+                                        >
+                                            {isSavingConnection ? 'Saving...' : 'Save Connection'}
+                                        </button>
+                                        <button 
+                                            className="btn btn-secondary" 
+                                            onClick={handleTestConnection}
+                                            disabled={isTestingConnection}
+                                        >
+                                            {isTestingConnection ? 'Testing...' : 'Test'}
+                                        </button>
                                     </div>
                                 </div>
                             </div>

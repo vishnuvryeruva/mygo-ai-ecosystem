@@ -12,21 +12,24 @@ import json
 class CALMService:
     """Service for interacting with SAP Cloud ALM APIs"""
     
-    def __init__(self, config: Optional[Dict] = None):
+    def __init__(self, config: Optional[Dict] = None, use_env_fallback: bool = True):
         """
         Initialize CALM Service with configuration
         
         Args:
             config: Optional configuration dict. If not provided or keys missing, uses environment variables.
+            use_env_fallback: If True, falls back to environment variables. If False, only uses provided config.
         """
         config = config or {}
         
-        # Helper to get value from config, then env var, then default
+        # Helper to get value from config, then env var (if allowed), then default
         def get_conf(key, env_var, default=''):
             val = config.get(key)
             if val and str(val).strip(): # If value exists and is not empty/whitespace
                 return val
-            return os.getenv(env_var, default)
+            if use_env_fallback:
+                return os.getenv(env_var, default)
+            return default
 
         self.api_endpoint = get_conf('apiEndpoint', 'CALM_API_ENDPOINT')
         self.token_url = get_conf('tokenUrl', 'CALM_TOKEN_URL')
@@ -79,9 +82,18 @@ class CALMService:
             
         except requests.exceptions.RequestException as e:
             print(f"Error getting CALM access token: {e}")
-            if hasattr(e.response, 'text'):
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"Response status: {e.response.status_code}")
                 print(f"Response: {e.response.text}")
-            raise
+                
+                # Provide more specific error messages
+                if e.response.status_code == 401:
+                    raise ValueError("Authentication failed: Invalid client credentials")
+                elif e.response.status_code == 404:
+                    raise ValueError("Token endpoint not found: Check the token URL")
+                elif e.response.status_code >= 500:
+                    raise ValueError("Server error: The authentication server is not responding properly")
+            raise ValueError(f"Connection failed: {str(e)}")
     
     def _make_request(self, method: str, endpoint: str, **kwargs) -> Dict:
         """
@@ -122,13 +134,19 @@ class CALMService:
         
         Returns:
             True if connection successful
+            
+        Raises:
+            Exception if connection fails (for detailed error reporting)
         """
         try:
-            self._get_access_token()
+            token = self._get_access_token()
+            if not token:
+                raise ValueError("Failed to obtain access token")
             return True
         except Exception as e:
             print(f"CALM connection test failed: {e}")
-            return False
+            # Re-raise the exception so the caller can handle it with specific error messages
+            raise
     
     def _get_project_url(self, project_id: str) -> str:
         """

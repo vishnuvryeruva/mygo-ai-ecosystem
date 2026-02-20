@@ -589,18 +589,41 @@ def test_new_connection():
         from services.calm_service import CALMService
         
         if data.get('type') == 'CALM':
+            # Validate required fields
+            api_endpoint = data.get('apiEndpoint', '').strip()
+            token_url = data.get('tokenUrl', '').strip()
+            client_id = data.get('clientId', '').strip()
+            client_secret = data.get('clientSecret', '').strip()
+            
+            if not all([api_endpoint, token_url, client_id, client_secret]):
+                return jsonify({"success": False, "error": "All fields are required"})
+            
+            # Create service with explicit config (no env fallback for testing)
             service = CALMService({
-                'api_endpoint': data.get('apiEndpoint'),
-                'token_url': data.get('tokenUrl'),
-                'client_id': data.get('clientId'),
-                'client_secret': data.get('clientSecret')
-            })
-            success = service.test_connection()
-            return jsonify({"success": success})
+                'apiEndpoint': api_endpoint,
+                'tokenUrl': token_url,
+                'clientId': client_id,
+                'clientSecret': client_secret
+            }, use_env_fallback=False)
+            
+            # Test connection - will raise exception if it fails
+            service.test_connection()
+            return jsonify({"success": True, "message": "Connection successful"})
         
         return jsonify({"success": False, "error": "Unsupported source type"})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        error_msg = str(e)
+        # Provide more specific error messages
+        if "credentials not configured" in error_msg.lower():
+            error_msg = "Invalid credentials provided"
+        elif "connection" in error_msg.lower() or "timeout" in error_msg.lower():
+            error_msg = "Unable to connect to the endpoint"
+        elif "401" in error_msg or "unauthorized" in error_msg.lower():
+            error_msg = "Authentication failed - invalid credentials"
+        elif "404" in error_msg or "not found" in error_msg.lower():
+            error_msg = "Endpoint not found - check the URL"
+        
+        return jsonify({"success": False, "error": error_msg}), 500
 
 
 # ============================================================================

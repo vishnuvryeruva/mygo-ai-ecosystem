@@ -269,14 +269,10 @@ def test_connection(source_id: str) -> Dict:
     if source['type'] == 'CALM':
         try:
             service = CALMService(source.get('config', {}))
-            success = service.test_connection()
+            service.test_connection()
             
-            if success:
-                update_source_status(source_id, 'connected')
-                return {'success': True, 'message': 'Connection successful'}
-            else:
-                update_source_status(source_id, 'error')
-                return {'success': False, 'error': 'Connection failed'}
+            update_source_status(source_id, 'connected')
+            return {'success': True, 'message': 'Connection successful'}
                 
         except Exception as e:
             update_source_status(source_id, 'error')
