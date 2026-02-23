@@ -38,6 +38,16 @@ const sourceColors: Record<string, { bg: string; text: string }> = {
     Solman: { bg: '#ffedd5', text: '#9a3412' },
 }
 
+// Map SAP document type codes to human-readable names
+const documentTypeNames: Record<string, string> = {
+    NT: 'Note',
+    FS: 'Functional Spec',
+    TS: 'Technical Spec',
+    SD: 'Solution Document',
+    CD: 'Change Document',
+    DP: 'Decision Paper',
+}
+
 export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps) {
     const [documents, setDocuments] = useState<Document[]>([])
     const [isLoading, setIsLoading] = useState(true)
@@ -59,8 +69,10 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
     const [selectedProject, setSelectedProject] = useState('')
 
     const [docsToSync, setDocsToSync] = useState<any[]>([])
+    const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set())
+    const [syncStatus, setSyncStatus] = useState<Record<string, boolean>>({})
     const [isSyncing, setIsSyncing] = useState(false)
-    const [syncResult, setSyncResult] = useState<{ message: string; count: number } | null>(null)
+    const [syncResult, setSyncResult] = useState<{ message: string; count: number; updated: number; added: number } | null>(null)
 
     // Load initial documents
     useEffect(() => {
@@ -85,19 +97,25 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
         setIsLoading(true)
         try {
             const res = await axios.get('http://localhost:5001/api/documents')
-            // Map backend docs to frontend format if needed
-            // Assuming backend returns a list of docs with source, project etc.
-            // If backend docs are from RAG, they might have metadata
-            const mappedDocs = res.data.documents.map((doc: any) => ({
-                id: doc.id || doc.name || doc.filename, // Fallback
-                name: doc.name || doc.metadata?.name || doc.filename,
-                type: doc.type || doc.metadata?.documentType || 'Document',
-                source: doc.source || doc.metadata?.source || 'File Upload',
-                project: doc.project || doc.metadata?.project || 'N/A',
-                updatedBy: doc.updatedBy || doc.metadata?.updatedBy || 'System',
-                updatedOn: doc.updatedOn || (doc.metadata?.updatedAt ? new Date(doc.metadata.updatedAt).toLocaleDateString() : 'N/A'),
-                webUrl: doc.webUrl || doc.metadata?.webUrl
-            }))
+            // Map backend docs to frontend format
+            const mappedDocs = res.data.documents.map((doc: any) => {
+                // Handle both old and new API response formats
+                const docId = doc.uuid || doc.id || doc.name || doc.filename
+                const docName = doc.title || doc.name || doc.metadata?.name || doc.filename
+                const docTypeCode = doc.documentTypeCode || doc.type || doc.metadata?.documentType
+                const docType = documentTypeNames[docTypeCode] || docTypeCode || 'Document'
+                
+                return {
+                    id: docId,
+                    name: docName,
+                    type: docType,
+                    source: doc.source || doc.metadata?.source || 'File Upload',
+                    project: doc.project || doc.metadata?.project || 'N/A',
+                    updatedBy: doc.updatedBy || doc.metadata?.updatedBy || 'System',
+                    updatedOn: doc.updatedOn || (doc.modifiedAt ? new Date(doc.modifiedAt).toLocaleDateString() : (doc.metadata?.updatedAt ? new Date(doc.metadata.updatedAt).toLocaleDateString() : 'N/A')),
+                    webUrl: doc.webUrl || doc.metadata?.webUrl
+                }
+            })
             setDocuments(mappedDocs)
         } catch (err) {
             console.error('Failed to fetch documents:', err)
@@ -134,28 +152,74 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
             setIsSyncing(true)
             try {
                 const res = await axios.get(`http://localhost:5001/api/calm/${selectedSource}/documents?projectId=${selectedProject}`)
-                setDocsToSync(res.data.documents || [])
+                const docs = res.data.documents || []
+                setDocsToSync(docs)
+                
+                // Check sync status for all documents
+                const docIds = docs.map((doc: any) => doc.uuid || doc.id)
+                const statusRes = await axios.post('http://localhost:5001/api/sync/check', {
+                    documentIds: docIds
+                })
+                setSyncStatus(statusRes.data.syncStatus || {})
+                
+                // Select all documents by default
+                setSelectedDocIds(new Set(docIds))
             } catch (err) {
                 console.error('Failed to fetch docs from source:', err)
             } finally {
                 setIsSyncing(false)
             }
         } else if (syncStep === 3) {
-            // Perform actual sync
+            // Perform actual sync (only selected documents)
             setIsSyncing(true)
             try {
+                // Filter to only sync selected documents
+                const selectedDocs = docsToSync.filter(doc => {
+                    const docId = doc.uuid || doc.id
+                    return selectedDocIds.has(docId)
+                })
+                
+                if (selectedDocs.length === 0) {
+                    alert('Please select at least one document to sync.')
+                    setIsSyncing(false)
+                    return
+                }
+                
                 const res = await axios.post('http://localhost:5001/api/sync', {
                     sourceId: selectedSource,
-                    documents: docsToSync.map(doc => ({
+                    documents: selectedDocs.map(doc => ({
                         ...doc,
+                        id: doc.uuid || doc.id,
+                        name: doc.title || doc.name,
+                        type: doc.documentTypeCode || doc.documentType || doc.type,
                         metadata: {
                             ...doc,
+                            uuid: doc.uuid,
+                            title: doc.title,
+                            displayId: doc.displayId,
+                            documentTypeCode: doc.documentTypeCode,
+                            projectId: doc.projectId,
+                            scopeId: doc.scopeId,
+                            statusCode: doc.statusCode,
+                            createdAt: doc.createdAt,
+                            modifiedAt: doc.modifiedAt,
                             source: sources.find(s => s.id === selectedSource)?.type || 'CALM',
                             project: projects.find(p => p.id === selectedProject)?.name || 'Unknown Project'
                         }
                     }))
                 })
-                setSyncResult({ message: res.data.message, count: res.data.results?.length || 0 })
+                
+                // Count updated vs newly added
+                const results = res.data.results || []
+                const updated = results.filter((r: any) => r.wasExisting).length
+                const added = results.filter((r: any) => !r.wasExisting && r.status === 'success').length
+                
+                setSyncResult({ 
+                    message: res.data.message, 
+                    count: results.length,
+                    updated: updated,
+                    added: added
+                })
                 setSyncStep(4)
                 fetchDocuments() // Refresh main list
             } catch (err) {
@@ -174,6 +238,29 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
         setSelectedProject('')
         setSyncResult(null)
         setDocsToSync([])
+        setSelectedDocIds(new Set())
+        setSyncStatus({})
+    }
+    
+    const toggleDocSelection = (docId: string) => {
+        const newSelected = new Set(selectedDocIds)
+        if (newSelected.has(docId)) {
+            newSelected.delete(docId)
+        } else {
+            newSelected.add(docId)
+        }
+        setSelectedDocIds(newSelected)
+    }
+    
+    const toggleSelectAll = () => {
+        if (selectedDocIds.size === docsToSync.length) {
+            // Deselect all
+            setSelectedDocIds(new Set())
+        } else {
+            // Select all
+            const allIds = docsToSync.map(doc => doc.uuid || doc.id)
+            setSelectedDocIds(new Set(allIds))
+        }
     }
 
     // Filter Logic
@@ -388,16 +475,62 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                                         </div>
                                     ) : (
                                         <>
-                                            <p className="mb-4">Found <strong>{docsToSync.length}</strong> documents in this project.</p>
-                                            <div className="max-h-60 overflow-y-auto border rounded p-2 bg-gray-50">
-                                                {docsToSync.map(doc => (
-                                                    <div key={doc.id} className="text-sm py-1 border-b last:border-0 flex justify-between">
-                                                        <span>{doc.name}</span>
-                                                        <span className="text-gray-500 text-xs">{doc.documentType || doc.type}</span>
-                                                    </div>
-                                                ))}
+                                            <div className="mb-4 flex justify-between items-center">
+                                                <p>Found <strong>{docsToSync.length}</strong> documents in this project.</p>
+                                                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedDocIds.size === docsToSync.length && docsToSync.length > 0}
+                                                        onChange={toggleSelectAll}
+                                                        className="cursor-pointer"
+                                                    />
+                                                    <span>Select All</span>
+                                                </label>
                                             </div>
-                                            <p className="mt-4 text-sm text-gray-600">Click Sync to import these documents into the Knowledge Base.</p>
+                                            <div className="max-h-60 overflow-y-auto border rounded p-2 bg-gray-50">
+                                                {docsToSync.map(doc => {
+                                                    const docId = doc.uuid || doc.id
+                                                    const typeCode = doc.documentTypeCode || doc.documentType || doc.type
+                                                    const typeName = documentTypeNames[typeCode] || typeCode || 'Document'
+                                                    const isSelected = selectedDocIds.has(docId)
+                                                    const isSynced = syncStatus[docId]
+                                                    
+                                                    return (
+                                                        <div 
+                                                            key={docId} 
+                                                            className="text-sm py-2 px-2 border-b last:border-0 flex items-center gap-3 hover:bg-gray-100 cursor-pointer"
+                                                            onClick={() => toggleDocSelection(docId)}
+                                                        >
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={isSelected}
+                                                                onChange={() => toggleDocSelection(docId)}
+                                                                className="cursor-pointer"
+                                                                onClick={(e) => e.stopPropagation()}
+                                                            />
+                                                            <div className="flex-1 flex justify-between items-center">
+                                                                <span className="flex-1">{doc.title || doc.name}</span>
+                                                                <div className="flex items-center gap-2">
+                                                                    <span className="text-gray-500 text-xs">{typeName}</span>
+                                                                    {isSynced && (
+                                                                        <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
+                                                                            Synced
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    )
+                                                })}
+                                            </div>
+                                            <p className="mt-4 text-sm text-gray-600">
+                                                Selected <strong>{selectedDocIds.size}</strong> document(s). 
+                                                {selectedDocIds.size > 0 && Object.values(syncStatus).filter(Boolean).length > 0 && (
+                                                    <span className="ml-2 text-blue-600">
+                                                        Existing documents will be updated.
+                                                    </span>
+                                                )}
+                                            </p>
                                         </>
                                     )}
                                 </div>
@@ -407,7 +540,17 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                                 <div className="text-center p-8">
                                     <div className="text-green-500 text-4xl mb-4">✓</div>
                                     <h3 className="text-xl font-bold mb-2">Sync Complete!</h3>
-                                    <p>{syncResult?.message}</p>
+                                    <p className="mb-4">{syncResult?.message}</p>
+                                    {syncResult && (
+                                        <div className="text-sm text-gray-600 space-y-1">
+                                            {syncResult.added > 0 && (
+                                                <p className="text-green-600">✓ {syncResult.added} document(s) newly added</p>
+                                            )}
+                                            {syncResult.updated > 0 && (
+                                                <p className="text-blue-600">↻ {syncResult.updated} document(s) updated</p>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>

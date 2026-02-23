@@ -273,7 +273,7 @@ class CALMService:
         project_id: Optional[str] = None
     ) -> Dict:
         """
-        List documents with optional filters
+        List documents with optional filters using OData query syntax
         
         Args:
             process_id: Filter by solution process ID
@@ -286,16 +286,26 @@ class CALMService:
         try:
             self._using_demo_data = False
             params = {}
-            if process_id:
-                params['solutionProcessId'] = process_id
-            if document_type and document_type != 'all':
-                params['documentType'] = document_type
-            if project_id:
-                params['projectId'] = project_id
+            
+            # Build OData $filter expression
+            filter_conditions = []
+            # if project_id:
+            #     filter_conditions.append(f"projectId eq {project_id}")
+            # # if process_id:
+            # #     filter_conditions.append(f"solutionProcessId eq {process_id}")
+            # # if document_type and document_type != 'all':
+            # #     filter_conditions.append(f"documentType eq '{document_type}'")
+            
+            # if filter_conditions:
+            #     params['$filter'] = ' and '.join(filter_conditions)
+            params['filter'] = 'projectId eq '+project_id
+            # Add OData query options
+            # params['$expand'] = 'toStatus'
+            # params['$count'] = 'true'
             
             response = self._make_request(
                 'GET',
-                '/api/calm-documents/v1/documents',
+                '/api/calm-documents/v1/Documents',
                 params=params
             )
             documents = response.get('value', response.get('documents', []))

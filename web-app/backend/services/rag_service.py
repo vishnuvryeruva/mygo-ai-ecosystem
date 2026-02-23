@@ -22,9 +22,12 @@ class RAGService:
         # Use OpenAI embeddings instead of SentenceTransformer to avoid HuggingFace network issues
         print("DEBUG: RAG Service initialized with OpenAI embeddings")
         
-        # Initialize ChromaDB
+        # Initialize ChromaDB with telemetry disabled
         db_path = os.getenv('VECTOR_DB_PATH', './vector_db')
-        self.client = chromadb.PersistentClient(path=db_path)
+        self.client = chromadb.PersistentClient(
+            path=db_path,
+            settings=Settings(anonymized_telemetry=False)
+        )
         
         # Get or create collection with new name to force new embedding dimensions
         # OpenAI text-embedding-3-small uses 1536 dimensions (vs 384 for SentenceTransformer)
@@ -52,12 +55,28 @@ class RAGService:
             print(f"ERROR: Failed to create embedding: {e}")
             raise
     
+    def check_document_exists(self, doc_id):
+        """Check if a document with the given ID already exists"""
+        try:
+            result = self.collection.get()
+            ids = result['ids']
+            
+            # Check if any ID starts with the document ID
+            for id in ids:
+                if id.startswith(f"{doc_id}_"):
+                    return True
+            return False
+        except Exception as e:
+            print(f"Error checking document existence: {e}")
+            return False
+    
     def add_placeholder_document(self, doc_metadata):
-        """Add a placeholder document to the database (for synced external files)"""
+        """Add or update a placeholder document in the database (for synced external files)"""
         try:
             # Handle nested metadata if present (frontend sends it nested)
             meta = doc_metadata.get('metadata', doc_metadata)
             
+            doc_id = doc_metadata.get('id', 'unknown')
             filename = meta.get('name', doc_metadata.get('name', 'unknown'))
             doc_type = meta.get('type') or meta.get('documentType') or 'Document'
             source = meta.get('source', 'CALM')
@@ -66,35 +85,72 @@ class RAGService:
             updated_on = meta.get('updatedOn', meta.get('lastModified', 'N/A'))
             web_url = meta.get('webUrl', '')
             
-            # Check for duplicates
-            if self.check_duplicate(filename):
-                return {"status": "skipped", "message": "Document already exists"}
+            # Preserve additional SAP Calm metadata
+            uuid = meta.get('uuid', '')
+            display_id = meta.get('displayId', '')
+            project_id = meta.get('projectId', '')
+            scope_id = meta.get('scopeId', '')
+            
+            # Check if document already exists
+            already_exists = self.check_document_exists(doc_id)
             
             # Create a placeholder chunk
-            placeholder_text = f"External document synced from {source}. Project: {project}. Type: {doc_type}. This is a placeholder for metadata purposes."
+            placeholder_text = f"External document synced from {source}. Project: {project}. Type: {doc_type}. Document: {filename}. This is a placeholder for metadata purposes."
             
             # Create embedding
             embedding = self._create_embedding(placeholder_text)
             
-            # Add to collection
-            self.collection.add(
-                embeddings=[embedding],
-                documents=[placeholder_text],
-                ids=[f"{filename}_0"],  # chunk 0
-                metadatas=[{
-                    "source": source,
-                    "type": doc_type,
-                    "project": project,
-                    "updatedBy": updated_by,
-                    "updatedOn": str(updated_on),
-                    "webUrl": web_url,
-                    "is_placeholder": True
-                }]
-            )
+            chunk_id = f"{doc_id}_0"
             
-            return {"status": "success", "message": "Placeholder added"}
+            metadata_obj = {
+                "source": source,
+                "type": doc_type,
+                "project": project,
+                "updatedBy": updated_by,
+                "updatedOn": str(updated_on),
+                "webUrl": web_url,
+                "is_placeholder": True,
+                "document_name": filename,
+                "document_id": doc_id
+            }
+            
+            # Add SAP-specific metadata if available
+            if uuid:
+                metadata_obj["uuid"] = uuid
+            if display_id:
+                metadata_obj["displayId"] = display_id
+            if project_id:
+                metadata_obj["projectId"] = project_id
+            if scope_id:
+                metadata_obj["scopeId"] = scope_id
+            
+            if already_exists:
+                # Update existing document
+                try:
+                    # ChromaDB doesn't have direct update, so delete and re-add
+                    self.collection.delete(ids=[chunk_id])
+                    self.collection.add(
+                        embeddings=[embedding],
+                        documents=[placeholder_text],
+                        ids=[chunk_id],
+                        metadatas=[metadata_obj]
+                    )
+                    return {"status": "updated", "message": "Document updated", "was_existing": True}
+                except Exception as e:
+                    print(f"Error updating document: {e}")
+                    return {"status": "error", "error": str(e)}
+            else:
+                # Add new document
+                self.collection.add(
+                    embeddings=[embedding],
+                    documents=[placeholder_text],
+                    ids=[chunk_id],
+                    metadatas=[metadata_obj]
+                )
+                return {"status": "success", "message": "Document added", "was_existing": False}
+                
         except Exception as e:
-            print(f"Error adding placeholder: {e}")
+            print(f"Error adding/updating placeholder: {e}")
             return {"status": "error", "error": str(e)}
 
     def ingest_documents(self, files, max_zip_size=256000):

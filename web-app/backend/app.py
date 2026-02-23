@@ -718,6 +718,31 @@ def calm_list_documents(source_id):
 # Document Sync Endpoints
 # ============================================================================
 
+@app.route('/api/sync/check', methods=['POST'])
+def check_sync_status():
+    """Check which documents are already synced"""
+    try:
+        data = request.json
+        document_ids = data.get('documentIds', [])
+        
+        if not document_ids:
+            return jsonify({"error": "documentIds array is required"}), 400
+        
+        # Check each document
+        sync_status = {}
+        for doc_id in document_ids:
+            is_synced = rag_service.check_document_exists(doc_id)
+            sync_status[doc_id] = is_synced
+        
+        return jsonify({
+            "syncStatus": sync_status
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/sync', methods=['POST'])
 def sync_documents():
     """Sync documents from a source to the knowledge base"""
@@ -744,17 +769,23 @@ def sync_documents():
         if documents:
             for doc in documents:
                 try:
-                    # Add placeholder to RAG service
-                    result = rag_service.add_placeholder_document(doc)
+                    # Normalize document structure to handle both old and new API formats
+                    normalized_doc = _normalize_document_structure(doc)
+                    
+                    # Add or update placeholder in RAG service
+                    result = rag_service.add_placeholder_document(normalized_doc)
                     results.append({
-                        "documentId": doc.get('id'),
+                        "documentId": normalized_doc.get('id'),
+                        "documentName": normalized_doc.get('name'),
                         "status": result.get('status'),
                         "message": result.get('message', ''),
+                        "wasExisting": result.get('was_existing', False),
                         "error": result.get('error')
                     })
                 except Exception as e:
+                    doc_id = doc.get('uuid') or doc.get('id')
                     results.append({
-                        "documentId": doc.get('id'),
+                        "documentId": doc_id,
                         "status": "error",
                         "error": str(e)
                     })
@@ -778,6 +809,66 @@ def sync_documents():
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+
+def _normalize_document_structure(doc: dict) -> dict:
+    """
+    Normalize document structure to handle both old and new API formats
+    (e.g., SAP Calm OData response with uuid, title, documentTypeCode)
+    
+    Args:
+        doc: Raw document object from API
+        
+    Returns:
+        Normalized document with consistent field names
+    """
+    # Document type code mapping (SAP Calm codes to readable names)
+    doc_type_names = {
+        'NT': 'Note',
+        'FS': 'Functional Spec',
+        'TS': 'Technical Spec',
+        'SD': 'Solution Document',
+        'CD': 'Change Document',
+        'DP': 'Decision Paper',
+    }
+    
+    # Extract and normalize fields
+    doc_id = doc.get('uuid') or doc.get('id')
+    doc_name = doc.get('title') or doc.get('name')
+    doc_type_code = doc.get('documentTypeCode') or doc.get('type')
+    doc_type = doc_type_names.get(doc_type_code, doc_type_code) if doc_type_code else 'Document'
+    
+    # Build normalized document
+    normalized = {
+        'id': doc_id,
+        'name': doc_name,
+        'type': doc_type,
+        'metadata': doc.get('metadata', {})
+    }
+    
+    # Merge all original fields into metadata for preservation
+    normalized['metadata'].update({
+        'uuid': doc.get('uuid'),
+        'title': doc.get('title'),
+        'displayId': doc.get('displayId'),
+        'documentTypeCode': doc.get('documentTypeCode'),
+        'projectId': doc.get('projectId'),
+        'scopeId': doc.get('scopeId'),
+        'statusCode': doc.get('statusCode'),
+        'priorityCode': doc.get('priorityCode'),
+        'sourceCode': doc.get('sourceCode'),
+        'createdAt': doc.get('createdAt'),
+        'modifiedAt': doc.get('modifiedAt'),
+        'content': doc.get('content'),
+        'tags': doc.get('tags', []),
+        'source': doc.get('metadata', {}).get('source') if 'metadata' in doc else doc.get('source'),
+        'project': doc.get('metadata', {}).get('project') if 'metadata' in doc else doc.get('project')
+    })
+    
+    # Remove None values from metadata
+    normalized['metadata'] = {k: v for k, v in normalized['metadata'].items() if v is not None}
+    
+    return normalized
 
 
 @app.route('/api/calm/<source_id>/push-spec', methods=['POST'])
