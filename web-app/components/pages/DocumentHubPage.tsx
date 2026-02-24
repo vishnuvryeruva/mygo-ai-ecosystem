@@ -96,7 +96,7 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
     const fetchDocuments = async () => {
         setIsLoading(true)
         try {
-            const res = await axios.get('http://localhost:5001/api/documents')
+            const res = await axios.get('/api/documents')
             // Map backend docs to frontend format
             const mappedDocs = res.data.documents.map((doc: any) => {
                 // Handle both old and new API response formats
@@ -126,7 +126,7 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
 
     const fetchSources = async () => {
         try {
-            const res = await axios.get('http://localhost:5001/api/sources')
+            const res = await axios.get('/api/sources')
             setSources(res.data.sources || [])
         } catch (err) {
             console.error('Failed to fetch sources:', err)
@@ -136,7 +136,7 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
     const fetchProjects = async (sourceId: string) => {
         setProjects([]) // Clear previous
         try {
-            const res = await axios.get(`http://localhost:5001/api/calm/${sourceId}/projects`)
+            const res = await axios.get(`/api/calm/${sourceId}/projects`)
             setProjects(res.data.projects || [])
         } catch (err) {
             console.error('Failed to fetch projects:', err)
@@ -151,13 +151,13 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
             // Fetch potential docs to sync
             setIsSyncing(true)
             try {
-                const res = await axios.get(`http://localhost:5001/api/calm/${selectedSource}/documents?projectId=${selectedProject}`)
+                const res = await axios.get(`/api/calm/${selectedSource}/documents?projectId=${selectedProject}`)
                 const docs = res.data.documents || []
                 setDocsToSync(docs)
                 
                 // Check sync status for all documents
                 const docIds = docs.map((doc: any) => doc.uuid || doc.id)
-                const statusRes = await axios.post('http://localhost:5001/api/sync/check', {
+                const statusRes = await axios.post('/api/sync/check', {
                     documentIds: docIds
                 })
                 setSyncStatus(statusRes.data.syncStatus || {})
@@ -185,7 +185,7 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                     return
                 }
                 
-                const res = await axios.post('http://localhost:5001/api/sync', {
+                const res = await axios.post('/api/sync', {
                     sourceId: selectedSource,
                     documents: selectedDocs.map(doc => ({
                         ...doc,

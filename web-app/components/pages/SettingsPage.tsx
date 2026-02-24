@@ -138,7 +138,7 @@ export default function SettingsPage() {
     const refreshSources = async () => {
         setIsLoadingSources(true)
         try {
-            const res = await axios.get('http://localhost:5001/api/sources')
+            const res = await axios.get('/api/sources')
             setSources(res.data.sources || [])
         } catch (err) {
             console.error('Failed to fetch sources:', err)
@@ -158,7 +158,7 @@ export default function SettingsPage() {
         setTestResult(null)
 
         try {
-            const response = await axios.post('http://localhost:5001/api/sources/test-connection', {
+            const response = await axios.post('/api/sources/test-connection', {
                 type: 'CALM',
                 apiEndpoint: connectionForm.apiEndpoint,
                 tokenUrl: connectionForm.tokenUrl,
@@ -190,7 +190,7 @@ export default function SettingsPage() {
 
         setIsSavingConnection(true)
         try {
-            await axios.post('http://localhost:5001/api/sources', {
+            await axios.post('/api/sources', {
                 name: connectionForm.sourceName,
                 type: 'CALM',
                 apiEndpoint: connectionForm.apiEndpoint,
@@ -215,7 +215,7 @@ export default function SettingsPage() {
     const handleDeleteSource = async (id: string) => {
         if (!confirm('Are you sure you want to delete this source?')) return
         try {
-            await axios.delete(`http://localhost:5001/api/sources/${id}`)
+            await axios.delete(`/api/sources/${id}`)
             await refreshSources()
         } catch (err) {
             console.error('Failed to delete source:', err)
