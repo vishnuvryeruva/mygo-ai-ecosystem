@@ -228,12 +228,16 @@ class CALMService:
             List of scope objects
         """
         try:
-            response = self._make_request(
-                'GET', 
-                '/api/calm-processscopes/v1/scopes',
-                params={'projectId': project_id}
-            )
-            return response.get('value', response.get('scopes', []))
+            token = self._get_access_token()
+            url = f"{self.api_endpoint}/api/calm-processmanagement/v1/scopes?$filter=projectId eq '{project_id}'"
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json'
+            }
+            response = requests.get(url, headers=headers, timeout=60)
+            response.raise_for_status()
+            data = response.json()
+            return data.get('value', data.get('scopes', []))
         except Exception as e:
             print(f"Error listing scopes: {e}")
             return self._get_demo_scopes(project_id)
@@ -253,12 +257,16 @@ class CALMService:
             List of solution process objects
         """
         try:
-            response = self._make_request(
-                'GET',
-                '/api/calm-processscopes/v1/solutionProcesses',
-                params={'scopeId': scope_id}
-            )
-            return response.get('value', response.get('processes', []))
+            token = self._get_access_token()
+            url = f"{self.api_endpoint}/api/calm-processscopes/v1/solutionProcesses?$filter=scopeId eq '{scope_id}'"
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json'
+            }
+            response = requests.get(url, headers=headers, timeout=60)
+            response.raise_for_status()
+            data = response.json()
+            return data.get('value', data.get('processes', []))
         except Exception as e:
             print(f"Error listing solution processes: {e}")
             return self._get_demo_processes(scope_id)
@@ -341,61 +349,55 @@ class CALMService:
         content: bytes,
         document_type: str,
         process_id: str,
+        project_id: Optional[str] = None,
         description: Optional[str] = None
     ) -> Dict:
         """
-        Upload a document to Cloud ALM
+        Create a document in Cloud ALM via the calm-documents API.
         
         Args:
-            name: Document name
-            content: Document content as bytes
-            document_type: Type of document (functional_spec, technical_spec, etc.)
-            process_id: Solution process ID to attach to
-            description: Optional description
+            name: Document title
+            content: Document content as bytes (decoded to HTML string)
+            document_type: Internal type label (functional_spec, technical_spec, etc.)
+            process_id: Solution process ID to relate the document to
+            project_id: Project ID (required by the API)
+            description: Unused, kept for signature compatibility
             
         Returns:
             Created document object
         """
         try:
             token = self._get_access_token()
-            
-            # First, create the document metadata
-            metadata = {
-                'name': name,
-                'documentType': document_type,
-                'solutionProcessId': process_id,
-                'description': description or ''
+
+            content_str = content.decode('utf-8') if isinstance(content, bytes) else content
+
+            payload = {
+                'title': name,
+                'content': content_str,
+                'documentTypeCode': 'SD',
             }
-            
+
+            if project_id:
+                payload['projectId'] = project_id
+
+            url = f"{self.api_endpoint}/api/calm-documents/v1/Documents"
+            print(f"DEBUG push_document url: {url}")
+            print(f"DEBUG push_document token (first 20 chars): {token[:20]}...")
+            print(f"DEBUG push_document payload (excluding content): { {k: v for k, v in payload.items() if k != 'content'} }")
             response = requests.post(
-                f"{self.api_endpoint}/api/calm-documents/v1/documents",
+                url,
                 headers={
                     'Authorization': f'Bearer {token}',
                     'Content-Type': 'application/json'
                 },
-                json=metadata,
+                json=payload,
                 timeout=30
             )
+            print(f"DEBUG push_document response status: {response.status_code}")
+            print(f"DEBUG push_document response body: {response.text[:1000]}")
             response.raise_for_status()
-            
-            doc_data = response.json()
-            doc_id = doc_data.get('id')
-            
-            # Then, upload the content
-            if doc_id and content:
-                upload_response = requests.put(
-                    f"{self.api_endpoint}/api/calm-documents/v1/documents/{doc_id}/content",
-                    headers={
-                        'Authorization': f'Bearer {token}',
-                        'Content-Type': 'application/octet-stream'
-                    },
-                    data=content,
-                    timeout=120
-                )
-                upload_response.raise_for_status()
-            
-            return doc_data
-            
+            return response.json()
+
         except Exception as e:
             print(f"Error pushing document: {e}")
             raise

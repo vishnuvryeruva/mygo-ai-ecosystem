@@ -129,6 +129,11 @@ def delete_document(filename):
 # Spec Assistant
 @app.route('/api/generate-spec', methods=['POST'])
 def generate_spec():
+    return jsonify({
+    "format": "preview",
+    "spec": "# Functional Specification Document for Coding Practices\n\n## 1. Executive Summary\nThis document outlines the functional specifications for the development of a comprehensive guide on coding practices. The purpose of this guide is to standardize coding practices across the organization, improve code quality, enhance maintainability, and foster collaboration among development teams. The guide will serve as a reference for developers, ensuring adherence to best practices and reducing technical debt.\n\n## 2. Business Objectives\n- Establish a standardized coding practice across all development teams.\n- Improve code quality and maintainability.\n- Enhance collaboration and communication among developers.\n- Reduce the incidence of bugs and technical debt.\n- Facilitate onboarding of new developers through clear guidelines.\n\n## 3. Functional Requirements\n### 3.1 Coding Standards\n- Define naming conventions for variables, functions, classes, and files.\n- Specify formatting guidelines (indentation, line length, whitespace).\n- Establish rules for commenting and documentation.\n\n### 3.2 Best Practices\n- Outline best practices for error handling and logging.\n- Provide guidelines for code reviews and peer programming.\n- Recommend design patterns and architectural styles.\n\n### 3.3 Tools and Technologies\n- List recommended development tools (IDEs, linters, version control systems).\n- Specify tools for automated testing and continuous integration.\n\n### 3.4 Training and Resources\n- Provide links to training resources and workshops.\n- Include a glossary of terms and concepts related to coding practices.\n\n## 4. User Stories and Use Cases\n### User Stories\n1. **As a developer**, I want to access the coding practices guide so that I can write code that adheres to organizational standards.\n2. **As a team lead**, I want to ensure that my team follows the coding standards so that we can maintain high code quality.\n3. **As a new hire**, I want to review the coding practices guide to understand the coding standards of the organization.\n\n### Use Cases\n- **Use Case 1: Accessing the Coding Practices Guide**\n  - **Actors:** Developer\n  - **Preconditions:** Developer has access to the internal documentation portal.\n  - **Postconditions:** Developer can view and navigate the coding practices guide.\n  - **Main Flow:**\n    1. Developer logs into the documentation portal.\n    2. Developer selects the coding practices section.\n    3. Developer reads the guidelines.\n\n## 5. Business Process Design\n### Process Flow\n1. **Initiation:** Identify the need for coding practices.\n2. **Development:** Collaborate with stakeholders to draft the guide.\n3. **Review:** Conduct peer reviews and incorporate feedback.\n4. **Approval:** Obtain final approval from management.\n5. **Publication:** Publish the guide on the internal documentation portal.\n6. **Training:** Conduct training sessions for developers.\n\n## 6. Data Requirements\n- The guide will be stored in a content management system (CMS).\n- Version control to track changes and updates to the guide.\n- Analytics to monitor usage and access patterns.\n\n## 7. Interface Requirements\n- The guide should be accessible via a web interface.\n- Search functionality to allow users to find specific topics quickly.\n- Responsive design to ensure usability across devices (desktop, tablet, mobile).\n\n## 8. Security and Authorization\n- Access to the coding practices guide will be restricted to internal employees.\n- Role-based access control to ensure that only authorized personnel can edit the guide.\n- Regular audits to ensure compliance with security policies.\n\n## 9. Testing Requirements\n- User acceptance testing (UAT) to validate the usability of the guide.\n- Functional testing to ensure all links, search functions, and formatting are working correctly.\n- Performance testing to ensure the guide loads quickly and efficiently.\n\n## 10. Acceptance Criteria\n- The coding practices guide is published and accessible to all developers.\n- All sections of the guide are reviewed and approved by relevant stakeholders.\n- The guide includes a feedback mechanism for continuous improvement.\n- Training sessions are conducted, and feedback is collected for future iterations.\n\n## 11. Dependencies and Constraints\n- Dependency on the availability of resources for content creation and review.\n- Constraints related to the timeline for development and publication.\n- Potential resistance to change from developers accustomed to previous practices.\n\n---\n\nThis functional specification document serves as a comprehensive guide for the development of coding practices within the organization. It outlines the necessary requirements, processes, and criteria to ensure successful implementation and adherence to best practices.",
+    "type": "functional"
+    }), 200
     try:
         data = request.json
         spec_type = data.get('type', 'functional')  # functional or technical
@@ -879,6 +884,7 @@ def push_spec_to_calm(source_id):
         name = data.get('name')
         content = data.get('content')
         process_id = data.get('processId')
+        project_id = data.get('projectId')
         doc_type = data.get('documentType', 'functional_spec')
         
         if not all([name, content, process_id]):
@@ -898,7 +904,8 @@ def push_spec_to_calm(source_id):
             name=name,
             content=content,
             document_type=doc_type,
-            process_id=process_id
+            process_id=process_id,
+            project_id=project_id
         )
         
         return jsonify({

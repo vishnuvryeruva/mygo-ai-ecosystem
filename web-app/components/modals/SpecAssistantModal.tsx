@@ -9,6 +9,13 @@ interface SpecAssistantModalProps {
   onClose: () => void
 }
 
+interface Source { id: string; name: string; type: string }
+interface Project { id: string; name: string }
+interface Scope { id: string; name: string }
+interface SolutionProcess { id: string; name: string }
+
+type AlmUploadStep = 'idle' | 'form' | 'uploading' | 'success' | 'error'
+
 export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps) {
   const [requirements, setRequirements] = useState('')
   const [specType, setSpecType] = useState('functional')
@@ -20,6 +27,21 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
   const [refinementMode, setRefinementMode] = useState(false)
   const [refinementInput, setRefinementInput] = useState('')
   const [refinementHistory, setRefinementHistory] = useState<{ role: 'user' | 'assistant', content: string }[]>([])
+
+  // Cloud ALM upload state
+  const [almUploadStep, setAlmUploadStep] = useState<AlmUploadStep>('idle')
+  const [almSources, setAlmSources] = useState<Source[]>([])
+  const [almSelectedSource, setAlmSelectedSource] = useState('')
+  const [almProjects, setAlmProjects] = useState<Project[]>([])
+  const [almSelectedProject, setAlmSelectedProject] = useState('')
+  const [almScopes, setAlmScopes] = useState<Scope[]>([])
+  const [almSelectedScope, setAlmSelectedScope] = useState('')
+  const [almProcesses, setAlmProcesses] = useState<SolutionProcess[]>([])
+  const [almSelectedProcess, setAlmSelectedProcess] = useState('')
+  const [almDocName, setAlmDocName] = useState('')
+  const [almLoadingStep, setAlmLoadingStep] = useState('')
+  const [almError, setAlmError] = useState('')
+  const [almSuccessDoc, setAlmSuccessDoc] = useState<any>(null)
 
   // Check for context from Solution Advisor
   useEffect(() => {
@@ -145,6 +167,110 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
     }
   }
 
+  const handleOpenAlmUpload = async () => {
+    setAlmUploadStep('form')
+    setAlmError('')
+    setAlmDocName(`${specType.charAt(0).toUpperCase() + specType.slice(1)} Specification`)
+    setAlmLoadingStep('sources')
+    try {
+      const res = await axios.get('/api/sources')
+      const calmSources = (res.data.sources || []).filter((s: Source) => s.type === 'CALM')
+      setAlmSources(calmSources)
+      if (calmSources.length === 1) {
+        setAlmSelectedSource(calmSources[0].id)
+        await loadAlmProjects(calmSources[0].id)
+      }
+    } catch {
+      setAlmError('Failed to load Cloud ALM sources.')
+    } finally {
+      setAlmLoadingStep('')
+    }
+  }
+
+  const loadAlmProjects = async (sourceId: string) => {
+    setAlmLoadingStep('projects')
+    setAlmProjects([])
+    setAlmSelectedProject('')
+    setAlmScopes([])
+    setAlmSelectedScope('')
+    setAlmProcesses([])
+    setAlmSelectedProcess('')
+    try {
+      const res = await axios.get(`/api/calm/${sourceId}/projects`)
+      setAlmProjects(res.data.projects || [])
+    } catch {
+      setAlmError('Failed to load projects.')
+    } finally {
+      setAlmLoadingStep('')
+    }
+  }
+
+  const loadAlmScopes = async (sourceId: string, projectId: string) => {
+    setAlmLoadingStep('scopes')
+    setAlmScopes([])
+    setAlmSelectedScope('')
+    setAlmProcesses([])
+    setAlmSelectedProcess('')
+    try {
+      const res = await axios.get(`/api/calm/${sourceId}/scopes?projectId=${projectId}`)
+      setAlmScopes(res.data.scopes || [])
+    } catch {
+      setAlmError('Failed to load scopes.')
+    } finally {
+      setAlmLoadingStep('')
+    }
+  }
+
+  const loadAlmProcesses = async (sourceId: string, scopeId: string) => {
+    setAlmLoadingStep('processes')
+    setAlmProcesses([])
+    setAlmSelectedProcess('')
+    try {
+      const res = await axios.get(`/api/calm/${sourceId}/solution-processes?scopeId=${scopeId}`)
+      setAlmProcesses(res.data.processes || [])
+    } catch {
+      setAlmError('Failed to load solution processes.')
+    } finally {
+      setAlmLoadingStep('')
+    }
+  }
+
+  const handleAlmUpload = async () => {
+    if (!almSelectedSource || !almSelectedProcess || !almDocName.trim()) return
+    setAlmUploadStep('uploading')
+    setAlmError('')
+    try {
+      const res = await axios.post(`/api/calm/${almSelectedSource}/push-spec`, {
+        name: almDocName.trim(),
+        content: specContent,
+        processId: almSelectedProcess,
+        projectId: almSelectedProject,
+        documentType: specType === 'functional' ? 'functional_spec' : 'technical_spec'
+      })
+      setAlmSuccessDoc(res.data.document)
+      setAlmUploadStep('success')
+    } catch (err: any) {
+      setAlmError(err?.response?.data?.error || 'Failed to upload to Cloud ALM.')
+      setAlmUploadStep('error')
+    }
+  }
+
+  const resetAlmUpload = () => {
+    setAlmUploadStep('idle')
+    setAlmSources([])
+    setAlmSelectedSource('')
+    setAlmProjects([])
+    setAlmSelectedProject('')
+    setAlmScopes([])
+    setAlmSelectedScope('')
+    setAlmProcesses([])
+    setAlmSelectedProcess('')
+    setAlmDocName('')
+    setAlmError('')
+    setAlmSuccessDoc(null)
+    setAlmLoadingStep('')
+  }
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal max-w-5xl" onClick={e => e.stopPropagation()}>
@@ -241,6 +367,184 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
                   collapsible={true}
                 />
               </div>
+
+              {/* Upload to Cloud ALM */}
+              {almUploadStep === 'idle' && (
+                <button
+                  onClick={handleOpenAlmUpload}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition-colors text-sm font-medium"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                  Upload to Cloud ALM
+                </button>
+              )}
+
+              {/* ALM Upload Panel */}
+              {almUploadStep !== 'idle' && (
+                <div className="glass-subtle rounded-xl border border-emerald-500/20 overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
+                    <h4 className="font-medium text-emerald-300 flex items-center gap-2 text-sm">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
+                      </svg>
+                      Upload to Cloud ALM
+                    </h4>
+                    <button onClick={resetAlmUpload} className="text-muted hover:text-main text-lg leading-none">✕</button>
+                  </div>
+
+                  <div className="p-4 space-y-3">
+                    {almUploadStep === 'uploading' && (
+                      <div className="flex flex-col items-center justify-center py-6 gap-3 text-muted">
+                        <div className="spinner w-6 h-6" />
+                        <span className="text-sm">Uploading to Cloud ALM...</span>
+                      </div>
+                    )}
+
+                    {almUploadStep === 'success' && (
+                      <div className="flex flex-col items-center justify-center py-6 gap-3 text-center">
+                        <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400 text-xl">✓</div>
+                        <p className="text-emerald-300 font-medium">Uploaded successfully!</p>
+                        {almSuccessDoc?.name && (
+                          <p className="text-muted text-sm">"{almSuccessDoc.name}" has been added to Cloud ALM.</p>
+                        )}
+                        <button onClick={resetAlmUpload} className="mt-2 text-sm text-muted hover:text-main underline">Done</button>
+                      </div>
+                    )}
+
+                    {almUploadStep === 'error' && (
+                      <div className="space-y-3">
+                        <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-sm">
+                          {almError}
+                        </div>
+                        <button
+                          onClick={() => setAlmUploadStep('form')}
+                          className="text-sm text-muted hover:text-main underline"
+                        >
+                          ← Try again
+                        </button>
+                      </div>
+                    )}
+
+                    {almUploadStep === 'form' && (
+                      <>
+                        {almError && (
+                          <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-sm">
+                            {almError}
+                          </div>
+                        )}
+
+                        {/* Document Name */}
+                        <div className="input-group mb-0">
+                          <label className="input-label text-xs">Document Name</label>
+                          <input
+                            type="text"
+                            value={almDocName}
+                            onChange={e => setAlmDocName(e.target.value)}
+                            className="input text-sm"
+                            placeholder="Enter document name..."
+                          />
+                        </div>
+
+                        {/* Source */}
+                        {almSources.length > 1 && (
+                          <div className="input-group mb-0">
+                            <label className="input-label text-xs">Cloud ALM Source</label>
+                            <select
+                              value={almSelectedSource}
+                              onChange={e => {
+                                setAlmSelectedSource(e.target.value)
+                                if (e.target.value) loadAlmProjects(e.target.value)
+                              }}
+                              className="input select text-sm"
+                              disabled={almLoadingStep === 'projects'}
+                            >
+                              <option value="">Select source...</option>
+                              {almSources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                            </select>
+                          </div>
+                        )}
+
+                        {almSources.length === 0 && almLoadingStep !== 'sources' && (
+                          <p className="text-sm text-red-400">No Cloud ALM sources configured. Please add one in Sources.</p>
+                        )}
+
+                        {/* Project */}
+                        {almSelectedSource && (
+                          <div className="input-group mb-0">
+                            <label className="input-label text-xs">
+                              Project
+                              {almLoadingStep === 'projects' && <span className="ml-2 text-muted">(loading...)</span>}
+                            </label>
+                            <select
+                              value={almSelectedProject}
+                              onChange={e => {
+                                setAlmSelectedProject(e.target.value)
+                                if (e.target.value) loadAlmScopes(almSelectedSource, e.target.value)
+                              }}
+                              className="input select text-sm"
+                              disabled={almLoadingStep === 'projects' || almProjects.length === 0}
+                            >
+                              <option value="">Select project...</option>
+                              {almProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                          </div>
+                        )}
+
+                        {/* Scope */}
+                        {almSelectedProject && (
+                          <div className="input-group mb-0">
+                            <label className="input-label text-xs">
+                              Scope
+                              {almLoadingStep === 'scopes' && <span className="ml-2 text-muted">(loading...)</span>}
+                            </label>
+                            <select
+                              value={almSelectedScope}
+                              onChange={e => {
+                                setAlmSelectedScope(e.target.value)
+                                if (e.target.value) loadAlmProcesses(almSelectedSource, e.target.value)
+                              }}
+                              className="input select text-sm"
+                              disabled={almLoadingStep === 'scopes' || almScopes.length === 0}
+                            >
+                              <option value="">Select scope...</option>
+                              {almScopes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                            </select>
+                          </div>
+                        )}
+
+                        {/* Solution Process */}
+                        {almSelectedScope && (
+                          <div className="input-group mb-0">
+                            <label className="input-label text-xs">
+                              Solution Process
+                              {almLoadingStep === 'processes' && <span className="ml-2 text-muted">(loading...)</span>}
+                            </label>
+                            <select
+                              value={almSelectedProcess}
+                              onChange={e => setAlmSelectedProcess(e.target.value)}
+                              className="input select text-sm"
+                              disabled={almLoadingStep === 'processes' || almProcesses.length === 0}
+                            >
+                              <option value="">Select solution process...</option>
+                              {almProcesses.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                          </div>
+                        )}
+
+                        <button
+                          onClick={handleAlmUpload}
+                          disabled={!almSelectedProcess || !almDocName.trim() || !!almLoadingStep}
+                          className="w-full btn btn-primary text-sm mt-1"
+                        >
+                          Upload to Cloud ALM
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Refinement suggestions */}
               <div className="glass-subtle p-4">
