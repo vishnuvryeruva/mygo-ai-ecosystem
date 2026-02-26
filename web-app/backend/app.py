@@ -886,9 +886,9 @@ def push_spec_to_calm(source_id):
         process_id = data.get('processId')
         project_id = data.get('projectId')
         doc_type = data.get('documentType', 'functional_spec')
-        
-        if not all([name, content, process_id]):
-            return jsonify({"error": "name, content, and processId are required"}), 400
+
+        if not all([name, content]):
+            return jsonify({"error": "name and content are required"}), 400
         
         source = source_config_service.get_source(source_id)
         if not source:

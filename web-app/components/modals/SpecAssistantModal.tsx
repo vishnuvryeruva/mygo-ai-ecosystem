@@ -11,8 +11,6 @@ interface SpecAssistantModalProps {
 
 interface Source { id: string; name: string; type: string }
 interface Project { id: string; name: string }
-interface Scope { id: string; name: string }
-interface SolutionProcess { id: string; name: string }
 
 type AlmUploadStep = 'idle' | 'form' | 'uploading' | 'success' | 'error'
 
@@ -34,10 +32,6 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
   const [almSelectedSource, setAlmSelectedSource] = useState('')
   const [almProjects, setAlmProjects] = useState<Project[]>([])
   const [almSelectedProject, setAlmSelectedProject] = useState('')
-  const [almScopes, setAlmScopes] = useState<Scope[]>([])
-  const [almSelectedScope, setAlmSelectedScope] = useState('')
-  const [almProcesses, setAlmProcesses] = useState<SolutionProcess[]>([])
-  const [almSelectedProcess, setAlmSelectedProcess] = useState('')
   const [almDocName, setAlmDocName] = useState('')
   const [almLoadingStep, setAlmLoadingStep] = useState('')
   const [almError, setAlmError] = useState('')
@@ -191,10 +185,6 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
     setAlmLoadingStep('projects')
     setAlmProjects([])
     setAlmSelectedProject('')
-    setAlmScopes([])
-    setAlmSelectedScope('')
-    setAlmProcesses([])
-    setAlmSelectedProcess('')
     try {
       const res = await axios.get(`/api/calm/${sourceId}/projects`)
       setAlmProjects(res.data.projects || [])
@@ -205,45 +195,14 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
     }
   }
 
-  const loadAlmScopes = async (sourceId: string, projectId: string) => {
-    setAlmLoadingStep('scopes')
-    setAlmScopes([])
-    setAlmSelectedScope('')
-    setAlmProcesses([])
-    setAlmSelectedProcess('')
-    try {
-      const res = await axios.get(`/api/calm/${sourceId}/scopes?projectId=${projectId}`)
-      setAlmScopes(res.data.scopes || [])
-    } catch {
-      setAlmError('Failed to load scopes.')
-    } finally {
-      setAlmLoadingStep('')
-    }
-  }
-
-  const loadAlmProcesses = async (sourceId: string, scopeId: string) => {
-    setAlmLoadingStep('processes')
-    setAlmProcesses([])
-    setAlmSelectedProcess('')
-    try {
-      const res = await axios.get(`/api/calm/${sourceId}/solution-processes?scopeId=${scopeId}`)
-      setAlmProcesses(res.data.processes || [])
-    } catch {
-      setAlmError('Failed to load solution processes.')
-    } finally {
-      setAlmLoadingStep('')
-    }
-  }
-
   const handleAlmUpload = async () => {
-    if (!almSelectedSource || !almSelectedProcess || !almDocName.trim()) return
+    if (!almSelectedSource || !almSelectedProject || !almDocName.trim()) return
     setAlmUploadStep('uploading')
     setAlmError('')
     try {
       const res = await axios.post(`/api/calm/${almSelectedSource}/push-spec`, {
         name: almDocName.trim(),
         content: specContent,
-        processId: almSelectedProcess,
         projectId: almSelectedProject,
         documentType: specType === 'functional' ? 'functional_spec' : 'technical_spec'
       })
@@ -261,10 +220,6 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
     setAlmSelectedSource('')
     setAlmProjects([])
     setAlmSelectedProject('')
-    setAlmScopes([])
-    setAlmSelectedScope('')
-    setAlmProcesses([])
-    setAlmSelectedProcess('')
     setAlmDocName('')
     setAlmError('')
     setAlmSuccessDoc(null)
@@ -479,10 +434,7 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
                             </label>
                             <select
                               value={almSelectedProject}
-                              onChange={e => {
-                                setAlmSelectedProject(e.target.value)
-                                if (e.target.value) loadAlmScopes(almSelectedSource, e.target.value)
-                              }}
+                              onChange={e => setAlmSelectedProject(e.target.value)}
                               className="input select text-sm"
                               disabled={almLoadingStep === 'projects' || almProjects.length === 0}
                             >
@@ -492,50 +444,9 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
                           </div>
                         )}
 
-                        {/* Scope */}
-                        {almSelectedProject && (
-                          <div className="input-group mb-0">
-                            <label className="input-label text-xs">
-                              Scope
-                              {almLoadingStep === 'scopes' && <span className="ml-2 text-muted">(loading...)</span>}
-                            </label>
-                            <select
-                              value={almSelectedScope}
-                              onChange={e => {
-                                setAlmSelectedScope(e.target.value)
-                                if (e.target.value) loadAlmProcesses(almSelectedSource, e.target.value)
-                              }}
-                              className="input select text-sm"
-                              disabled={almLoadingStep === 'scopes' || almScopes.length === 0}
-                            >
-                              <option value="">Select scope...</option>
-                              {almScopes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                            </select>
-                          </div>
-                        )}
-
-                        {/* Solution Process */}
-                        {almSelectedScope && (
-                          <div className="input-group mb-0">
-                            <label className="input-label text-xs">
-                              Solution Process
-                              {almLoadingStep === 'processes' && <span className="ml-2 text-muted">(loading...)</span>}
-                            </label>
-                            <select
-                              value={almSelectedProcess}
-                              onChange={e => setAlmSelectedProcess(e.target.value)}
-                              className="input select text-sm"
-                              disabled={almLoadingStep === 'processes' || almProcesses.length === 0}
-                            >
-                              <option value="">Select solution process...</option>
-                              {almProcesses.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                            </select>
-                          </div>
-                        )}
-
                         <button
                           onClick={handleAlmUpload}
-                          disabled={!almSelectedProcess || !almDocName.trim() || !!almLoadingStep}
+                          disabled={!almSelectedProject || !almDocName.trim() || !!almLoadingStep}
                           className="w-full btn btn-primary text-sm mt-1"
                         >
                           Upload to Cloud ALM
