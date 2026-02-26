@@ -8,6 +8,7 @@ import requests
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 import json
+import urllib.parse
 
 class CALMService:
     """Service for interacting with SAP Cloud ALM APIs"""
@@ -285,30 +286,23 @@ class CALMService:
         """
         try:
             self._using_demo_data = False
-            params = {}
+            filter_value = f"projectId eq '{project_id}'"
+            encoded_filter = urllib.parse.quote(filter_value, safe="' ")
+            url = f"{self.api_endpoint}/api/calm-documents/v1/Documents?$filter=projectId eq " + project_id
+            token = self._get_access_token()
             
-            # Build OData $filter expression
-            filter_conditions = []
-            # if project_id:
-            #     filter_conditions.append(f"projectId eq {project_id}")
-            # # if process_id:
-            # #     filter_conditions.append(f"solutionProcessId eq {process_id}")
-            # # if document_type and document_type != 'all':
-            # #     filter_conditions.append(f"documentType eq '{document_type}'")
-            
-            # if filter_conditions:
-            #     params['$filter'] = ' and '.join(filter_conditions)
-            params['filter'] = 'projectId eq '+project_id
-            # Add OData query options
-            # params['$expand'] = 'toStatus'
-            # params['$count'] = 'true'
-            
-            response = self._make_request(
-                'GET',
-                '/api/calm-documents/v1/Documents',
-                params=params
-            )
-            documents = response.get('value', response.get('documents', []))
+            headers = {}
+            headers['Authorization'] = f'Bearer {token}'
+            headers['Content-Type'] = 'application/json'
+            response = requests.get(url, headers=headers, timeout=60)
+            # response = self._make_request(
+            #     'GET',
+            #     '/api/calm-documents/v1/Documents',
+            #     params=params
+            # )
+            response.raise_for_status()
+            data = response.json()
+            documents = data.get('value', data.get('documents', []))
             return {'documents': documents, 'isDemo': False}
         except Exception as e:
             self._using_demo_data = True
