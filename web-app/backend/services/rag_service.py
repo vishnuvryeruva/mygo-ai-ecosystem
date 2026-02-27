@@ -319,7 +319,7 @@ Please provide a comprehensive answer based on the context above."""
                 parts = id.rsplit('_', 1)
                 if len(parts) > 0:
                     filename = parts[0]
-                    metadata = metadatas[i] if metadatas and i < len(metadatas) else {}
+                    metadata = (metadatas[i] if metadatas and i < len(metadatas) else None) or {}
                     
                     if filename not in file_info:
                         file_info[filename] = {
