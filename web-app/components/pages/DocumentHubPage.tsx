@@ -75,6 +75,10 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
     const [isSyncing, setIsSyncing] = useState(false)
     const [syncResult, setSyncResult] = useState<{ message: string; count: number; updated: number; added: number } | null>(null)
 
+    // Document viewer modal state
+    const [viewerDoc, setViewerDoc] = useState<{ name: string; content: string } | null>(null)
+    const [isLoadingContent, setIsLoadingContent] = useState(false)
+
     // Load initial documents
     useEffect(() => {
         fetchDocuments()
@@ -265,6 +269,21 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
         }
     }
 
+    const openDocumentViewer = async (doc: Document) => {
+        if (!doc.documentId) return
+        setIsLoadingContent(true)
+        setViewerDoc({ name: doc.name, content: '' })
+        try {
+            const res = await axios.get(`/api/documents/${doc.documentId}/view`)
+            setViewerDoc({ name: doc.name, content: res.data.content || '' })
+        } catch (err: any) {
+            const errMsg = err?.response?.data?.error || 'Failed to load document content.'
+            setViewerDoc({ name: doc.name, content: `<p style="color:red">${errMsg}</p>` })
+        } finally {
+            setIsLoadingContent(false)
+        }
+    }
+
     // Filter Logic
     const filteredDocs = documents.filter(doc => {
         if (sourceFilter !== 'All Sources' && doc.source !== sourceFilter) return false
@@ -389,9 +408,9 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                                         </svg>
                                         {doc.source === 'CALM' && doc.documentId ? (
                                             <button
-                                                onClick={() => window.open(`/api/documents/${doc.documentId}/download`, '_blank')}
+                                                onClick={() => openDocumentViewer(doc)}
                                                 className="hover:underline text-left text-blue-600 font-medium"
-                                                title="Click to download this document"
+                                                title="Click to view this document"
                                             >
                                                 {doc.name}
                                             </button>
@@ -419,6 +438,47 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                     </table>
                 )}
             </div>
+
+            {/* Document Viewer Modal */}
+            {viewerDoc && (
+                <div className="settings-modal-overlay" onClick={() => setViewerDoc(null)}>
+                    <div
+                        className="settings-modal"
+                        style={{ maxWidth: 860, width: '90vw', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="settings-modal-header">
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <h3 className="settings-modal-title" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {viewerDoc.name}
+                                </h3>
+                                <p className="settings-modal-desc">Document content</p>
+                            </div>
+                            <button className="settings-modal-close" onClick={() => setViewerDoc(null)}>×</button>
+                        </div>
+                        <div
+                            className="settings-modal-body"
+                            style={{ flex: 1, overflowY: 'auto', padding: '1.5rem' }}
+                        >
+                            {isLoadingContent ? (
+                                <div className="text-center p-8">
+                                    <div className="animate-spin h-8 w-8 border-4 border-blue-500 rounded-full border-t-transparent mx-auto mb-4"></div>
+                                    <p className="text-gray-500">Loading document content...</p>
+                                </div>
+                            ) : (
+                                <div
+                                    className="prose max-w-none"
+                                    style={{ fontSize: 14, lineHeight: 1.7 }}
+                                    dangerouslySetInnerHTML={{ __html: viewerDoc.content }}
+                                />
+                            )}
+                        </div>
+                        <div className="settings-modal-footer">
+                            <button className="btn btn-secondary" onClick={() => setViewerDoc(null)}>Close</button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Sync Modal */}
             {showSyncModal && (

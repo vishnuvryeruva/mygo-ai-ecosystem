@@ -750,6 +750,48 @@ def download_calm_document(document_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/documents/<document_id>/view', methods=['GET'])
+def view_calm_document(document_id):
+    """
+    Return the stored HTML content for a CALM document.
+    First checks the local vector store (saved during sync).
+    If not found locally, falls back to fetching live from CALM.
+    """
+    try:
+        # 1. Try local vector store first
+        html_content = rag_service.get_document_html(document_id)
+
+        if html_content:
+            return jsonify({"documentId": document_id, "content": html_content, "source": "local"})
+
+        # 2. Fall back to live CALM fetch
+        source_id = request.args.get('sourceId')
+        if not source_id:
+            sources = source_config_service.list_sources()
+            calm_source = next((s for s in sources if s['type'] == 'CALM'), None)
+            if not calm_source:
+                return jsonify({"error": "Document content not found locally and no CALM source configured"}), 404
+            source_id = calm_source['id']
+
+        source = source_config_service.get_source(source_id)
+        if not source:
+            return jsonify({"error": "Source not found"}), 404
+
+        service = get_calm_service(source.get('config'))
+        calm_doc = service.get_document(document_id)
+        html_content = calm_doc.get('content') or calm_doc.get('htmlContent') or calm_doc.get('text') or ''
+
+        if not html_content:
+            return jsonify({"error": "Document has no displayable content"}), 404
+
+        return jsonify({"documentId": document_id, "content": html_content, "source": "live"})
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 # ============================================================================
 # Document Sync Endpoints
 # ============================================================================
@@ -803,19 +845,33 @@ def sync_documents():
         
         # Process full document objects
         if documents:
+            calm_service_instance = get_calm_service(source.get('config'))
             for doc in documents:
                 try:
                     # Normalize document structure to handle both old and new API formats
                     normalized_doc = _normalize_document_structure(doc)
-                    
-                    # Add or update placeholder in RAG service
-                    result = rag_service.add_placeholder_document(normalized_doc)
+                    doc_id = normalized_doc.get('id')
+
+                    # Try to fetch real document content from CALM
+                    html_content = None
+                    try:
+                        calm_doc = calm_service_instance.get_document(doc_id)
+                        html_content = calm_doc.get('content') or calm_doc.get('htmlContent') or calm_doc.get('text')
+                    except Exception as fetch_err:
+                        print(f"Could not fetch content for document {doc_id}: {fetch_err}")
+
+                    if html_content:
+                        result = rag_service.ingest_calm_document(normalized_doc, html_content)
+                    else:
+                        result = rag_service.add_placeholder_document(normalized_doc)
+
                     results.append({
-                        "documentId": normalized_doc.get('id'),
+                        "documentId": doc_id,
                         "documentName": normalized_doc.get('name'),
                         "status": result.get('status'),
                         "message": result.get('message', ''),
                         "wasExisting": result.get('was_existing', False),
+                        "hasContent": bool(html_content),
                         "error": result.get('error')
                     })
                 except Exception as e:

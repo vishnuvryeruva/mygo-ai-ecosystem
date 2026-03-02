@@ -318,6 +318,30 @@ class CALMService:
             print(f"Error listing documents (using demo data): {e}")
             return {'documents': self._get_demo_documents(), 'isDemo': True, 'error': str(e)}
     
+    def get_document(self, document_id: str) -> Dict:
+        """
+        Get a single document by ID, including its content field
+        
+        Args:
+            document_id: Document UUID
+            
+        Returns:
+            Document object with content field
+        """
+        try:
+            token = self._get_access_token()
+            url = f"{self.api_endpoint}/api/calm-documents/v1/Documents/{document_id}"
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json'
+            }
+            response = requests.get(url, headers=headers, timeout=60)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            print(f"Error getting document {document_id}: {e}")
+            raise
+
     def get_document_content(self, document_id: str) -> bytes:
         """
         Download document content
@@ -332,7 +356,7 @@ class CALMService:
             token = self._get_access_token()
             
             response = requests.get(
-                f"{self.api_endpoint}/api/calm-documents/v1/documents/{document_id}/content",
+                f"{self.api_endpoint}/api/calm-documents/v1/Documents/{document_id}/content",
                 headers={'Authorization': f'Bearer {token}'},
                 timeout=120
             )

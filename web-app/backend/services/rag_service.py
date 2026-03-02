@@ -70,6 +70,106 @@ class RAGService:
             print(f"Error checking document existence: {e}")
             return False
     
+    def ingest_calm_document(self, doc_metadata, html_content: str):
+        """
+        Ingest a CALM document with real HTML content into the vector database.
+        Strips HTML tags for embedding/search, stores raw HTML in metadata for display.
+        Replaces any existing placeholder or chunks for this document.
+        """
+        import re
+
+        doc_id = doc_metadata.get('id', 'unknown')
+        meta = doc_metadata.get('metadata', doc_metadata)
+        filename = meta.get('name', doc_metadata.get('name', 'unknown'))
+        doc_type = meta.get('type') or meta.get('documentType') or 'Document'
+        source = meta.get('source', 'CALM')
+        project = meta.get('project', 'N/A')
+        updated_by = meta.get('updatedBy', 'System')
+        updated_on = str(meta.get('updatedOn', meta.get('lastModified', 'N/A')))
+        web_url = meta.get('webUrl', '')
+        uuid = meta.get('uuid', '')
+        display_id = meta.get('displayId', '')
+        project_id = meta.get('projectId', '')
+        scope_id = meta.get('scopeId', '')
+
+        # Strip HTML tags to get plain text for embeddings
+        plain_text = re.sub(r'<[^>]+>', ' ', html_content)
+        plain_text = re.sub(r'\s+', ' ', plain_text).strip()
+
+        if not plain_text:
+            # Fall back to placeholder if content is empty after stripping
+            return self.add_placeholder_document(doc_metadata)
+
+        # Delete existing chunks for this document
+        try:
+            existing = self.collection.get()
+            ids_to_delete = [i for i in existing['ids'] if i.startswith(f"{doc_id}_")]
+            if ids_to_delete:
+                self.collection.delete(ids=ids_to_delete)
+        except Exception as e:
+            print(f"Warning: could not delete existing chunks for {doc_id}: {e}")
+
+        chunks = self._chunk_text(plain_text, chunk_size=500, overlap=50)
+
+        # Truncate html_content to fit ChromaDB metadata limit (~1MB, but keep it reasonable)
+        MAX_HTML = 50000
+        stored_html = html_content[:MAX_HTML] if len(html_content) > MAX_HTML else html_content
+
+        base_metadata = {
+            "source": source,
+            "type": doc_type,
+            "project": project,
+            "updatedBy": updated_by,
+            "updatedOn": updated_on,
+            "webUrl": web_url,
+            "is_placeholder": False,
+            "document_name": filename,
+            "document_id": doc_id,
+            "html_content": stored_html,
+        }
+        if uuid:
+            base_metadata["uuid"] = uuid
+        if display_id:
+            base_metadata["displayId"] = display_id
+        if project_id:
+            base_metadata["projectId"] = project_id
+        if scope_id:
+            base_metadata["scopeId"] = scope_id
+
+        for i, chunk in enumerate(chunks):
+            chunk_meta = dict(base_metadata)
+            # Only store html_content on the first chunk to avoid redundant storage
+            if i > 0:
+                chunk_meta["html_content"] = ""
+            embedding = self._create_embedding(chunk)
+            self.collection.add(
+                embeddings=[embedding],
+                documents=[chunk],
+                ids=[f"{doc_id}_{i}"],
+                metadatas=[chunk_meta]
+            )
+
+        return {"status": "success", "chunks": len(chunks), "was_existing": False}
+
+    def get_document_html(self, doc_id: str) -> str:
+        """
+        Retrieve the stored HTML content for a CALM document by its document_id.
+        Returns the html_content from the first chunk, or empty string if not found.
+        """
+        try:
+            result = self.collection.get(
+                where={"document_id": doc_id}
+            )
+            metadatas = result.get('metadatas', [])
+            for m in metadatas:
+                html = m.get('html_content', '')
+                if html:
+                    return html
+            return ''
+        except Exception as e:
+            print(f"Error retrieving html content for {doc_id}: {e}")
+            return ''
+
     def add_placeholder_document(self, doc_metadata):
         """Add or update a placeholder document in the database (for synced external files)"""
         try:
