@@ -1,375 +1,112 @@
 'use client'
 
-import { useState, useMemo } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+/**
+ * RichTextResponse — renders markdown-like text in chat bubbles.
+ * Supports **bold**, bullet lists, numbered lists, and code blocks.
+ * Keeps things lightweight — no external markdown parser needed.
+ */
+export default function RichTextResponse({ content }: { content: string }) {
+    if (!content) return null
 
-interface Section {
-    id: string
-    title: string
-    level: number
-    content: string
-}
-
-interface RichTextResponseProps {
-    content: string
-    title?: string
-    showDownload?: boolean
-    downloadFileName?: string
-    onDownload?: (format: 'docx' | 'pdf' | 'excel') => void
-    showCopy?: boolean
-    collapsible?: boolean
-    className?: string
-}
-
-export default function RichTextResponse({
-    content,
-    title,
-    showDownload = false,
-    downloadFileName = 'document',
-    onDownload,
-    showCopy = true,
-    collapsible = false,
-    className = ''
-}: RichTextResponseProps) {
-    const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
-    const [allExpanded, setAllExpanded] = useState(false)
-    const [copied, setCopied] = useState(false)
-
-    // Parse content into sections based on headings
-    const sections = useMemo((): Section[] => {
-        if (!collapsible) return []
-
-        const lines = content.split('\n')
-        const parsedSections: Section[] = []
-        let currentSection: Section | null = null
-        let contentBuffer: string[] = []
-
-        lines.forEach((line, index) => {
-            const headingMatch = line.match(/^(#{1,3})\s+(.+)$/)
-
-            if (headingMatch) {
-                // Save previous section
-                if (currentSection !== null) {
-                    currentSection.content = contentBuffer.join('\n')
-                    parsedSections.push(currentSection)
-                }
-
-                // Start new section
-                currentSection = {
-                    id: `section-${index}`,
-                    title: headingMatch[2],
-                    level: headingMatch[1].length,
-                    content: ''
-                }
-                contentBuffer = []
-            } else if (currentSection !== null) {
-                contentBuffer.push(line)
-            } else {
-                // Content before first heading
-                if (line.trim()) {
-                    contentBuffer.push(line)
-                }
-            }
-        })
-
-        // Save last section
-        if (currentSection !== null) {
-            (currentSection as Section).content = contentBuffer.join('\n')
-            parsedSections.push(currentSection as Section)
-        }
-
-        return parsedSections
-    }, [content, collapsible])
-
-    const toggleSection = (sectionId: string) => {
-        setExpandedSections(prev => {
-            const newSet = new Set(prev)
-            if (newSet.has(sectionId)) {
-                newSet.delete(sectionId)
-            } else {
-                newSet.add(sectionId)
-            }
-            return newSet
-        })
-    }
-
-    const toggleAll = () => {
-        if (allExpanded) {
-            setExpandedSections(new Set())
-        } else {
-            setExpandedSections(new Set(sections.map(s => s.id)))
-        }
-        setAllExpanded(!allExpanded)
-    }
-
-    const copyToClipboard = async () => {
-        try {
-            await navigator.clipboard.writeText(content)
-            setCopied(true)
-            setTimeout(() => setCopied(false), 2000)
-        } catch (err) {
-            console.error('Failed to copy:', err)
-        }
-    }
-
-    const isSectionExpanded = (sectionId: string) => expandedSections.has(sectionId)
-
-    // Custom components for ReactMarkdown
-    const markdownComponents = {
-        h1: ({ children }: any) => (
-            <h1 className="text-xl font-bold text-heading mt-4 mb-2 pb-2 border-b border-white/10">
-                {children}
-            </h1>
-        ),
-        h2: ({ children }: any) => (
-            <h2 className="text-lg font-semibold text-heading mt-3 mb-2">
-                {children}
-            </h2>
-        ),
-        h3: ({ children }: any) => (
-            <h3 className="text-base font-semibold text-heading mt-2 mb-1">
-                {children}
-            </h3>
-        ),
-        p: ({ children }: any) => (
-            <p className="text-main mb-2 leading-relaxed">
-                {children}
-            </p>
-        ),
-        ul: ({ children }: any) => (
-            <ul className="list-disc list-inside mb-2 ml-4 space-y-1">
-                {children}
-            </ul>
-        ),
-        ol: ({ children }: any) => (
-            <ol className="list-decimal list-inside mb-2 ml-4 space-y-1">
-                {children}
-            </ol>
-        ),
-        li: ({ children }: any) => (
-            <li className="text-main">
-                {children}
-            </li>
-        ),
-        code: ({ inline, children }: any) => (
-            inline ? (
-                <code className="bg-white/10 text-orange-400 px-1.5 py-0.5 rounded text-sm font-mono">
-                    {children}
-                </code>
-            ) : (
-                <code className="block bg-gray-900 text-green-400 p-4 rounded-lg text-sm font-mono overflow-x-auto my-2">
-                    {children}
-                </code>
-            )
-        ),
-        pre: ({ children }: any) => (
-            <pre className="bg-gray-900 text-green-400 p-4 rounded-lg text-sm font-mono overflow-x-auto my-3">
-                {children}
-            </pre>
-        ),
-        blockquote: ({ children }: any) => (
-            <blockquote className="border-l-4 border-orange-500 pl-4 italic text-gray-600 my-2">
-                {children}
-            </blockquote>
-        ),
-        strong: ({ children }: any) => (
-            <strong className="font-semibold text-heading">
-                {children}
-            </strong>
-        ),
-        em: ({ children }: any) => (
-            <em className="italic text-main">
-                {children}
-            </em>
-        ),
-        hr: () => (
-            <hr className="my-4 border-gray-300" />
-        ),
-        table: ({ children }: any) => (
-            <div className="overflow-x-auto my-3">
-                <table className="min-w-full border border-gray-300 rounded-lg">
-                    {children}
-                </table>
-            </div>
-        ),
-        thead: ({ children }: any) => (
-            <thead className="bg-gray-100">
-                {children}
-            </thead>
-        ),
-        th: ({ children }: any) => (
-            <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700 border-b border-gray-300">
-                {children}
-            </th>
-        ),
-        td: ({ children }: any) => (
-            <td className="px-4 py-2 text-sm text-main border-b border-gray-200">
-                {children}
-            </td>
-        ),
-    }
+    // Split into paragraphs
+    const paragraphs = content.split('\n\n')
 
     return (
-        <div className={`glass-card rounded-xl shadow-lg border border-white/10 overflow-hidden ${className}`}>
-            {/* Header */}
-            <div className="bg-gradient-to-r from-orange-500 to-orange-600 px-6 py-4">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
-                            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                        </div>
-                        <h3 className="text-lg font-semibold text-white">
-                            {title || 'Generated Response'}
-                        </h3>
-                    </div>
+        <div style={{ fontSize: '0.83rem', lineHeight: 1.6, wordBreak: 'break-word' }}>
+            {paragraphs.map((para, pIdx) => {
+                const lines = para.split('\n')
 
-                    <div className="flex items-center gap-2">
-                        {showCopy && (
-                            <button
-                                onClick={copyToClipboard}
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white text-sm rounded-lg transition-colors"
-                            >
-                                {copied ? (
-                                    <>
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                        </svg>
-                                        Copied!
-                                    </>
-                                ) : (
-                                    <>
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                        </svg>
-                                        Copy
-                                    </>
-                                )}
-                            </button>
-                        )}
+                // Check if this is a list block
+                const isBulletList = lines.every(l => l.trim().startsWith('- ') || l.trim().startsWith('• ') || l.trim() === '')
+                const isNumberedList = lines.every(l => /^\d+\./.test(l.trim()) || l.trim() === '')
 
-                        {showDownload && onDownload && (
-                            <div className="relative group">
-                                <button className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-orange-600 text-sm rounded-lg hover:bg-gray-100 transition-colors font-medium">
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                    </svg>
-                                    Download
-                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                    </svg>
-                                </button>
-                                <div className="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 py-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10 min-w-[120px]">
-                                    <button
-                                        onClick={() => onDownload('docx')}
-                                        className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
-                                    >
-                                        <svg className="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 24 24">
-                                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" />
-                                        </svg>
-                                        Word (.docx)
-                                    </button>
-                                    <button
-                                        onClick={() => onDownload('pdf')}
-                                        className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
-                                    >
-                                        <svg className="w-4 h-4 text-red-600" fill="currentColor" viewBox="0 0 24 24">
-                                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" />
-                                        </svg>
-                                        PDF
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            </div>
+                if (isBulletList && lines.some(l => l.trim())) {
+                    return (
+                        <ul key={pIdx} style={{ margin: '6px 0', paddingLeft: '18px' }}>
+                            {lines.filter(l => l.trim()).map((line, lIdx) => (
+                                <li key={lIdx} style={{ marginBottom: '3px' }}>
+                                    <InlineFormat text={line.replace(/^[\s]*[-•]\s*/, '')} />
+                                </li>
+                            ))}
+                        </ul>
+                    )
+                }
 
-            {/* Collapsible Controls */}
-            {collapsible && sections.length > 0 && (
-                <div className="px-6 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
-                    <span className="text-sm text-gray-600">
-                        {sections.length} section{sections.length !== 1 ? 's' : ''}
-                    </span>
-                    <button
-                        onClick={toggleAll}
-                        className="text-sm text-orange-600 hover:text-orange-700 font-medium flex items-center gap-1"
-                    >
-                        {allExpanded ? (
-                            <>
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                                </svg>
-                                Collapse All
-                            </>
-                        ) : (
-                            <>
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                </svg>
-                                Expand All
-                            </>
-                        )}
-                    </button>
-                </div>
-            )}
+                if (isNumberedList && lines.some(l => l.trim())) {
+                    return (
+                        <ol key={pIdx} style={{ margin: '6px 0', paddingLeft: '18px' }}>
+                            {lines.filter(l => l.trim()).map((line, lIdx) => (
+                                <li key={lIdx} style={{ marginBottom: '3px' }}>
+                                    <InlineFormat text={line.replace(/^\d+\.\s*/, '')} />
+                                </li>
+                            ))}
+                        </ol>
+                    )
+                }
 
-            {/* Content */}
-            <div className="p-6">
-                {collapsible && sections.length > 0 ? (
-                    <div className="space-y-2">
-                        {sections.map((section) => (
-                            <div
-                                key={section.id}
-                                className="border border-gray-200 rounded-lg overflow-hidden"
-                            >
-                                <button
-                                    onClick={() => toggleSection(section.id)}
-                                    className="w-full px-4 py-3 bg-gray-50 hover:bg-gray-100 flex items-center justify-between transition-colors"
-                                >
-                                    <span className={`font-medium text-heading ${section.level === 1 ? 'text-base' : 'text-sm'}`}>
-                                        {section.title}
-                                    </span>
-                                    <svg
-                                        className={`w-5 h-5 text-gray-500 transition-transform duration-200 ${isSectionExpanded(section.id) ? 'rotate-180' : ''
-                                            }`}
-                                        fill="none"
-                                        stroke="currentColor"
-                                        viewBox="0 0 24 24"
-                                    >
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                    </svg>
-                                </button>
+                // Check for code block markers
+                if (para.trim().startsWith('```')) {
+                    const codeContent = para.replace(/```\w*\n?/, '').replace(/```$/, '')
+                    return (
+                        <pre key={pIdx} style={{
+                            background: '#1e293b',
+                            color: '#e2e8f0',
+                            padding: '10px 12px',
+                            borderRadius: '8px',
+                            fontSize: '0.78rem',
+                            fontFamily: "'SF Mono', 'Fira Code', monospace",
+                            overflow: 'auto',
+                            margin: '6px 0',
+                            whiteSpace: 'pre-wrap',
+                        }}>
+                            {codeContent}
+                        </pre>
+                    )
+                }
 
-                                <div
-                                    className={`overflow-hidden transition-all duration-300 ease-in-out ${isSectionExpanded(section.id) ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'
-                                        }`}
-                                >
-                                    <div className="px-4 py-3 bg-transparent border-t border-white/5">
-                                        <ReactMarkdown
-                                            remarkPlugins={[remarkGfm]}
-                                            components={markdownComponents}
-                                        >
-                                            {section.content}
-                                        </ReactMarkdown>
-                                    </div>
-                                </div>
-                            </div>
+                // Regular paragraph
+                return (
+                    <p key={pIdx} style={{ margin: '5px 0' }}>
+                        {lines.map((line, lIdx) => (
+                            <span key={lIdx}>
+                                {lIdx > 0 && <br />}
+                                <InlineFormat text={line} />
+                            </span>
                         ))}
-                    </div>
-                ) : (
-                    <div className="prose prose-sm max-w-none">
-                        <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            components={markdownComponents}
-                        >
-                            {content}
-                        </ReactMarkdown>
-                    </div>
-                )}
-            </div>
+                    </p>
+                )
+            })}
         </div>
+    )
+}
+
+/** Handles **bold** and `code` inline formatting */
+function InlineFormat({ text }: { text: string }) {
+    // Split by **bold** and `code` markers
+    const parts = text.split(/(\*\*.*?\*\*|`[^`]+`)/g)
+
+    return (
+        <>
+            {parts.map((part, i) => {
+                if (part.startsWith('**') && part.endsWith('**')) {
+                    return <strong key={i}>{part.slice(2, -2)}</strong>
+                }
+                if (part.startsWith('`') && part.endsWith('`')) {
+                    return (
+                        <code key={i} style={{
+                            background: '#f1f5f9',
+                            padding: '1px 5px',
+                            borderRadius: '4px',
+                            fontSize: '0.8em',
+                            fontFamily: "'SF Mono', 'Fira Code', monospace",
+                            color: '#c2410c',
+                        }}>
+                            {part.slice(1, -1)}
+                        </code>
+                    )
+                }
+                return <span key={i}>{part}</span>
+            })}
+        </>
     )
 }

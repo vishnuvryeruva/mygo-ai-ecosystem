@@ -27,38 +27,27 @@ export default function AuthenticatedLayout({
     const [chatbotMinimized, setChatbotMinimized] = useState(false)
     const [activeAgent, setActiveAgent] = useState<string | null>('ask-yoda')
 
-    const handleAgentSelect = useCallback((agentId: string) => {
+    // Agent selection — always opens the chatbot with the selected agent
+    const handleAgentSelect = useCallback((agentId: string, openModal?: boolean) => {
         setActiveAgent(agentId)
+        setChatbotOpen(true)
 
-        if (agentId === 'ask-yoda') {
-            setChatbotOpen(true)
-            setChatbotMinimized(false)
-        } else if (agentId === 'sync-documents') {
-            setActiveAgent('sync-documents')
-            setChatbotOpen(true)
-            setChatbotMinimized(false)
-        } else if (
-            [
-                'solution-advisor',
-                'spec-assistant',
-                'prompt-generator',
-                'explain-code',
-                'test-case-generator',
-                'code-advisor',
-            ].includes(agentId)
-        ) {
+        if (openModal) {
+            // Open the corresponding modal (chatbot stays minimized)
             setActiveModal(agentId)
-            setChatbotOpen(true)
             setChatbotMinimized(true)
+        } else {
+            // Just open the chatbot for this agent
+            setChatbotMinimized(false)
         }
     }, [])
 
-    // Listen for agent-select events from child pages
+    // Listen for agent-select events from child pages & chatbot action buttons
     useEffect(() => {
         const handler = (e: Event) => {
             const detail = (e as CustomEvent).detail
             if (detail?.agentId) {
-                handleAgentSelect(detail.agentId)
+                handleAgentSelect(detail.agentId, detail.openModal)
             }
         }
         window.addEventListener('agent-select', handler)
