@@ -1,15 +1,12 @@
 'use client'
 
-import { useTheme } from '@/context/ThemeContext'
-
-interface SidebarProps {
-    activeItem: string
-    onItemClick: (item: string) => void
-}
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 
 interface NavItem {
     id: string
     label: string
+    href: string
     icon: React.ReactNode
 }
 
@@ -17,6 +14,7 @@ const navItems: NavItem[] = [
     {
         id: 'dashboard',
         label: 'Dashboard',
+        href: '/dashboard',
         icon: (
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="7" height="7" />
@@ -29,6 +27,7 @@ const navItems: NavItem[] = [
     {
         id: 'document-hub',
         label: 'Document Hub',
+        href: '/document-hub',
         icon: (
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
@@ -41,6 +40,7 @@ const navItems: NavItem[] = [
     {
         id: 'code-repository',
         label: 'Code Repository',
+        href: '/code-repository',
         icon: (
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="16 18 22 12 16 6" />
@@ -51,6 +51,7 @@ const navItems: NavItem[] = [
     {
         id: 'agents',
         label: 'Agent Builder',
+        href: '/agents',
         icon: (
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
@@ -62,8 +63,8 @@ const navItems: NavItem[] = [
     },
 ]
 
-export default function Sidebar({ activeItem, onItemClick }: SidebarProps) {
-    const { theme } = useTheme()
+export default function Sidebar() {
+    const pathname = usePathname()
 
     return (
         <aside className="sidebar">
@@ -81,14 +82,14 @@ export default function Sidebar({ activeItem, onItemClick }: SidebarProps) {
             <nav className="sidebar-nav">
                 <div className="nav-section-title">NAVIGATION</div>
                 {navItems.map((item) => (
-                    <div
+                    <Link
                         key={item.id}
-                        className={`nav-item ${activeItem === item.id ? 'active' : ''}`}
-                        onClick={() => onItemClick(item.id)}
+                        href={item.href}
+                        className={`nav-item ${pathname === item.href || pathname.startsWith(item.href + '/') ? 'active' : ''}`}
                     >
                         <span className="nav-item-icon">{item.icon}</span>
                         <span>{item.label}</span>
-                    </div>
+                    </Link>
                 ))}
             </nav>
         </aside>
