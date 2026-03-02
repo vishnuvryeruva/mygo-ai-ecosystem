@@ -718,6 +718,37 @@ def calm_list_documents(source_id):
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/documents/<document_id>/download', methods=['GET'])
+def download_calm_document(document_id):
+    """Download document content from CALM"""
+    try:
+        source_id = request.args.get('sourceId')
+        
+        if not source_id:
+            # Fallback to the first CALM source if not explicitly provided
+            sources = source_config_service.list_sources()
+            calm_source = next((s for s in sources if s['type'] == 'CALM'), None)
+            if not calm_source:
+                return jsonify({"error": "No CALM source found"}), 404
+            source_id = calm_source['id']
+            
+        source = source_config_service.get_source(source_id)
+        if not source:
+            return jsonify({"error": "Source not found"}), 404
+            
+        service = get_calm_service(source.get('config'))
+        content = service.get_document_content(document_id)
+        
+        from flask import make_response
+        response = make_response(content)
+        # Content-Type will be application/octet-stream if unknown, or text/html if returned by CALM
+        response.headers['Content-Disposition'] = f'attachment; filename="document_{document_id}"'
+        return response
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 
 # ============================================================================
 # Document Sync Endpoints

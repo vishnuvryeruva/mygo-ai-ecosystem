@@ -330,6 +330,7 @@ Please provide a comprehensive answer based on the context above."""
                             'updatedBy': metadata.get('updatedBy', 'System'),
                             'updatedOn': metadata.get('updatedOn', 'N/A'),
                             'webUrl': metadata.get('webUrl'),
+                            'documentId': metadata.get('uuid') or metadata.get('id', ''),
                             'chunks': 0,
                             'estimated_size': 0
                         }
@@ -351,6 +352,7 @@ Please provide a comprehensive answer based on the context above."""
                     'updatedBy': info['updatedBy'],
                     'updatedOn': info['updatedOn'],
                     'webUrl': info.get('webUrl'),
+                    'documentId': info.get('documentId'),
                     'size': f"{size_kb:.1f} KB" if size_kb >= 1 else f"{info['estimated_size']} bytes",
                     'chunks': info['chunks']
                 })

@@ -5,7 +5,21 @@
  * Supports **bold**, bullet lists, numbered lists, and code blocks.
  * Keeps things lightweight — no external markdown parser needed.
  */
-export default function RichTextResponse({ content }: { content: string }) {
+export default function RichTextResponse({
+    content,
+    title,
+    showCopy,
+    showDownload,
+    collapsible,
+    onDownload
+}: {
+    content: string;
+    title?: string;
+    showCopy?: boolean;
+    showDownload?: boolean;
+    collapsible?: boolean;
+    onDownload?: any;
+}) {
     if (!content) return null
 
     // Split into paragraphs

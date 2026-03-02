@@ -74,13 +74,7 @@ export default function AskYodaModal({ onClose }: AskYodaModalProps) {
 
           {/* Answer with Rich Text */}
           {answer && (
-            <RichTextResponse
-              content={answer}
-              title="Answer"
-              showCopy={true}
-              showDownload={false}
-              collapsible={false}
-            />
+            <RichTextResponse content={answer} />
           )}
         </div>
       </div>

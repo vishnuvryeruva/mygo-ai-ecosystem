@@ -29,6 +29,7 @@ interface Document {
     updatedBy: string
     updatedOn: string
     webUrl?: string
+    documentId?: string
 }
 
 const sourceColors: Record<string, { bg: string; text: string }> = {
@@ -104,7 +105,7 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                 const docName = doc.title || doc.name || doc.metadata?.name || doc.filename
                 const docTypeCode = doc.documentTypeCode || doc.type || doc.metadata?.documentType
                 const docType = documentTypeNames[docTypeCode] || docTypeCode || 'Document'
-                
+
                 return {
                     id: docId,
                     name: docName,
@@ -113,7 +114,8 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                     project: doc.project || doc.metadata?.project || 'N/A',
                     updatedBy: doc.updatedBy || doc.metadata?.updatedBy || 'System',
                     updatedOn: doc.updatedOn || (doc.modifiedAt ? new Date(doc.modifiedAt).toLocaleDateString() : (doc.metadata?.updatedAt ? new Date(doc.metadata.updatedAt).toLocaleDateString() : 'N/A')),
-                    webUrl: doc.webUrl || doc.metadata?.webUrl
+                    webUrl: doc.webUrl || doc.metadata?.webUrl,
+                    documentId: doc.documentId || doc.metadata?.uuid
                 }
             })
             setDocuments(mappedDocs)
@@ -154,14 +156,14 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                 const res = await axios.get(`/api/calm/${selectedSource}/documents?projectId=${selectedProject}`)
                 const docs = res.data.documents || []
                 setDocsToSync(docs)
-                
+
                 // Check sync status for all documents
                 const docIds = docs.map((doc: any) => doc.uuid || doc.id)
                 const statusRes = await axios.post('/api/sync/check', {
                     documentIds: docIds
                 })
                 setSyncStatus(statusRes.data.syncStatus || {})
-                
+
                 // Select all documents by default
                 setSelectedDocIds(new Set(docIds))
             } catch (err) {
@@ -178,13 +180,13 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                     const docId = doc.uuid || doc.id
                     return selectedDocIds.has(docId)
                 })
-                
+
                 if (selectedDocs.length === 0) {
                     alert('Please select at least one document to sync.')
                     setIsSyncing(false)
                     return
                 }
-                
+
                 const res = await axios.post('/api/sync', {
                     sourceId: selectedSource,
                     documents: selectedDocs.map(doc => ({
@@ -208,14 +210,14 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                         }
                     }))
                 })
-                
+
                 // Count updated vs newly added
                 const results = res.data.results || []
                 const updated = results.filter((r: any) => r.wasExisting).length
                 const added = results.filter((r: any) => !r.wasExisting && r.status === 'success').length
-                
-                setSyncResult({ 
-                    message: res.data.message, 
+
+                setSyncResult({
+                    message: res.data.message,
                     count: results.length,
                     updated: updated,
                     added: added
@@ -241,7 +243,7 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
         setSelectedDocIds(new Set())
         setSyncStatus({})
     }
-    
+
     const toggleDocSelection = (docId: string) => {
         const newSelected = new Set(selectedDocIds)
         if (newSelected.has(docId)) {
@@ -251,7 +253,7 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
         }
         setSelectedDocIds(newSelected)
     }
-    
+
     const toggleSelectAll = () => {
         if (selectedDocIds.size === docsToSync.length) {
             // Deselect all
@@ -385,12 +387,20 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                                             <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
                                             <polyline points="14 2 14 8 20 8" />
                                         </svg>
-                                        {doc.webUrl ? (
-                                            <a href={doc.webUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                                        {doc.source === 'CALM' && doc.documentId ? (
+                                            <button
+                                                onClick={() => window.open(`/api/documents/${doc.documentId}/download`, '_blank')}
+                                                className="hover:underline text-left text-blue-600 font-medium"
+                                                title="Click to download this document"
+                                            >
+                                                {doc.name}
+                                            </button>
+                                        ) : doc.webUrl ? (
+                                            <a href={doc.webUrl} target="_blank" rel="noopener noreferrer" className="hover:underline text-blue-600 font-medium overflow-hidden text-ellipsis whitespace-nowrap" title="Click to view external link">
                                                 {doc.name}
                                             </a>
                                         ) : (
-                                            <span>{doc.name}</span>
+                                            <span className="overflow-hidden text-ellipsis whitespace-nowrap" title={doc.name}>{doc.name}</span>
                                         )}
                                     </td>
                                     <td>{doc.updatedBy}</td>
@@ -494,10 +504,10 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                                                     const typeName = documentTypeNames[typeCode] || typeCode || 'Document'
                                                     const isSelected = selectedDocIds.has(docId)
                                                     const isSynced = syncStatus[docId]
-                                                    
+
                                                     return (
-                                                        <div 
-                                                            key={docId} 
+                                                        <div
+                                                            key={docId}
                                                             className="text-sm py-2 px-2 border-b last:border-0 flex items-center gap-3 hover:bg-gray-100 cursor-pointer"
                                                             onClick={() => toggleDocSelection(docId)}
                                                         >
@@ -524,7 +534,7 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                                                 })}
                                             </div>
                                             <p className="mt-4 text-sm text-gray-600">
-                                                Selected <strong>{selectedDocIds.size}</strong> document(s). 
+                                                Selected <strong>{selectedDocIds.size}</strong> document(s).
                                                 {selectedDocIds.size > 0 && Object.values(syncStatus).filter(Boolean).length > 0 && (
                                                     <span className="ml-2 text-blue-600">
                                                         Existing documents will be updated.
