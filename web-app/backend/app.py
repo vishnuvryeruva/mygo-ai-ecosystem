@@ -1012,10 +1012,11 @@ def push_test_cases_to_calm(source_id):
         data = request.json
         name = data.get('name')
         content = data.get('content')
-        process_id = data.get('processId')
+        project_id = data.get('projectId')
+        process_id = data.get('processId', '')
         
-        if not all([name, content, process_id]):
-            return jsonify({"error": "name, content, and processId are required"}), 400
+        if not all([name, content, project_id]):
+            return jsonify({"error": "name, content, and projectId are required"}), 400
         
         source = source_config_service.get_source(source_id)
         if not source:
@@ -1031,7 +1032,8 @@ def push_test_cases_to_calm(source_id):
             name=name,
             content=content,
             document_type='test_case',
-            process_id=process_id
+            process_id=process_id,
+            project_id=project_id
         )
         
         return jsonify({

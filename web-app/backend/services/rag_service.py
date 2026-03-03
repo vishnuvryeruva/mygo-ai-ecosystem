@@ -422,15 +422,18 @@ Please provide a comprehensive answer based on the context above."""
                     metadata = (metadatas[i] if metadatas and i < len(metadatas) else None) or {}
                     
                     if filename not in file_info:
+                        # Extract real document name from metadata if available
+                        real_name = metadata.get('document_name') or metadata.get('name') or metadata.get('title') or filename
+                        
                         file_info[filename] = {
-                            'name': filename,
+                            'name': real_name,
                             'type': metadata.get('type') or self._get_file_type(filename),
                             'source': metadata.get('source', 'File Upload'),
                             'project': metadata.get('project', 'N/A'),
                             'updatedBy': metadata.get('updatedBy', 'System'),
                             'updatedOn': metadata.get('updatedOn', 'N/A'),
                             'webUrl': metadata.get('webUrl'),
-                            'documentId': metadata.get('uuid') or metadata.get('id', ''),
+                            'documentId': metadata.get('uuid') or metadata.get('document_id') or metadata.get('id') or filename,
                             'chunks': 0,
                             'estimated_size': 0
                         }
