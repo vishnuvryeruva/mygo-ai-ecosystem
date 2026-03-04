@@ -75,6 +75,11 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
     const [isSyncing, setIsSyncing] = useState(false)
     const [syncResult, setSyncResult] = useState<{ message: string; count: number; updated: number; added: number } | null>(null)
 
+    // Document selection & delete state
+    const [selectedDocumentIds, setSelectedDocumentIds] = useState<Set<string>>(new Set())
+    const [isDeleting, setIsDeleting] = useState(false)
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+
     // Document viewer modal state
     const [viewerDoc, setViewerDoc] = useState<{ name: string; content: string } | null>(null)
     const [isLoadingContent, setIsLoadingContent] = useState(false)
@@ -269,6 +274,40 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
         }
     }
 
+    const toggleDocumentSelection = (id: string) => {
+        setSelectedDocumentIds(prev => {
+            const next = new Set(prev)
+            next.has(id) ? next.delete(id) : next.add(id)
+            return next
+        })
+    }
+
+    const toggleSelectAllDocuments = () => {
+        if (selectedDocumentIds.size === filteredDocs.length) {
+            setSelectedDocumentIds(new Set())
+        } else {
+            setSelectedDocumentIds(new Set(filteredDocs.map(d => d.id)))
+        }
+    }
+
+    const handleDeleteSelected = async () => {
+        setIsDeleting(true)
+        setShowDeleteConfirm(false)
+        try {
+            await Promise.all(
+                Array.from(selectedDocumentIds).map(id =>
+                    axios.delete(`/api/documents/${encodeURIComponent(id)}`)
+                )
+            )
+            setSelectedDocumentIds(new Set())
+            await fetchDocuments()
+        } catch (err) {
+            console.error('Delete failed:', err)
+        } finally {
+            setIsDeleting(false)
+        }
+    }
+
     const openDocumentViewer = async (doc: Document) => {
         if (!doc.documentId) return
         setIsLoadingContent(true)
@@ -365,10 +404,28 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                 </div>
             </div>
 
-            {/* Document Count */}
-            <p className="doc-hub-count">
-                <span className="doc-hub-count-num">{filteredDocs.length}</span> documents found
-            </p>
+            {/* Document Count & Bulk Actions */}
+            <div className="flex items-center justify-between mb-2">
+                <p className="doc-hub-count" style={{ margin: 0 }}>
+                    <span className="doc-hub-count-num">{filteredDocs.length}</span> documents found
+                </p>
+                {selectedDocumentIds.size > 0 && (
+                    <button
+                        className="btn"
+                        onClick={() => setShowDeleteConfirm(true)}
+                        disabled={isDeleting}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, backgroundColor: '#ef4444', color: '#fff', border: 'none' }}
+                    >
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                            <path d="M10 11v6M14 11v6" />
+                            <path d="M9 6V4h6v2" />
+                        </svg>
+                        {isDeleting ? 'Deleting...' : `Delete (${selectedDocumentIds.size})`}
+                    </button>
+                )}
+            </div>
 
             {/* Document Table */}
             <div className="doc-hub-table-wrapper">
@@ -378,6 +435,15 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                     <table className="doc-hub-table">
                         <thead>
                             <tr>
+                                <th style={{ width: 40, textAlign: 'center' }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={filteredDocs.length > 0 && selectedDocumentIds.size === filteredDocs.length}
+                                        onChange={toggleSelectAllDocuments}
+                                        style={{ cursor: 'pointer' }}
+                                        title="Select all"
+                                    />
+                                </th>
                                 <th>SOURCE</th>
                                 <th>TYPE</th>
                                 <th>DOCUMENT NAME</th>
@@ -388,7 +454,15 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                         </thead>
                         <tbody>
                             {filteredDocs.map((doc) => (
-                                <tr key={doc.id}>
+                                <tr key={doc.id} style={selectedDocumentIds.has(doc.id) ? { backgroundColor: '#f0f7ff' } : {}}>
+                                    <td style={{ textAlign: 'center' }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedDocumentIds.has(doc.id)}
+                                            onChange={() => toggleDocumentSelection(doc.id)}
+                                            style={{ cursor: 'pointer' }}
+                                        />
+                                    </td>
                                     <td>
                                         <span
                                             className="doc-source-badge"
@@ -429,7 +503,7 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                             ))}
                             {filteredDocs.length === 0 && (
                                 <tr>
-                                    <td colSpan={6} className="text-center p-8 text-gray-400">
+                                    <td colSpan={7} className="text-center p-8 text-gray-400">
                                         No documents found. Try adjusting filters or syncing a source.
                                     </td>
                                 </tr>
@@ -475,6 +549,34 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                         </div>
                         <div className="settings-modal-footer">
                             <button className="btn btn-secondary" onClick={() => setViewerDoc(null)}>Close</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Delete Confirmation Dialog */}
+            {showDeleteConfirm && (
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
+                    <div className="modal max-w-md">
+                        <div className="modal-header">
+                            <h3 className="modal-title">Delete Documents</h3>
+                        </div>
+                        <div className="modal-body">
+                            <p className="text-main">
+                                Are you sure you want to delete <strong className="text-heading">{selectedDocumentIds.size} document{selectedDocumentIds.size > 1 ? 's' : ''}</strong> from your account? This action cannot be undone.
+                            </p>
+                        </div>
+                        <div className="modal-footer">
+                            <button onClick={() => setShowDeleteConfirm(false)} className="btn btn-secondary">
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleDeleteSelected}
+                                className="btn"
+                                style={{ backgroundColor: '#ef4444', color: '#fff', border: 'none' }}
+                            >
+                                Delete
+                            </button>
                         </div>
                     </div>
                 </div>
