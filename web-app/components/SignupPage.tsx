@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import axios from 'axios'
 
 interface SignupPageProps {
     onSignup: (token: string, user: { id: string; name: string; email: string }) => void
@@ -28,19 +29,14 @@ export default function SignupPage({ onSignup }: SignupPageProps) {
 
         setIsLoading(true)
         try {
-            const res = await fetch('http://localhost:5001/api/auth/register', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, email, password }),
-            })
-            const data = await res.json()
-            if (!res.ok) {
-                setError(data.error || 'Registration failed')
-                return
-            }
+            const { data } = await axios.post('/api/auth/register', { name, email, password })
             onSignup(data.token, data.user)
-        } catch {
-            setError('Cannot connect to server. Please try again.')
+        } catch (err: unknown) {
+            if (axios.isAxiosError(err)) {
+                setError(err.response?.data?.error || 'Registration failed')
+            } else {
+                setError('Cannot connect to server. Please try again.')
+            }
         } finally {
             setIsLoading(false)
         }

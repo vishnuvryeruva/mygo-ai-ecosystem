@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import axios from 'axios'
 
 interface LoginPageProps {
     onLogin: (token: string, user: { id: string; name: string; email: string }) => void
@@ -20,19 +21,14 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         setError('')
         setIsLoading(true)
         try {
-            const res = await fetch('http://localhost:5001/api/auth/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password }),
-            })
-            const data = await res.json()
-            if (!res.ok) {
-                setError(data.error || 'Login failed')
-                return
-            }
+            const { data } = await axios.post('/api/auth/login', { email, password })
             onLogin(data.token, data.user)
-        } catch {
-            setError('Cannot connect to server. Please try again.')
+        } catch (err: unknown) {
+            if (axios.isAxiosError(err)) {
+                setError(err.response?.data?.error || 'Login failed')
+            } else {
+                setError('Cannot connect to server. Please try again.')
+            }
         } finally {
             setIsLoading(false)
         }
