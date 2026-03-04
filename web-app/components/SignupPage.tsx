@@ -3,34 +3,42 @@
 import { useState } from 'react'
 import Link from 'next/link'
 
-interface LoginPageProps {
-    onLogin: (token: string, user: { id: string; name: string; email: string }) => void
+interface SignupPageProps {
+    onSignup: (token: string, user: { id: string; name: string; email: string }) => void
 }
 
-export default function LoginPage({ onLogin }: LoginPageProps) {
+export default function SignupPage({ onSignup }: SignupPageProps) {
+    const [name, setName] = useState('')
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
-    const [isLoading, setIsLoading] = useState(false)
+    const [confirmPassword, setConfirmPassword] = useState('')
     const [showPassword, setShowPassword] = useState(false)
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+    const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState('')
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
-        if (!email.trim() || !password.trim()) return
         setError('')
+
+        if (password !== confirmPassword) {
+            setError('Passwords do not match')
+            return
+        }
+
         setIsLoading(true)
         try {
-            const res = await fetch('http://localhost:5001/api/auth/login', {
+            const res = await fetch('http://localhost:5001/api/auth/register', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password }),
+                body: JSON.stringify({ name, email, password }),
             })
             const data = await res.json()
             if (!res.ok) {
-                setError(data.error || 'Login failed')
+                setError(data.error || 'Registration failed')
                 return
             }
-            onLogin(data.token, data.user)
+            onSignup(data.token, data.user)
         } catch {
             setError('Cannot connect to server. Please try again.')
         } finally {
@@ -40,7 +48,6 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
 
     return (
         <div className="login-page">
-            {/* Background decoration */}
             <div className="login-bg-decoration">
                 <div className="login-bg-circle login-bg-circle-1" />
                 <div className="login-bg-circle login-bg-circle-2" />
@@ -90,12 +97,12 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                     </div>
                 </div>
 
-                {/* Right panel - login form */}
+                {/* Right panel - signup form */}
                 <div className="login-form-panel">
                     <div className="login-form-content">
                         <div className="login-form-header">
-                            <h2>Welcome back</h2>
-                            <p>Sign in to your YODA workspace</p>
+                            <h2>Create your account</h2>
+                            <p>Join YODA and start your AI journey</p>
                         </div>
 
                         {error && (
@@ -110,6 +117,27 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                         )}
 
                         <form onSubmit={handleSubmit} className="login-form">
+                            {/* Full name */}
+                            <div className="login-field">
+                                <label htmlFor="name">Full Name</label>
+                                <div className="login-input-wrapper">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+                                        <circle cx="12" cy="7" r="4" />
+                                    </svg>
+                                    <input
+                                        id="name"
+                                        type="text"
+                                        placeholder="John Doe"
+                                        value={name}
+                                        onChange={(e) => setName(e.target.value)}
+                                        required
+                                        autoComplete="name"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Email */}
                             <div className="login-field">
                                 <label htmlFor="email">Email</label>
                                 <div className="login-input-wrapper">
@@ -129,6 +157,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                                 </div>
                             </div>
 
+                            {/* Password */}
                             <div className="login-field">
                                 <label htmlFor="password">Password</label>
                                 <div className="login-input-wrapper">
@@ -143,7 +172,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                                         value={password}
                                         onChange={(e) => setPassword(e.target.value)}
                                         required
-                                        autoComplete="current-password"
+                                        autoComplete="new-password"
                                     />
                                     <button
                                         type="button"
@@ -165,21 +194,58 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                                 </div>
                             </div>
 
+                            {/* Confirm password */}
+                            <div className="login-field">
+                                <label htmlFor="confirmPassword">Confirm Password</label>
+                                <div className="login-input-wrapper">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                                        <path d="M7 11V7a5 5 0 0110 0v4" />
+                                    </svg>
+                                    <input
+                                        id="confirmPassword"
+                                        type={showConfirmPassword ? 'text' : 'password'}
+                                        placeholder="••••••••"
+                                        value={confirmPassword}
+                                        onChange={(e) => setConfirmPassword(e.target.value)}
+                                        required
+                                        autoComplete="new-password"
+                                    />
+                                    <button
+                                        type="button"
+                                        className="login-password-toggle"
+                                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                                    >
+                                        {showConfirmPassword ? (
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" />
+                                                <line x1="1" y1="1" x2="23" y2="23" />
+                                            </svg>
+                                        ) : (
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                                <circle cx="12" cy="12" r="3" />
+                                            </svg>
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+
                             <button
                                 type="submit"
                                 className="login-submit-btn"
-                                disabled={isLoading || !email.trim() || !password.trim()}
+                                disabled={isLoading || !name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim()}
                             >
                                 {isLoading ? (
                                     <div className="login-spinner" />
                                 ) : (
-                                    'Sign in'
+                                    'Create Account'
                                 )}
                             </button>
                         </form>
 
                         <div className="auth-switch-link">
-                            <p>Don&apos;t have an account? <Link href="/signup">Create one</Link></p>
+                            <p>Already have an account? <Link href="/login">Sign in</Link></p>
                         </div>
 
                         <div className="login-form-footer">

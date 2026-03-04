@@ -1,17 +1,17 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import LoginPage from '@/components/LoginPage'
+import SignupPage from '@/components/SignupPage'
 
-export default function LoginRoute() {
+export default function SignupRoute() {
     const router = useRouter()
 
-    const handleLogin = (token: string, user: { id: string; name: string; email: string }) => {
+    const handleSignup = (token: string, user: { id: string; name: string; email: string }) => {
         localStorage.setItem('mygo-token', token)
         localStorage.setItem('mygo-user', JSON.stringify(user))
         document.cookie = `mygo-auth=${token}; path=/; max-age=604800; SameSite=Lax`
         router.push('/dashboard')
     }
 
-    return <LoginPage onLogin={handleLogin} />
+    return <SignupPage onSignup={handleSignup} />
 }
