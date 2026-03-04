@@ -722,6 +722,12 @@ def calm_list_documents(source_id):
 def download_calm_document(document_id):
     """Download document content from CALM"""
     try:
+        # Prevent invalid IDs from hitting CALM API (which expect a UUID)
+        import re
+        is_uuid = bool(re.match(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$', str(document_id)))
+        if not is_uuid:
+            return jsonify({"error": "This document was synced using an older version. Please re-sync the project from the Data Sources tab to download it."}), 400
+
         source_id = request.args.get('sourceId')
         
         if not source_id:
@@ -764,7 +770,14 @@ def view_calm_document(document_id):
         if html_content:
             return jsonify({"documentId": document_id, "content": html_content, "source": "local"})
 
-        # 2. Fall back to live CALM fetch
+        # 2. Prevent invalid IDs from hitting CALM API (which expect a UUID)
+        import re
+        # Basic UUID format check
+        is_uuid = bool(re.match(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$', str(document_id)))
+        if not is_uuid:
+            return jsonify({"error": "This document was synced using an older version. Please re-sync the project from the Data Sources tab to view its contents."}), 400
+
+        # 3. Fall back to live CALM fetch
         source_id = request.args.get('sourceId')
         if not source_id:
             sources = source_config_service.list_sources()
