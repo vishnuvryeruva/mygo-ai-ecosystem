@@ -1066,7 +1066,7 @@ if __name__ == '__main__':
     print(f"Available MCP tools: {list(TOOLS.keys())}")
     print(f"Cloud ALM endpoints available at /api/calm/<source_id>/...")
     print(f"Source configuration endpoints available at /api/sources")
-    app.run(debug=True, port=port, host='0.0.0.0')
+    app.run(debug=True, port=port, host='0.0.0.0', threaded=True)
 
 
 
