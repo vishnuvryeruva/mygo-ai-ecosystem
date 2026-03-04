@@ -84,19 +84,13 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
     const [viewerDoc, setViewerDoc] = useState<{ name: string; content: string } | null>(null)
     const [isLoadingContent, setIsLoadingContent] = useState(false)
 
-    // Load initial documents
+    // Load initial documents and filter data on mount
     useEffect(() => {
         fetchDocuments()
+        fetchSources()
     }, [])
 
-    // Load sources when modal opens
-    useEffect(() => {
-        if (showSyncModal && sources.length === 0) {
-            fetchSources()
-        }
-    }, [showSyncModal])
-
-    // Load projects when source selected
+    // Load projects when source selected in sync modal
     useEffect(() => {
         if (selectedSource && syncStep === 2) {
             fetchProjects(selectedSource)
@@ -328,6 +322,8 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
         if (sourceFilter !== 'All Sources' && doc.source !== sourceFilter) return false
         if (typeFilter !== 'All Types' && doc.type !== typeFilter) return false
         if (projectFilter !== 'All Projects' && doc.project !== projectFilter) return false
+        console.log('doc===', doc.project, projectFilter)
+
         return true
     })
 
@@ -373,25 +369,22 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                     <span>FILTERS</span>
                 </div>
                 <select className="doc-hub-filter-select" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
-                    <option>All Sources</option>
-                    <option>CALM</option>
-                    <option>SharePoint</option>
-                    <option>Jira</option>
-                    <option>Solman</option>
+                    <option value="All Sources">All Sources</option>
+                    {sources.map(s => (
+                        <option key={s.id} value={s.type}>{s.name}</option>
+                    ))}
                 </select>
                 <select className="doc-hub-filter-select" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-                    <option>All Types</option>
-                    <option>Solution Document</option>
-                    <option>Technical Spec</option>
-                    <option>Change document</option>
-                    <option>Decision Paper</option>
-                    <option>Functional Spec</option>
+                    <option value="All Types">All Types</option>
+                    {Array.from(new Set(documents.map(d => d.type))).filter(Boolean).sort().map(t => (
+                        <option key={t} value={t}>{t}</option>
+                    ))}
                 </select>
                 <select className="doc-hub-filter-select" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
-                    <option>All Projects</option>
-                    <option>Project Phoenix</option>
-                    <option>Project Atlas</option>
-                    <option>Project Nebula</option>
+                    <option value="All Projects">All Projects</option>
+                    {Array.from(new Set(documents.map(d => d.project))).filter(p => p && p !== 'N/A').sort().map(p => (
+                        <option key={p} value={p}>{p}</option>
+                    ))}
                 </select>
                 <div className="doc-hub-date-filter">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
