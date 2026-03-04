@@ -370,8 +370,8 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                 </div>
                 <select className="doc-hub-filter-select" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
                     <option value="All Sources">All Sources</option>
-                    {sources.map(s => (
-                        <option key={s.id} value={s.type}>{s.name}</option>
+                    {Array.from(new Set(documents.map(d => d.source))).filter(s => s && s !== 'File Upload').sort().map(s => (
+                        <option key={s} value={s}>{s}</option>
                     ))}
                 </select>
                 <select className="doc-hub-filter-select" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
