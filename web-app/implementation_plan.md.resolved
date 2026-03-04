@@ -1,0 +1,53 @@
+# BTP Source and Code Repository Module Implementation Plan
+
+## Goal Description
+The objective is to allow users to configure a SAP BTP Source in the settings via a modal, securely test the connection, and then use that BTP source in the new Code Repository module. The Code Repository will fetch and display code, and feature a side-by-side AI Agent to interactively read and modify the code via prompts.
+
+## Proposed Changes
+
+### Configuration and Setup
+- Install `@monaco-editor/react` to provide a clean and capable code editor component.
+
+### Frontend Components
+
+#### [MODIFY] [web-app/components/pages/SettingsPage.tsx](file:///c:/Users/Yashwanth%20Singh%20R/Desktop/YODA/mygo-ai-ecosystem/yoda-new/mygo-ai-ecosystem/web-app/components/pages/SettingsPage.tsx)
+- Add a "Source Type" dropdown to the Add Connection Modal, allowing the user to select either `CALM` or `BTP`.
+- Currently the `test-connection` and `create-source` endpoints default to `type: 'CALM'`. Update this logic to pass the selected type.
+- Ensure the BTP settings collect: Source Name, Token URL, Client ID, Client Secret, API Endpoint.
+
+#### [MODIFY] `web-app/app/(authenticated)/code-repository/page.tsx`
+- Implement a two-pane layout:
+  - **Left Pane (Code Editor):** Integrates the Monaco editor to display the fetched ABAP/source code.
+  - **Right Pane (AI Agent):** A chat interface allowing users to instruct the agent to modify the code.
+- Add a dropdown at the top to select a BTP Source and a "Sync" button to fetch data from the source.
+- Build logic to send user prompts + existing code to the backend, and update the editor with the AI's modified code response.
+
+### Backend Services & API
+
+#### [NEW] `web-app/backend/services/btp_service.py`
+- Create `BTPService` class with a [test_connection()](file:///c:/Users/Yashwanth%20Singh%20R/Desktop/YODA/mygo-ai-ecosystem/yoda-new/mygo-ai-ecosystem/web-app/backend/services/source_config_service.py#253-283) method.
+- Implement the OAuth Client Credentials flow: generate a Bearer token using the Token URL, Client ID, and Client Secret.
+- Implement a GET request to the provided `apiEndpoint` using the generated Bearer token to fetch the OData list (e.g., ZDEV package catalog).
+
+#### [MODIFY] [web-app/backend/services/source_config_service.py](file:///c:/Users/Yashwanth%20Singh%20R/Desktop/YODA/mygo-ai-ecosystem/yoda-new/mygo-ai-ecosystem/web-app/backend/services/source_config_service.py)
+- Update [test_connection](file:///c:/Users/Yashwanth%20Singh%20R/Desktop/YODA/mygo-ai-ecosystem/yoda-new/mygo-ai-ecosystem/web-app/backend/services/source_config_service.py#253-283) to instantiate and use `BTPService` when `source['type'] == 'BTP'`.
+
+#### [MODIFY] [web-app/backend/app.py](file:///c:/Users/Yashwanth%20Singh%20R/Desktop/YODA/mygo-ai-ecosystem/yoda-new/mygo-ai-ecosystem/web-app/backend/app.py)
+- Update `/api/sources/test-connection` to handle `type == 'BTP'` alongside `CALM`, routing to the `BTPService`.
+- Add a new endpoint `/api/btp/<source_id>/fetch-code` that retrieves the OData securely using the saved credentials.
+- Add an AI endpoint `/api/btp/edit-code` that uses the `openai_service` to accept existing code and a prompt, returning modified code.
+
+## Verification Plan
+
+### Automated Tests
+- Run backend validations or unit tests if available. Since it's mainly integration with external BTP URL and OpenAI, mocked responses could be added but manual tests are more straightforward for BTP.
+
+### Manual Verification
+1. Navigate to Settings -> Manage Sources.
+2. Click "Add Connection" and select "BTP" as the Source Type.
+3. Input the test BTP details (Token URL, BTP Endpoint, Client ID, Client Secret).
+4. Click "Test" and observe the "Connection successful" message. Click "Save Connection".
+5. Navigate to the "Code Repository" page via Sidebar.
+6. Select the newly added BTP Source from the dropdown and click "Sync".
+7. Verify the returned JSON/Code is displayed cleanly in the editor.
+8. Use the AI Agent panel, type "Add a comment specifying this was fetched from BTP" and verify the code editor updates seamlessly.

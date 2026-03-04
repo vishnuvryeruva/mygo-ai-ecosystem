@@ -592,6 +592,7 @@ def test_new_connection():
     try:
         data = request.json
         from services.calm_service import CALMService
+        from services.btp_service import BTPService
         
         if data.get('type') == 'CALM':
             # Validate required fields
@@ -612,6 +613,27 @@ def test_new_connection():
             }, use_env_fallback=False)
             
             # Test connection - will raise exception if it fails
+            service.test_connection()
+            return jsonify({"success": True, "message": "Connection successful"})
+            
+        elif data.get('type') == 'BTP':
+            api_endpoint = data.get('apiEndpoint', '').strip()
+            token_url = data.get('tokenUrl', '').strip()
+            client_id = data.get('clientId', '').strip()
+            client_secret = data.get('clientSecret', '').strip()
+            auth_type = data.get('authType', '').strip()
+            
+            if not all([api_endpoint, token_url, client_id, client_secret]):
+                return jsonify({"success": False, "error": "All fields are required including Token URL"})
+                
+            service = BTPService({
+                'apiEndpoint': api_endpoint,
+                'tokenUrl': token_url,
+                'clientId': client_id,
+                'clientSecret': client_secret,
+                'authType': auth_type
+            }, use_env_fallback=False)
+            
             service.test_connection()
             return jsonify({"success": True, "message": "Connection successful"})
         
@@ -786,6 +808,56 @@ def view_calm_document(document_id):
 
         return jsonify({"documentId": document_id, "content": html_content, "source": "live"})
 
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+# ============================================================================
+# SAP BTP Code Repository Endpoints
+# ============================================================================
+
+@app.route('/api/btp/<source_id>/fetch-code', methods=['GET'])
+def btp_fetch_code(source_id):
+    try:
+        source = source_config_service.get_source(source_id)
+        if not source or source['type'] != 'BTP':
+            return jsonify({"error": "Valid BTP Source not found"}), 404
+            
+        from services.btp_service import BTPService
+        service = BTPService(source.get('config', {}))
+        data = service.fetch_data()
+        
+        return jsonify({"data": data})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/btp/generate-code', methods=['POST'])
+def btp_generate_code():
+    try:
+        data = request.json
+        prompt = data.get('prompt', '')
+        code = data.get('code', '')
+        
+        system_msg = "You are an expert SAP ABAP and BTP developer. You are given an existing code block and a user instruction. Return ONLY the modified code without any markdown formatting wrappers or explanations."
+        user_msg = f"Existing Code:\n{code}\n\nInstruction: {prompt}\n\nPlease provide the updated code."
+        
+        messages = [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": user_msg}
+        ]
+        
+        response = openai_service.generate_response(messages)
+        
+        if response.startswith("```"):
+            lines = response.splitlines()
+            if len(lines) > 2:
+                response = "\n".join(lines[1:-1])
+                
+        return jsonify({"code": response})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1047,7 +1119,7 @@ def push_test_cases_to_calm(source_id):
 
 
 if __name__ == '__main__':
-    port = int(os.getenv('FLASK_PORT', 5001))
+    port = int(os.getenv('FLASK_PORT', 5000))
     print(f"DEBUG: Starting Flask app on port {port}")
     print(f"MCP Endpoints available at /mcp/tools and /mcp/execute")
     print(f"Available MCP tools: {list(TOOLS.keys())}")

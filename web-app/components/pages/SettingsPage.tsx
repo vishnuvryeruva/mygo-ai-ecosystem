@@ -75,6 +75,7 @@ const creditBreakdown = [
 
 /* ─── Connection form shape ────────────────────────────── */
 interface ConnectionForm {
+    sourceType: string
     sourceName: string
     authType: string
     clientId: string
@@ -84,6 +85,7 @@ interface ConnectionForm {
 }
 
 const emptyConnection: ConnectionForm = {
+    sourceType: 'CALM',
     sourceName: '',
     authType: 'OAuth 2.0',
     clientId: '',
@@ -159,7 +161,8 @@ export default function SettingsPage() {
 
         try {
             const response = await axios.post('/api/sources/test-connection', {
-                type: 'CALM',
+                type: connectionForm.sourceType,
+                authType: connectionForm.authType,
                 apiEndpoint: connectionForm.apiEndpoint,
                 tokenUrl: connectionForm.tokenUrl,
                 clientId: connectionForm.clientId,
@@ -173,9 +176,9 @@ export default function SettingsPage() {
             }
         } catch (err: any) {
             console.error('Test connection error:', err)
-            setTestResult({ 
-                success: false, 
-                message: err.response?.data?.error || 'Failed to test connection. Please check your credentials.' 
+            setTestResult({
+                success: false,
+                message: err.response?.data?.error || 'Failed to test connection. Please check your credentials.'
             })
         } finally {
             setIsTestingConnection(false)
@@ -192,7 +195,8 @@ export default function SettingsPage() {
         try {
             await axios.post('/api/sources', {
                 name: connectionForm.sourceName,
-                type: 'CALM',
+                type: connectionForm.sourceType,
+                authType: connectionForm.authType,
                 apiEndpoint: connectionForm.apiEndpoint,
                 tokenUrl: connectionForm.tokenUrl,
                 clientId: connectionForm.clientId,
@@ -387,6 +391,16 @@ export default function SettingsPage() {
                                     </div>
                                     <div className="settings-modal-body">
                                         <div className="settings-form-group">
+                                            <label>Source Type *</label>
+                                            <select
+                                                value={connectionForm.sourceType}
+                                                onChange={e => setConnectionForm({ ...connectionForm, sourceType: e.target.value })}
+                                            >
+                                                <option value="CALM">SAP Cloud ALM</option>
+                                                <option value="BTP">SAP BTP</option>
+                                            </select>
+                                        </div>
+                                        <div className="settings-form-group">
                                             <label>Source Name *</label>
                                             <input
                                                 type="text"
@@ -403,6 +417,7 @@ export default function SettingsPage() {
                                             >
                                                 <option value="OAuth 2.0">OAuth 2.0</option>
                                                 <option value="Client Credentials">Client Credentials</option>
+                                                <option value="Basic Authentication">Basic Authentication</option>
                                             </select>
                                         </div>
                                         <div className="settings-form-group">
@@ -424,16 +439,16 @@ export default function SettingsPage() {
                                             />
                                         </div>
                                         <div className="settings-form-group">
-                                            <label>Client ID *</label>
+                                            <label>{connectionForm.authType === 'Basic Authentication' ? 'Username / Client ID *' : 'Client ID *'}</label>
                                             <input
                                                 type="text"
-                                                placeholder="Client ID"
+                                                placeholder={connectionForm.authType === 'Basic Authentication' ? "Username" : "Client ID"}
                                                 value={connectionForm.clientId}
                                                 onChange={e => setConnectionForm({ ...connectionForm, clientId: e.target.value })}
                                             />
                                         </div>
                                         <div className="settings-form-group">
-                                            <label>Client Secret *</label>
+                                            <label>{connectionForm.authType === 'Basic Authentication' ? 'Password / Client Secret *' : 'Client Secret *'}</label>
                                             <input
                                                 type="password"
                                                 placeholder="••••••••"
@@ -453,15 +468,15 @@ export default function SettingsPage() {
                                         )}
                                     </div>
                                     <div className="settings-modal-footer">
-                                        <button 
-                                            className="btn btn-primary" 
+                                        <button
+                                            className="btn btn-primary"
                                             onClick={handleAddSource}
                                             disabled={isSavingConnection}
                                         >
                                             {isSavingConnection ? 'Saving...' : 'Save Connection'}
                                         </button>
-                                        <button 
-                                            className="btn btn-secondary" 
+                                        <button
+                                            className="btn btn-secondary"
                                             onClick={handleTestConnection}
                                             disabled={isTestingConnection}
                                         >

@@ -2,10 +2,10 @@ import json
 import urllib.request
 import urllib.error
 
-# Assuming backend is running on port 5001
+# Assuming backend is running on port 5000
 try:
     # First get sources
-    req = urllib.request.Request('http://localhost:5001/api/sources')
+    req = urllib.request.Request('http://localhost:5000/api/sources')
     with urllib.request.urlopen(req) as response:
         sources_data = json.loads(response.read().decode())
         sources = sources_data.get('sources', [])
@@ -19,7 +19,7 @@ try:
     print(f"Found CALM source: {source_id}")
     
     # Get projects to find the exact project ID
-    req = urllib.request.Request(f'http://localhost:5001/api/calm/{source_id}/projects')
+    req = urllib.request.Request(f'http://localhost:5000/api/calm/{source_id}/projects')
     with urllib.request.urlopen(req) as response:
         projects_data = json.loads(response.read().decode())
         projects = projects_data.get('projects', [])
@@ -38,7 +38,7 @@ try:
     print(f"Testing with project: {env_project.get('name')} ({project_id})")
     
     # Get documents
-    url = f'http://localhost:5001/api/calm/{source_id}/documents?projectId={project_id}'
+    url = f'http://localhost:5000/api/calm/{source_id}/documents?projectId={project_id}'
     req = urllib.request.Request(url)
     with urllib.request.urlopen(req) as response:
         docs_data = json.loads(response.read().decode())

@@ -130,7 +130,8 @@ def create_source(data: Dict) -> Dict:
             'apiEndpoint': data.get('apiEndpoint', ''),
             'tokenUrl': data.get('tokenUrl', ''),
             'clientId': data.get('clientId', ''),
-            'clientSecret': data.get('clientSecret', '')
+            'clientSecret': data.get('clientSecret', ''),
+            'authType': data.get('authType', 'OAuth 2.0')
         }
     }
     
@@ -169,6 +170,7 @@ def update_source(source_id: str, data: Dict) -> Optional[Dict]:
             source['config']['apiEndpoint'] = data.get('apiEndpoint', source['config'].get('apiEndpoint', ''))
             source['config']['tokenUrl'] = data.get('tokenUrl', source['config'].get('tokenUrl', ''))
             source['config']['clientId'] = data.get('clientId', source['config'].get('clientId', ''))
+            source['config']['authType'] = data.get('authType', source['config'].get('authType', 'OAuth 2.0'))
             
             # Only update secret if provided
             if data.get('clientSecret'):
@@ -261,6 +263,7 @@ def test_connection(source_id: str) -> Dict:
         Connection test result
     """
     from services.calm_service import CALMService
+    from services.btp_service import BTPService
     
     source = get_source(source_id)
     if not source:
@@ -269,6 +272,18 @@ def test_connection(source_id: str) -> Dict:
     if source['type'] == 'CALM':
         try:
             service = CALMService(source.get('config', {}))
+            service.test_connection()
+            
+            update_source_status(source_id, 'connected')
+            return {'success': True, 'message': 'Connection successful'}
+                
+        except Exception as e:
+            update_source_status(source_id, 'error')
+            return {'success': False, 'error': str(e)}
+            
+    elif source['type'] == 'BTP':
+        try:
+            service = BTPService(source.get('config', {}))
             service.test_connection()
             
             update_source_status(source_id, 'connected')
