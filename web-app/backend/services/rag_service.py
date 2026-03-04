@@ -366,6 +366,16 @@ class RAGService:
         # Build context from retrieved documents
         context = "\n\n".join(results['documents'][0])
         
+        # Inject global index of documents to allow Yoda to answer metadata/availability questions
+        try:
+            doc_list = self.list_documents()
+            global_index = "Available Documents Index:\n"
+            for doc in doc_list:
+                global_index += f"- '{doc['name']}' (Project: {doc['project']}, Source: {doc['source']})\n"
+            context = global_index + "\n\nDetailed Excerpts:\n" + context
+        except Exception as e:
+            print(f"DEBUG: Failed to append global index to context: {e}")
+        
         # Generate answer using OpenAI with context
         # Use custom prompt if provided, otherwise use default from config
         if custom_prompt:

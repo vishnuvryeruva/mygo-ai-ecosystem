@@ -2,6 +2,12 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import os
 import io
+import sqlite3
+import uuid
+import jwt
+import bcrypt
+import datetime
+from functools import wraps
 from dotenv import load_dotenv
 from services.openai_service import OpenAIService
 from services.rag_service import RAGService
@@ -38,7 +44,67 @@ except Exception as e:
     print(f"DEBUG: Startup - Chat completion FAILED: {e}")
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, supports_credentials=True)
+
+JWT_SECRET = os.getenv('JWT_SECRET', 'mygo-yoda-secret-key-change-in-production')
+JWT_ALGORITHM = 'HS256'
+JWT_EXPIRY_DAYS = 7
+
+# ── SQLite user database ────────────────────────────────────────────────────
+DB_PATH = os.path.join(basedir, 'users.db')
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    conn = get_db()
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# ── JWT helper ──────────────────────────────────────────────────────────────
+def create_token(user_id: str, email: str) -> str:
+    payload = {
+        'sub': user_id,
+        'email': email,
+        'exp': datetime.datetime.utcnow() + datetime.timedelta(days=JWT_EXPIRY_DAYS),
+        'iat': datetime.datetime.utcnow(),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+def decode_token(token: str):
+    return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header.split(' ', 1)[1]
+        if not token:
+            return jsonify({'error': 'Token missing'}), 401
+        try:
+            payload = decode_token(token)
+            request.current_user = payload
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token expired'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'error': 'Invalid token'}), 401
+        return f(*args, **kwargs)
+    return decorated
 
 # Initialize services
 openai_service = OpenAIService()
@@ -59,6 +125,74 @@ def log_request_info():
 @app.route('/api/health', methods=['GET'])
 def health():
     return jsonify({"status": "ok"})
+
+# ── Auth endpoints ──────────────────────────────────────────────────────────
+
+@app.route('/api/auth/register', methods=['POST'])
+def register():
+    data = request.get_json() or {}
+    name = (data.get('name') or '').strip()
+    email = (data.get('email') or '').strip().lower()
+    password = (data.get('password') or '')
+
+    if not name or not email or not password:
+        return jsonify({'error': 'Name, email and password are required'}), 400
+
+    password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    user_id = str(uuid.uuid4())
+    created_at = datetime.datetime.utcnow().isoformat()
+
+    try:
+        conn = get_db()
+        conn.execute(
+            'INSERT INTO users (id, name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)',
+            (user_id, name, email, password_hash, created_at)
+        )
+        conn.commit()
+        conn.close()
+    except sqlite3.IntegrityError:
+        return jsonify({'error': 'An account with this email already exists'}), 409
+
+    token = create_token(user_id, email)
+    return jsonify({
+        'token': token,
+        'user': {'id': user_id, 'name': name, 'email': email}
+    }), 201
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def login():
+    data = request.get_json() or {}
+    email = (data.get('email') or '').strip().lower()
+    password = (data.get('password') or '')
+
+    if not email or not password:
+        return jsonify({'error': 'Email and password are required'}), 400
+
+    conn = get_db()
+    row = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
+    conn.close()
+
+    if not row or not bcrypt.checkpw(password.encode('utf-8'), row['password_hash'].encode('utf-8')):
+        return jsonify({'error': 'Invalid email or password'}), 401
+
+    token = create_token(row['id'], row['email'])
+    return jsonify({
+        'token': token,
+        'user': {'id': row['id'], 'name': row['name'], 'email': row['email']}
+    })
+
+
+@app.route('/api/auth/me', methods=['GET'])
+@token_required
+def me():
+    payload = request.current_user
+    conn = get_db()
+    row = conn.execute('SELECT id, name, email, created_at FROM users WHERE id = ?', (payload['sub'],)).fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'error': 'User not found'}), 404
+    return jsonify({'id': row['id'], 'name': row['name'], 'email': row['email'], 'created_at': row['created_at']})
 
 # Ask Yoda - RAG-based Q&A
 @app.route('/api/ask-yoda', methods=['POST'])
@@ -744,6 +878,12 @@ def calm_list_documents(source_id):
 def download_calm_document(document_id):
     """Download document content from CALM"""
     try:
+        # Prevent invalid IDs from hitting CALM API (which expect a UUID)
+        import re
+        is_uuid = bool(re.match(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$', str(document_id)))
+        if not is_uuid:
+            return jsonify({"error": "This document was synced using an older version. Please re-sync the project from the Data Sources tab to download it."}), 400
+
         source_id = request.args.get('sourceId')
         
         if not source_id:
@@ -786,7 +926,14 @@ def view_calm_document(document_id):
         if html_content:
             return jsonify({"documentId": document_id, "content": html_content, "source": "local"})
 
-        # 2. Fall back to live CALM fetch
+        # 2. Prevent invalid IDs from hitting CALM API (which expect a UUID)
+        import re
+        # Basic UUID format check
+        is_uuid = bool(re.match(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$', str(document_id)))
+        if not is_uuid:
+            return jsonify({"error": "This document was synced using an older version. Please re-sync the project from the Data Sources tab to view its contents."}), 400
+
+        # 3. Fall back to live CALM fetch
         source_id = request.args.get('sourceId')
         if not source_id:
             sources = source_config_service.list_sources()
@@ -1125,7 +1272,7 @@ if __name__ == '__main__':
     print(f"Available MCP tools: {list(TOOLS.keys())}")
     print(f"Cloud ALM endpoints available at /api/calm/<source_id>/...")
     print(f"Source configuration endpoints available at /api/sources")
-    app.run(debug=True, port=port, host='0.0.0.0')
+    app.run(debug=True, port=port, host='0.0.0.0', threaded=True)
 
 
 

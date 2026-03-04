@@ -10,6 +10,10 @@ openai>=1.50.0
 chromadb==0.4.15
 sentence-transformers>=3.0.0
 
+# Authentication
+PyJWT==2.11.0
+bcrypt==5.0.0
+
 # Environment Variables
 python-dotenv==1.0.0
 
