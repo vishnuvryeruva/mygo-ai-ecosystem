@@ -351,7 +351,7 @@ def generate_test_cases():
         data = request.json
         code = data.get('code', '')
         test_type = data.get('test_type', 'manual')  # manual or unit
-        format_type = data.get('format', 'excel')  # excel, word, jira, preview
+        format_type = data.get('format', 'excel')  # excel, word, jira, preview, calm
         
         # For preview, return raw text for inline display
         if format_type == 'preview':
@@ -360,6 +360,15 @@ def generate_test_cases():
                 "test_cases": test_content,
                 "test_type": test_type,
                 "format": "preview"
+            })
+        
+        # For CALM format, return structured JSON
+        if format_type == 'calm':
+            test_cases = test_service.generate_test_cases(code, test_type, 'calm')
+            return jsonify({
+                "test_cases": test_cases,
+                "test_type": test_type,
+                "format": "calm"
             })
         
         test_cases = test_service.generate_test_cases(code, test_type, format_type)
@@ -1154,16 +1163,20 @@ def push_spec_to_calm(source_id):
 
 @app.route('/api/calm/<source_id>/push-test-cases', methods=['POST'])
 def push_test_cases_to_calm(source_id):
-    """Push test cases to Cloud ALM"""
+    """Push test cases to Cloud ALM as Manual Test Cases"""
     try:
         data = request.json
-        name = data.get('name')
-        content = data.get('content')
+        test_cases = data.get('testCases', [])
         project_id = data.get('projectId')
-        process_id = data.get('processId', '')
+        scope_id = data.get('scopeId')
+        priority_code = data.get('priorityCode', 20)
+        name_prefix = data.get('namePrefix', '')  # Optional prefix for test case names
         
-        if not all([name, content, project_id]):
-            return jsonify({"error": "name, content, and projectId are required"}), 400
+        if not all([test_cases, project_id, scope_id]):
+            return jsonify({"error": "testCases, projectId, and scopeId are required"}), 400
+        
+        if not isinstance(test_cases, list) or len(test_cases) == 0:
+            return jsonify({"error": "testCases must be a non-empty array"}), 400
         
         source = source_config_service.get_source(source_id)
         if not source:
@@ -1171,22 +1184,57 @@ def push_test_cases_to_calm(source_id):
         
         service = get_calm_service(source.get('config'))
         
-        # Convert content to bytes if string
-        if isinstance(content, str):
-            content = content.encode('utf-8')
+        # Create each test case in Cloud ALM
+        created_test_cases = []
+        errors = []
         
-        result = service.push_document(
-            name=name,
-            content=content,
-            document_type='test_case',
-            process_id=process_id,
-            project_id=project_id
-        )
+        for idx, test_case in enumerate(test_cases):
+            try:
+                # Apply name prefix if provided
+                original_title = test_case.get('title', f'Test Case {idx + 1}')
+                if name_prefix and name_prefix.strip():
+                    title = f"{name_prefix.strip()} - {original_title}"
+                else:
+                    title = original_title
+                
+                activities = test_case.get('toActivities', [])
+                
+                if not activities:
+                    errors.append(f"Test case '{title}' has no activities")
+                    continue
+                
+                result = service.create_manual_test_case(
+                    title=title,
+                    project_id=project_id,
+                    scope_id=scope_id,
+                    activities=activities,
+                    priority_code=priority_code,
+                    is_prepared=False
+                )
+                
+                created_test_cases.append({
+                    'title': title,
+                    'id': result.get('uuid', result.get('id')),  # SAP Cloud ALM uses 'uuid'
+                    'status': 'created'
+                })
+            except Exception as e:
+                error_msg = f"Failed to create test case '{test_case.get('title', idx + 1)}': {str(e)}"
+                print(error_msg)
+                errors.append(error_msg)
         
-        return jsonify({
-            "message": "Test cases pushed successfully",
-            "document": result
-        })
+        response = {
+            "message": f"Successfully created {len(created_test_cases)} test case(s)",
+            "testCases": created_test_cases,
+            "totalRequested": len(test_cases),
+            "totalCreated": len(created_test_cases)
+        }
+        
+        if errors:
+            response["errors"] = errors
+            response["message"] += f" with {len(errors)} error(s)"
+        
+        return jsonify(response)
+        
     except Exception as e:
         import traceback
         traceback.print_exc()

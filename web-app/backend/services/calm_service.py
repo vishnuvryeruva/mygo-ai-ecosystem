@@ -427,6 +427,76 @@ class CALMService:
             raise
     
     # =========================================================================
+    # Manual Test Case API
+    # =========================================================================
+    
+    def create_manual_test_case(
+        self,
+        title: str,
+        project_id: str,
+        scope_id: str,
+        activities: List[Dict],
+        priority_code: int = 20,
+        is_prepared: bool = False,
+        references: Optional[List[Dict]] = None
+    ) -> Dict:
+        """
+        Create a Manual Test Case in Cloud ALM via the Test Management API.
+        
+        Args:
+            title: Test case title
+            project_id: Project ID (UUID)
+            scope_id: Scope ID (UUID)
+            activities: List of test activities with actions
+            priority_code: Priority (10=Low, 20=Medium, 30=High)
+            is_prepared: Whether test case is prepared
+            references: Optional list of reference links
+            
+        Returns:
+            Created test case object
+        """
+        try:
+            token = self._get_access_token()
+            
+            payload = {
+                'title': title,
+                'projectId': project_id,
+                'scopeId': scope_id,
+                'priorityCode': priority_code,
+                'isPrepared': is_prepared,
+                'toActivities': activities
+            }
+            
+            if references:
+                payload['toReferences'] = references
+            
+            url = f"{self.api_endpoint}/api/calm-testmanagement/v1/ManualTestCases"
+            print(f"DEBUG create_manual_test_case url: {url}")
+            print(f"DEBUG create_manual_test_case payload: {json.dumps(payload, indent=2)}")
+            
+            response = requests.post(
+                url,
+                headers={
+                    'Authorization': f'Bearer {token}',
+                    'Content-Type': 'application/json'
+                },
+                json=payload,
+                timeout=30
+            )
+            
+            print(f"DEBUG create_manual_test_case response status: {response.status_code}")
+            print(f"DEBUG create_manual_test_case response body: {response.text[:1000]}")
+            response.raise_for_status()
+            return response.json()
+            
+        except Exception as e:
+            print(f"Error creating manual test case: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"Response status: {e.response.status_code}")
+                print(f"Response: {e.response.text}")
+            raise
+    
+    # =========================================================================
     # Demo Data (for development/testing)
     # =========================================================================
     
