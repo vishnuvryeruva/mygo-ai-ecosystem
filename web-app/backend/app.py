@@ -839,22 +839,60 @@ def calm_list_solution_processes(source_id):
 
 @app.route('/api/calm/<source_id>/documents', methods=['GET'])
 def calm_list_documents(source_id):
-    """List documents from Cloud ALM"""
+    """List documents and test cases from Cloud ALM"""
     try:
         process_id = request.args.get('processId')
         doc_type = request.args.get('type')
         project_id = request.args.get('projectId')
+        scope_id = request.args.get('scopeId')
+        include_test_cases = request.args.get('includeTestCases', 'false').lower() == 'true'
         
         source = source_config_service.get_source(source_id)
         if not source:
             return jsonify({"error": "Source not found"}), 404
         
         service = get_calm_service(source.get('config'))
+        
+        # Fetch documents
         result = service.list_documents(  # Returns {documents, isDemo, error?}
             process_id=process_id,
             document_type=doc_type,
             project_id=project_id
         )
+        
+        # Fetch test cases if requested
+        test_cases = []
+        if include_test_cases and project_id:
+            print(f"DEBUG: Fetching test cases for project_id={project_id}, scope_id={scope_id}")
+            try:
+                test_cases = service.list_manual_test_cases(
+                    project_id=project_id,
+                    scope_id=scope_id
+                )
+                print(f"DEBUG: Fetched {len(test_cases)} test cases")
+                # Add type indicator to test cases
+                for tc in test_cases:
+                    tc['itemType'] = 'test_case'
+                    tc['name'] = tc.get('title', 'Untitled Test Case')
+                    tc['id'] = tc.get('uuid', tc.get('id'))
+            except Exception as e:
+                print(f"ERROR fetching test cases: {e}")
+                import traceback
+                traceback.print_exc()
+                # Continue even if test cases fail
+        
+        # Add type indicator to documents
+        documents = result.get('documents', [])
+        for doc in documents:
+            doc['itemType'] = 'document'
+            if 'name' not in doc and 'title' in doc:
+                doc['name'] = doc['title']
+        
+        # Combine results
+        result['testCases'] = test_cases
+        result['totalDocuments'] = len(documents)
+        result['totalTestCases'] = len(test_cases)
+        
         return jsonify(result)
     except Exception as e:
         import traceback

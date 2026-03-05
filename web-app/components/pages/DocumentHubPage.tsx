@@ -153,22 +153,26 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
             setSyncStep(2)
         } else if (syncStep === 2 && selectedProject) {
             setSyncStep(3)
-            // Fetch potential docs to sync
+            // Fetch potential docs and test cases to sync
             setIsSyncing(true)
             try {
-                const res = await axios.get(`/api/calm/${selectedSource}/documents?projectId=${selectedProject}`)
+                const res = await axios.get(`/api/calm/${selectedSource}/documents?projectId=${selectedProject}&includeTestCases=true`)
                 const docs = res.data.documents || []
-                setDocsToSync(docs)
+                const testCases = res.data.testCases || []
+                
+                // Combine documents and test cases
+                const allItems = [...docs, ...testCases]
+                setDocsToSync(allItems)
 
-                // Check sync status for all documents
-                const docIds = docs.map((doc: any) => doc.uuid || doc.id)
+                // Check sync status for all items
+                const itemIds = allItems.map((item: any) => item.uuid || item.id)
                 const statusRes = await axios.post('/api/sync/check', {
-                    documentIds: docIds
+                    documentIds: itemIds
                 })
                 setSyncStatus(statusRes.data.syncStatus || {})
 
-                // Select all documents by default
-                setSelectedDocIds(new Set(docIds))
+                // Select all items by default
+                setSelectedDocIds(new Set(itemIds))
             } catch (err) {
                 console.error('Failed to fetch docs from source:', err)
             } finally {
@@ -655,8 +659,9 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                                             <div className="max-h-60 overflow-y-auto border rounded p-2 bg-gray-50">
                                                 {docsToSync.map(doc => {
                                                     const docId = doc.uuid || doc.id
+                                                    const isTestCase = doc.itemType === 'test_case'
                                                     const typeCode = doc.documentTypeCode || doc.documentType || doc.type
-                                                    const typeName = documentTypeNames[typeCode] || typeCode || 'Document'
+                                                    const typeName = isTestCase ? 'Test Case' : (documentTypeNames[typeCode] || typeCode || 'Document')
                                                     const isSelected = selectedDocIds.has(docId)
                                                     const isSynced = syncStatus[docId]
 
@@ -673,10 +678,23 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                                                                 className="cursor-pointer"
                                                                 onClick={(e) => e.stopPropagation()}
                                                             />
+                                                            {isTestCase ? (
+                                                                <span className="text-lg" title="Test Case">🧪</span>
+                                                            ) : (
+                                                                <span className="text-lg" title="Document">📄</span>
+                                                            )}
                                                             <div className="flex-1 flex justify-between items-center">
                                                                 <span className="flex-1">{doc.title || doc.name}</span>
                                                                 <div className="flex items-center gap-2">
-                                                                    <span className="text-gray-500 text-xs">{typeName}</span>
+                                                                    <span 
+                                                                        className={`text-xs px-2 py-1 rounded ${
+                                                                            isTestCase 
+                                                                                ? 'bg-purple-100 text-purple-700' 
+                                                                                : 'bg-blue-100 text-blue-700'
+                                                                        }`}
+                                                                    >
+                                                                        {typeName}
+                                                                    </span>
                                                                     {isSynced && (
                                                                         <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
                                                                             Synced
@@ -689,10 +707,12 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                                                 })}
                                             </div>
                                             <p className="mt-4 text-sm text-gray-600">
-                                                Selected <strong>{selectedDocIds.size}</strong> document(s).
+                                                Selected <strong>{selectedDocIds.size}</strong> item(s) 
+                                                ({docsToSync.filter(d => selectedDocIds.has(d.uuid || d.id) && d.itemType === 'document').length} document(s), 
+                                                {docsToSync.filter(d => selectedDocIds.has(d.uuid || d.id) && d.itemType === 'test_case').length} test case(s)).
                                                 {selectedDocIds.size > 0 && Object.values(syncStatus).filter(Boolean).length > 0 && (
                                                     <span className="ml-2 text-blue-600">
-                                                        Existing documents will be updated.
+                                                        Existing items will be updated.
                                                     </span>
                                                 )}
                                             </p>
