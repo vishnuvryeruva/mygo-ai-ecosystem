@@ -17,6 +17,7 @@ from services.code_service import CodeService
 from services.test_service import TestService
 from services.advisor_service import AdvisorService
 from services import role_service
+from services import user_service
 from config.prompts import get_all_prompts, get_prompt, update_prompt
 
 # Import MCP tools
@@ -67,9 +68,28 @@ def init_db():
             name TEXT NOT NULL,
             email TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
+            role TEXT DEFAULT 'Admin',
+            created_by TEXT,
             created_at TEXT NOT NULL
         )
     ''')
+    
+    # Add role column if it doesn't exist (for existing databases)
+    try:
+        conn.execute('ALTER TABLE users ADD COLUMN role TEXT DEFAULT "Admin"')
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    
+    # Add created_by column if it doesn't exist
+    try:
+        conn.execute('ALTER TABLE users ADD COLUMN created_by TEXT')
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    
+    # Update all existing users without a role to Admin
+    conn.execute("UPDATE users SET role = 'Admin' WHERE role IS NULL OR role = '' OR role = 'Viewer'")
     conn.commit()
     conn.close()
 
@@ -142,12 +162,15 @@ def register():
     password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     user_id = str(uuid.uuid4())
     created_at = datetime.datetime.utcnow().isoformat()
+    
+    # All users who sign up through the registration flow get Admin role by default
+    role = 'Admin'
 
     try:
         conn = get_db()
         conn.execute(
-            'INSERT INTO users (id, name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)',
-            (user_id, name, email, password_hash, created_at)
+            'INSERT INTO users (id, name, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+            (user_id, name, email, password_hash, role, created_at)
         )
         conn.commit()
         conn.close()
@@ -157,7 +180,7 @@ def register():
     token = create_token(user_id, email)
     return jsonify({
         'token': token,
-        'user': {'id': user_id, 'name': name, 'email': email}
+        'user': {'id': user_id, 'name': name, 'email': email, 'role': role}
     }), 201
 
 
@@ -180,7 +203,7 @@ def login():
     token = create_token(row['id'], row['email'])
     return jsonify({
         'token': token,
-        'user': {'id': row['id'], 'name': row['name'], 'email': row['email']}
+        'user': {'id': row['id'], 'name': row['name'], 'email': row['email'], 'role': row['role'] or 'Viewer'}
     })
 
 
@@ -189,11 +212,11 @@ def login():
 def me():
     payload = request.current_user
     conn = get_db()
-    row = conn.execute('SELECT id, name, email, created_at FROM users WHERE id = ?', (payload['sub'],)).fetchone()
+    row = conn.execute('SELECT id, name, email, role, created_at FROM users WHERE id = ?', (payload['sub'],)).fetchone()
     conn.close()
     if not row:
         return jsonify({'error': 'User not found'}), 404
-    return jsonify({'id': row['id'], 'name': row['name'], 'email': row['email'], 'created_at': row['created_at']})
+    return jsonify({'id': row['id'], 'name': row['name'], 'email': row['email'], 'role': row['role'] or 'Viewer', 'created_at': row['created_at']})
 
 # Ask Yoda - RAG-based Q&A
 @app.route('/api/ask-yoda', methods=['POST'])
@@ -837,6 +860,113 @@ def delete_role(role_id):
         if success:
             return jsonify({"message": "Role deleted successfully"})
         return jsonify({"error": "Role not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ============================================================================
+# User Management Endpoints (Admin only)
+# ============================================================================
+
+def admin_required(f):
+    """Decorator to require admin role"""
+    @wraps(f)
+    @token_required
+    def decorated(*args, **kwargs):
+        user_id = request.current_user['sub']
+        user = user_service.get_user_by_id(user_id)
+        if not user or user['role'] != 'Admin':
+            return jsonify({"error": "Admin access required"}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
+@app.route('/api/users', methods=['GET'])
+@admin_required
+def list_users():
+    """List users created by current admin (Admin only)"""
+    try:
+        current_user_id = request.current_user['sub']
+        users = user_service.list_users(created_by=current_user_id)
+        return jsonify({"users": users})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users', methods=['POST'])
+@admin_required
+def create_user():
+    """Create a new user (Admin only)"""
+    try:
+        data = request.json
+        name = data.get('name', '').strip()
+        email = data.get('email', '').strip()
+        password = data.get('password', '')
+        role = data.get('role', 'Viewer')
+        
+        if not name or not email or not password:
+            return jsonify({"error": "Name, email, and password are required"}), 400
+        
+        # Set the current admin as the creator
+        current_user_id = request.current_user['sub']
+        user = user_service.create_user(name, email, password, role, created_by=current_user_id)
+        return jsonify({"user": user, "message": "User created successfully"})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>', methods=['PUT'])
+@admin_required
+def update_user(user_id):
+    """Update a user (Admin only)"""
+    try:
+        data = request.json
+        name = data.get('name')
+        role = data.get('role')
+        
+        user = user_service.update_user(user_id, name, role)
+        if user:
+            return jsonify({"user": user, "message": "User updated successfully"})
+        return jsonify({"error": "User not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>', methods=['DELETE'])
+@admin_required
+def delete_user(user_id):
+    """Delete a user (Admin only)"""
+    try:
+        current_user_id = request.current_user['sub']
+        
+        # Get the user to be deleted
+        user_to_delete = user_service.get_user_by_id(user_id)
+        
+        if not user_to_delete:
+            return jsonify({"error": "User not found"}), 404
+        
+        # Prevent admin from deleting themselves
+        if user_id == current_user_id:
+            return jsonify({"error": "You cannot delete your own account"}), 400
+        
+        # Prevent deleting Admin users
+        if user_to_delete['role'] == 'Admin':
+            return jsonify({"error": "Cannot delete Admin users"}), 403
+        
+        # Verify the user was created by the current admin
+        if user_to_delete.get('created_by') != current_user_id:
+            return jsonify({"error": "You can only delete users you created"}), 403
+        
+        success = user_service.delete_user(user_id)
+        if success:
+            return jsonify({"message": "User deleted successfully"})
+        return jsonify({"error": "User not found"}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

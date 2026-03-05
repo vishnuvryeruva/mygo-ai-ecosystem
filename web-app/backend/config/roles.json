@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "id": "e913f7fd-d330-473b-98f8-28ce5fc093f1",
+    "name": "test",
+    "permissions": [
+      "Read"
+    ],
+    "createdAt": "2026-03-05T23:41:06.035285"
+  }
+]
