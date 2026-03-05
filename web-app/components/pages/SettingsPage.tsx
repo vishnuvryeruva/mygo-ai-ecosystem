@@ -114,8 +114,9 @@ export default function SettingsPage() {
     const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
 
     /* Roles state */
-    const [roles, setRoles] = useState<Role[]>(defaultRoles)
+    const [roles, setRoles] = useState<Role[]>([])
     const [newRoleName, setNewRoleName] = useState('')
+    const [isLoadingRoles, setIsLoadingRoles] = useState(false)
 
     /* Users state */
     const [users, setUsers] = useState<User[]>(defaultUsers)
@@ -125,6 +126,8 @@ export default function SettingsPage() {
     useEffect(() => {
         if (activeTab === 'sources') {
             refreshSources()
+        } else if (activeTab === 'roles') {
+            refreshRoles()
         }
     }, [activeTab])
 
@@ -144,6 +147,18 @@ export default function SettingsPage() {
             console.error('Failed to fetch sources:', err)
         } finally {
             setIsLoadingSources(false)
+        }
+    }
+
+    const refreshRoles = async () => {
+        setIsLoadingRoles(true)
+        try {
+            const res = await axios.get('/api/roles')
+            setRoles(res.data.roles || [])
+        } catch (err) {
+            console.error('Failed to fetch roles:', err)
+        } finally {
+            setIsLoadingRoles(false)
         }
     }
 
@@ -223,32 +238,51 @@ export default function SettingsPage() {
         }
     }
 
-    const handleAddRole = () => {
+    const handleAddRole = async () => {
         if (!newRoleName.trim()) return
-        const newRole: Role = {
-            id: Date.now().toString(),
-            name: newRoleName.trim(),
-            permissions: ['Read'],
+        try {
+            await axios.post('/api/roles', {
+                name: newRoleName.trim(),
+                permissions: ['Read']
+            })
+            await refreshRoles()
+            setNewRoleName('')
+        } catch (err) {
+            console.error('Failed to add role:', err)
+            alert('Failed to add role')
         }
-        setRoles([...roles, newRole])
-        setNewRoleName('')
     }
 
-    const handleDeleteRole = (id: string) => {
-        setRoles(roles.filter(r => r.id !== id))
+    const handleDeleteRole = async (id: string) => {
+        if (!confirm('Are you sure you want to delete this role?')) return
+        try {
+            await axios.delete(`/api/roles/${id}`)
+            await refreshRoles()
+        } catch (err) {
+            console.error('Failed to delete role:', err)
+            alert('Failed to delete role')
+        }
     }
 
-    const handleTogglePermission = (roleId: string, permission: string) => {
-        setRoles(roles.map(r => {
-            if (r.id !== roleId) return r
-            const has = r.permissions.includes(permission)
-            return {
-                ...r,
-                permissions: has
-                    ? r.permissions.filter(p => p !== permission)
-                    : [...r.permissions, permission],
-            }
-        }))
+    const handleTogglePermission = async (roleId: string, permission: string) => {
+        const role = roles.find(r => r.id === roleId)
+        if (!role) return
+
+        const has = role.permissions.includes(permission)
+        const updatedPermissions = has
+            ? role.permissions.filter(p => p !== permission)
+            : [...role.permissions, permission]
+
+        try {
+            await axios.put(`/api/roles/${roleId}`, {
+                name: role.name,
+                permissions: updatedPermissions
+            })
+            await refreshRoles()
+        } catch (err) {
+            console.error('Failed to update role permissions:', err)
+            alert('Failed to update role permissions')
+        }
     }
 
     const handleAddUser = () => {
@@ -497,32 +531,41 @@ export default function SettingsPage() {
                             <button className="btn btn-primary" onClick={handleAddRole}>Add Role</button>
                         </div>
 
-                        <div className="settings-roles-grid">
-                            {roles.map((role) => (
-                                <div key={role.id} className="settings-role-card">
-                                    <div className="settings-role-header">
-                                        <h3 className="settings-role-name">{role.name}</h3>
-                                        <button className="settings-icon-btn danger" title="Delete role" onClick={() => handleDeleteRole(role.id)}>
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                <polyline points="3 6 5 6 21 6" />
-                                                <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-                                            </svg>
-                                        </button>
-                                    </div>
-                                    <div className="settings-role-permissions">
-                                        {['Read', 'Write', 'Delete', 'Manage Users'].map((perm) => (
-                                            <button
-                                                key={perm}
-                                                className={`settings-permission-badge ${role.permissions.includes(perm) ? 'active' : ''}`}
-                                                onClick={() => handleTogglePermission(role.id, perm)}
-                                            >
-                                                {perm}
+                        {isLoadingRoles ? (
+                            <div className="p-8 text-center text-gray-500">Loading roles...</div>
+                        ) : (
+                            <div className="settings-roles-grid">
+                                {roles.map((role) => (
+                                    <div key={role.id} className="settings-role-card">
+                                        <div className="settings-role-header">
+                                            <h3 className="settings-role-name">{role.name}</h3>
+                                            <button className="settings-icon-btn danger" title="Delete role" onClick={() => handleDeleteRole(role.id)}>
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                    <polyline points="3 6 5 6 21 6" />
+                                                    <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                                                </svg>
                                             </button>
-                                        ))}
+                                        </div>
+                                        <div className="settings-role-permissions">
+                                            {['Read', 'Write', 'Delete', 'Manage Users'].map((perm) => (
+                                                <button
+                                                    key={perm}
+                                                    className={`settings-permission-badge ${role.permissions.includes(perm) ? 'active' : ''}`}
+                                                    onClick={() => handleTogglePermission(role.id, perm)}
+                                                >
+                                                    {perm}
+                                                </button>
+                                            ))}
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
-                        </div>
+                                ))}
+                                {roles.length === 0 && (
+                                    <div className="settings-empty-state">
+                                        <p>No roles configured yet. Add a role to get started.</p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 )
 

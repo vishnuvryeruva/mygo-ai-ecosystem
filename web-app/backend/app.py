@@ -16,6 +16,7 @@ from services.prompt_service import PromptService
 from services.code_service import CodeService
 from services.test_service import TestService
 from services.advisor_service import AdvisorService
+from services import role_service
 from config.prompts import get_all_prompts, get_prompt, update_prompt
 
 # Import MCP tools
@@ -772,6 +773,72 @@ def test_new_connection():
             error_msg = "Endpoint not found - check the URL"
         
         return jsonify({"success": False, "error": error_msg}), 500
+
+
+# ============================================================================
+# Role Management Endpoints
+# ============================================================================
+
+@app.route('/api/roles', methods=['GET'])
+def list_roles():
+    """List all roles"""
+    try:
+        roles = role_service.list_roles()
+        return jsonify({"roles": roles})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/roles', methods=['POST'])
+def create_role():
+    """Create a new role"""
+    try:
+        data = request.json
+        role = role_service.create_role(data)
+        return jsonify({"role": role, "message": "Role created successfully"})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/roles/<role_id>', methods=['GET'])
+def get_role(role_id):
+    """Get a specific role"""
+    try:
+        role = role_service.get_role(role_id)
+        if role:
+            return jsonify(role)
+        return jsonify({"error": "Role not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/roles/<role_id>', methods=['PUT'])
+def update_role(role_id):
+    """Update a role"""
+    try:
+        data = request.json
+        role = role_service.update_role(role_id, data)
+        if role:
+            return jsonify({"role": role, "message": "Role updated successfully"})
+        return jsonify({"error": "Role not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/roles/<role_id>', methods=['DELETE'])
+def delete_role(role_id):
+    """Delete a role"""
+    try:
+        success = role_service.delete_role(role_id)
+        if success:
+            return jsonify({"message": "Role deleted successfully"})
+        return jsonify({"error": "Role not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ============================================================================
