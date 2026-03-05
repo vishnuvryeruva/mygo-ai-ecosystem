@@ -490,6 +490,45 @@ class CALMService:
             traceback.print_exc()
             return []
     
+    def get_manual_test_case(self, test_case_id: str) -> Dict:
+        """
+        Get a single Manual Test Case by ID with expanded activities and references.
+        
+        Args:
+            test_case_id: Test case UUID
+            
+        Returns:
+            Test case object with full details including activities and references
+        """
+        try:
+            token = self._get_access_token()
+            
+            # Use $expand to include toActivities (with nested toActions) and toReferences
+            expand_query = "$expand=toActivities($expand=toActions),toReferences"
+            url = f"{self.api_endpoint}/api/calm-testmanagement/v1/ManualTestCases/{test_case_id}?{expand_query}"
+            print(f"DEBUG get_manual_test_case url: {url}")
+            
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json'
+            }
+            
+            response = requests.get(url, headers=headers, timeout=60)
+            
+            print(f"DEBUG get_manual_test_case response status: {response.status_code}")
+            print(f"DEBUG get_manual_test_case response body (first 1000 chars): {response.text[:1000]}")
+            
+            response.raise_for_status()
+            
+            return response.json()
+            
+        except Exception as e:
+            print(f"Error getting manual test case {test_case_id}: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"Response status: {e.response.status_code}")
+                print(f"Response: {e.response.text}")
+            raise
+    
     def create_manual_test_case(
         self,
         title: str,

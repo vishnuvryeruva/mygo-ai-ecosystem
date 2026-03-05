@@ -875,6 +875,8 @@ def calm_list_documents(source_id):
                     tc['itemType'] = 'test_case'
                     tc['name'] = tc.get('title', 'Untitled Test Case')
                     tc['id'] = tc.get('uuid', tc.get('id'))
+                    tc['type'] = 'Manual Test Case'
+                    tc['documentTypeCode'] = 'TEST_CASE'
             except Exception as e:
                 print(f"ERROR fetching test cases: {e}")
                 import traceback
@@ -899,6 +901,39 @@ def calm_list_documents(source_id):
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/test-cases/<test_case_id>', methods=['GET'])
+def get_test_case(test_case_id):
+    """Get test case details from CALM"""
+    try:
+        import re
+        is_uuid = bool(re.match(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$', str(test_case_id)))
+        if not is_uuid:
+            return jsonify({"error": "Invalid test case ID"}), 400
+
+        source_id = request.args.get('sourceId')
+
+        if not source_id:
+            # Fallback to the first CALM source if not explicitly provided
+            sources = source_config_service.list_sources()
+            calm_source = next((s for s in sources if s['type'] == 'CALM'), None)
+            if not calm_source:
+                return jsonify({"error": "No CALM source found"}), 404
+            source_id = calm_source['id']
+
+        source = source_config_service.get_source(source_id)
+        if not source:
+            return jsonify({"error": "Source not found"}), 404
+
+        service = get_calm_service(source.get('config'))
+        test_case = service.get_manual_test_case(test_case_id)
+
+        return jsonify(test_case)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/documents/<document_id>/download', methods=['GET'])
 def download_calm_document(document_id):
     """Download document content from CALM"""
@@ -910,7 +945,7 @@ def download_calm_document(document_id):
             return jsonify({"error": "This document was synced using an older version. Please re-sync the project from the Data Sources tab to download it."}), 400
 
         source_id = request.args.get('sourceId')
-        
+
         if not source_id:
             # Fallback to the first CALM source if not explicitly provided
             sources = source_config_service.list_sources()
@@ -918,14 +953,14 @@ def download_calm_document(document_id):
             if not calm_source:
                 return jsonify({"error": "No CALM source found"}), 404
             source_id = calm_source['id']
-            
+
         source = source_config_service.get_source(source_id)
         if not source:
             return jsonify({"error": "Source not found"}), 404
-            
+
         service = get_calm_service(source.get('config'))
         content = service.get_document_content(document_id)
-        
+
         from flask import make_response
         response = make_response(content)
         # Content-Type will be application/octet-stream if unknown, or text/html if returned by CALM

@@ -30,6 +30,7 @@ interface Document {
     updatedOn: string
     webUrl?: string
     documentId?: string
+    documentTypeCode?: string
 }
 
 const sourceColors: Record<string, { bg: string; text: string }> = {
@@ -311,10 +312,139 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
         setIsLoadingContent(true)
         setViewerDoc({ name: doc.name, content: '' })
         try {
-            const res = await axios.get(`/api/documents/${doc.documentId}/view`)
-            setViewerDoc({ name: doc.name, content: res.data.content || '' })
+            // Check if this is a test case
+            const isTestCase = doc.type === 'Manual Test Case' || doc.documentTypeCode === 'TEST_CASE'
+            
+            if (isTestCase) {
+                // Fetch test case details
+                const res = await axios.get(`/api/test-cases/${doc.documentId}`)
+                const testCase = res.data
+                
+                console.log('Test case data:', testCase)
+                
+                // Format test case as HTML for display with better styling
+                let html = `
+                    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; line-height: 1.6;">
+                        <h1 style="color: #1f2937; margin-bottom: 20px; font-size: 24px; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px;">
+                            ${testCase.title || 'Test Case'}
+                        </h1>
+                        
+                        <div style="background: #f9fafb; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                            <p style="margin: 5px 0;">
+                                <strong style="color: #374151;">Priority:</strong> 
+                                <span style="padding: 4px 12px; border-radius: 4px; font-size: 14px; font-weight: 500; ${
+                                    testCase.priorityCode === 30 ? 'background: #fee2e2; color: #991b1b;' :
+                                    testCase.priorityCode === 20 ? 'background: #fef3c7; color: #92400e;' :
+                                    'background: #dbeafe; color: #1e40af;'
+                                }">
+                                    ${testCase.priorityCode === 10 ? 'Low' : testCase.priorityCode === 20 ? 'Medium' : testCase.priorityCode === 30 ? 'High' : 'Unknown'}
+                                </span>
+                            </p>
+                            <p style="margin: 5px 0;">
+                                <strong style="color: #374151;">Status:</strong> 
+                                <span style="padding: 4px 12px; border-radius: 4px; font-size: 14px; font-weight: 500; ${
+                                    testCase.isPrepared ? 'background: #d1fae5; color: #065f46;' : 'background: #e5e7eb; color: #6b7280;'
+                                }">
+                                    ${testCase.isPrepared ? 'Prepared' : 'Not Prepared'}
+                                </span>
+                            </p>
+                        </div>
+                `
+                
+                if (testCase.toActivities && testCase.toActivities.length > 0) {
+                    html += '<h2 style="color: #1f2937; margin-top: 30px; margin-bottom: 15px; font-size: 20px;">Test Activities</h2>'
+                    
+                    testCase.toActivities.forEach((activity: any, actIdx: number) => {
+                        html += `
+                            <div style="margin-bottom: 25px; padding: 20px; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                                <h3 style="color: #7c3aed; margin: 0 0 15px 0; font-size: 18px; display: flex; align-items: center;">
+                                    <span style="background: #7c3aed; color: white; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-right: 10px; font-size: 14px; font-weight: bold;">
+                                        ${activity.sequence || actIdx + 1}
+                                    </span>
+                                    ${activity.title}
+                                </h3>
+                        `
+                        
+                        if (activity.toActions && activity.toActions.length > 0) {
+                            html += '<div style="margin-left: 38px;">'
+                            
+                            activity.toActions.forEach((action: any, actionIdx: number) => {
+                                html += `
+                                    <div style="margin-bottom: 15px; padding: 15px; background: #f9fafb; border-left: 3px solid #7c3aed; border-radius: 4px;">
+                                        <div style="display: flex; align-items: start; margin-bottom: 8px;">
+                                            <span style="background: #e9d5ff; color: #6b21a8; min-width: 24px; height: 24px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; margin-right: 10px; font-size: 12px; font-weight: bold;">
+                                                ${action.sequence || actionIdx + 1}
+                                            </span>
+                                            <strong style="color: #1f2937; font-size: 15px;">${action.title}</strong>
+                                        </div>
+                                `
+                                
+                                if (action.description && action.description.trim()) {
+                                    html += `
+                                        <div style="margin: 10px 0 10px 34px; padding: 10px; background: white; border-radius: 4px;">
+                                            <div style="color: #6b7280; font-size: 12px; font-weight: 600; text-transform: uppercase; margin-bottom: 5px;">Description</div>
+                                            <div style="color: #374151;">${action.description}</div>
+                                        </div>
+                                    `
+                                }
+                                
+                                if (action.expectedResult && action.expectedResult.trim()) {
+                                    html += `
+                                        <div style="margin: 10px 0 10px 34px; padding: 10px; background: #ecfdf5; border-radius: 4px; border-left: 3px solid #10b981;">
+                                            <div style="color: #047857; font-size: 12px; font-weight: 600; text-transform: uppercase; margin-bottom: 5px;">✓ Expected Result</div>
+                                            <div style="color: #065f46; font-weight: 500;">${action.expectedResult}</div>
+                                        </div>
+                                    `
+                                }
+                                
+                                if (action.isEvidenceRequired) {
+                                    html += `
+                                        <div style="margin: 10px 0 0 34px;">
+                                            <span style="display: inline-block; padding: 4px 8px; background: #fef3c7; color: #92400e; border-radius: 4px; font-size: 12px; font-weight: 500;">
+                                                📸 Evidence Required
+                                            </span>
+                                        </div>
+                                    `
+                                }
+                                
+                                html += '</div>'
+                            })
+                            
+                            html += '</div>'
+                        }
+                        
+                        html += '</div>'
+                    })
+                }
+                
+                // Add references if available
+                if (testCase.toReferences && testCase.toReferences.length > 0) {
+                    html += '<h2 style="color: #1f2937; margin-top: 30px; margin-bottom: 15px; font-size: 20px;">References</h2>'
+                    html += '<div style="background: #f9fafb; padding: 15px; border-radius: 8px;">'
+                    
+                    testCase.toReferences.forEach((ref: any) => {
+                        html += `
+                            <div style="margin-bottom: 10px;">
+                                <a href="${ref.url}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: none; font-weight: 500;">
+                                    🔗 ${ref.name}
+                                </a>
+                            </div>
+                        `
+                    })
+                    
+                    html += '</div>'
+                }
+                
+                html += '</div>'
+                
+                setViewerDoc({ name: doc.name, content: html })
+            } else {
+                // Regular document
+                const res = await axios.get(`/api/documents/${doc.documentId}/view`)
+                setViewerDoc({ name: doc.name, content: res.data.content || '' })
+            }
         } catch (err: any) {
-            const errMsg = err?.response?.data?.error || 'Failed to load document content.'
+            const errMsg = err?.response?.data?.error || 'Failed to load content.'
             setViewerDoc({ name: doc.name, content: `<p style="color:red">${errMsg}</p>` })
         } finally {
             setIsLoadingContent(false)
