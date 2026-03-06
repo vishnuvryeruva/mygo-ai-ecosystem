@@ -2,13 +2,16 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import os
 import io
-import sqlite3
 import uuid
 import jwt
 import bcrypt
 import datetime
 from functools import wraps
 from dotenv import load_dotenv
+import psycopg2
+import psycopg2.extras
+import psycopg2.errorcodes
+from db import get_conn, init_db
 from services.openai_service import OpenAIService
 from services.rag_service import RAGService
 from services.spec_service import SpecService
@@ -52,47 +55,7 @@ JWT_SECRET = os.getenv('JWT_SECRET', 'mygo-yoda-secret-key-change-in-production'
 JWT_ALGORITHM = 'HS256'
 JWT_EXPIRY_DAYS = 7
 
-# ── SQLite user database ────────────────────────────────────────────────────
-DB_PATH = os.path.join(basedir, 'users.db')
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def init_db():
-    conn = get_db()
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            role TEXT DEFAULT 'Admin',
-            created_by TEXT,
-            created_at TEXT NOT NULL
-        )
-    ''')
-    
-    # Add role column if it doesn't exist (for existing databases)
-    try:
-        conn.execute('ALTER TABLE users ADD COLUMN role TEXT DEFAULT "Admin"')
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass
-    
-    # Add created_by column if it doesn't exist
-    try:
-        conn.execute('ALTER TABLE users ADD COLUMN created_by TEXT')
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass
-    
-    # Update all existing users without a role to Admin
-    conn.execute("UPDATE users SET role = 'Admin' WHERE role IS NULL OR role = '' OR role = 'Viewer'")
-    conn.commit()
-    conn.close()
-
+# ── PostgreSQL user database (via db.py) ────────────────────────────────────
 init_db()
 
 # ── JWT helper ──────────────────────────────────────────────────────────────
@@ -167,14 +130,15 @@ def register():
     role = 'Admin'
 
     try:
-        conn = get_db()
-        conn.execute(
-            'INSERT INTO users (id, name, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-            (user_id, name, email, password_hash, role, created_at)
-        )
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                'INSERT INTO users (id, name, email, password_hash, role, created_at) VALUES (%s, %s, %s, %s, %s, %s)',
+                (user_id, name, email, password_hash, role, created_at)
+            )
         conn.commit()
         conn.close()
-    except sqlite3.IntegrityError:
+    except psycopg2.errors.UniqueViolation:
         return jsonify({'error': 'An account with this email already exists'}), 409
 
     token = create_token(user_id, email)
@@ -193,8 +157,10 @@ def login():
     if not email or not password:
         return jsonify({'error': 'Email and password are required'}), 400
 
-    conn = get_db()
-    row = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
+    conn = get_conn()
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute('SELECT * FROM users WHERE email = %s', (email,))
+        row = cur.fetchone()
     conn.close()
 
     if not row or not bcrypt.checkpw(password.encode('utf-8'), row['password_hash'].encode('utf-8')):
@@ -211,8 +177,10 @@ def login():
 @token_required
 def me():
     payload = request.current_user
-    conn = get_db()
-    row = conn.execute('SELECT id, name, email, role, created_at FROM users WHERE id = ?', (payload['sub'],)).fetchone()
+    conn = get_conn()
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute('SELECT id, name, email, role, created_at FROM users WHERE id = %s', (payload['sub'],))
+        row = cur.fetchone()
     conn.close()
     if not row:
         return jsonify({'error': 'User not found'}), 404

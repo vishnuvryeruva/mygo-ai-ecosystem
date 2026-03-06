@@ -1,11 +1,16 @@
 import os
-import chromadb
-from chromadb.config import Settings
-from services.openai_service import OpenAIService
-import PyPDF2
 import io
 import zipfile
+import re
+
+import PyPDF2
+import psycopg2
+import psycopg2.extras
+from pgvector.psycopg2 import register_vector
 from docx import Document
+
+from db import get_conn
+from services.openai_service import OpenAIService
 
 # Supported file extensions for extraction from ZIP files
 SUPPORTED_EXTENSIONS = {
@@ -15,37 +20,22 @@ SUPPORTED_EXTENSIONS = {
     '.py', '.js', '.ts', '.java', '.abap', '.json', '.yaml', '.yml', '.xml'
 }
 
+
 class RAGService:
     def __init__(self):
         self.openai_service = OpenAIService()
-        
-        # Use OpenAI embeddings instead of SentenceTransformer to avoid HuggingFace network issues
-        print("DEBUG: RAG Service initialized with OpenAI embeddings")
-        
-        # Initialize ChromaDB with telemetry disabled
-        db_path = os.getenv('VECTOR_DB_PATH', './vector_db')
-        self.client = chromadb.PersistentClient(
-            path=db_path,
-            settings=Settings(anonymized_telemetry=False)
-        )
-        
-        # Get or create collection with new name to force new embedding dimensions
-        # OpenAI text-embedding-3-small uses 1536 dimensions (vs 384 for SentenceTransformer)
-        self.collection = self.client.get_or_create_collection(
-            name="sap_knowledge_base_openai",  # Changed from sap_knowledge_base
-            metadata={"description": "SAP knowledge base with OpenAI embeddings (1536 dim)"}
-        )
-    
+        print("DEBUG: RAG Service initialized with OpenAI embeddings + PostgreSQL (pgvector)")
+
+    # ── Embedding ─────────────────────────────────────────────────────────────
+
     def _create_embedding(self, text):
-        """Create embedding using OpenAI's embedding model"""
+        """Create embedding using OpenAI's text-embedding-3-small model (1536-dim)."""
         try:
             from openai import OpenAI
-            # Use longer timeout for slow network connections
             client = OpenAI(
                 api_key=os.getenv('OPENAI_API_KEY'),
-                timeout=120.0  # 120 second timeout instead of default 10s
+                timeout=120.0
             )
-            
             response = client.embeddings.create(
                 model="text-embedding-3-small",
                 input=text
@@ -54,30 +44,109 @@ class RAGService:
         except Exception as e:
             print(f"ERROR: Failed to create embedding: {e}")
             raise
-    
-    def check_document_exists(self, doc_id):
-        """Check if a document with the given ID already exists"""
+
+    # ── Internal helpers ───────────────────────────────────────────────────────
+
+    def _chunk_text(self, text, chunk_size=500, overlap=50):
+        """Split text into overlapping word-based chunks."""
+        words = text.split()
+        chunks = []
+        for i in range(0, len(words), chunk_size - overlap):
+            chunk = ' '.join(words[i:i + chunk_size])
+            chunks.append(chunk)
+        return chunks
+
+    def _get_file_type(self, filename):
+        """Map filename extension to a human-readable type label."""
+        ext = filename.lower().split('.')[-1] if '.' in filename else 'unknown'
+        type_map = {
+            'pdf': 'PDF', 'docx': 'Word', 'doc': 'Word', 'txt': 'Text',
+            'md': 'Markdown', 'py': 'Python', 'js': 'JavaScript',
+            'ts': 'TypeScript', 'java': 'Java', 'abap': 'ABAP',
+            'json': 'JSON', 'yaml': 'YAML', 'yml': 'YAML', 'xml': 'XML'
+        }
+        return type_map.get(ext, ext.upper())
+
+    def _delete_chunks_for_doc(self, doc_id: str, conn):
+        """Delete all existing chunks that start with doc_id."""
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM documents WHERE id LIKE %s",
+                (f"{doc_id}_%",)
+            )
+
+    def _insert_chunk(self, conn, chunk_id: str, doc_id: str, content: str,
+                      embedding, metadata: dict):
+        """Insert a single chunk row into the documents table."""
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO documents (
+                    id, document_id, document_name, content, embedding,
+                    source, doc_type, project, updated_by, updated_on,
+                    web_url, is_placeholder, html_content,
+                    uuid, display_id, project_id, scope_id
+                ) VALUES (
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s,
+                    %s, %s, %s, %s
+                )
+                ON CONFLICT (id) DO UPDATE SET
+                    content = EXCLUDED.content,
+                    embedding = EXCLUDED.embedding,
+                    html_content = EXCLUDED.html_content,
+                    updated_on = EXCLUDED.updated_on
+                """,
+                (
+                    chunk_id,
+                    doc_id,
+                    metadata.get('document_name', ''),
+                    content,
+                    embedding,
+                    metadata.get('source', 'File Upload'),
+                    metadata.get('type', 'Unknown'),
+                    metadata.get('project', 'N/A'),
+                    metadata.get('updatedBy', 'System'),
+                    metadata.get('updatedOn', 'N/A'),
+                    metadata.get('webUrl', ''),
+                    metadata.get('is_placeholder', False),
+                    metadata.get('html_content', ''),
+                    metadata.get('uuid', ''),
+                    metadata.get('displayId', ''),
+                    metadata.get('projectId', ''),
+                    metadata.get('scopeId', ''),
+                )
+            )
+
+    # ── Public API ─────────────────────────────────────────────────────────────
+
+    def check_document_exists(self, doc_id: str) -> bool:
+        """Check if any chunk exists for the given document_id prefix."""
+        conn = get_conn()
         try:
-            result = self.collection.get()
-            ids = result['ids']
-            
-            # Check if any ID starts with the document ID
-            for id in ids:
-                if id.startswith(f"{doc_id}_"):
-                    return True
-            return False
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM documents WHERE id LIKE %s LIMIT 1",
+                    (f"{doc_id}_%",)
+                )
+                return cur.fetchone() is not None
         except Exception as e:
             print(f"Error checking document existence: {e}")
             return False
-    
+        finally:
+            conn.close()
+
+    def check_duplicate(self, filename: str) -> bool:
+        """Check if a document with the same filename already exists."""
+        return self.check_document_exists(filename)
+
     def ingest_calm_document(self, doc_metadata, html_content: str):
         """
         Ingest a CALM document with real HTML content into the vector database.
         Strips HTML tags for embedding/search, stores raw HTML in metadata for display.
         Replaces any existing placeholder or chunks for this document.
         """
-        import re
-
         doc_id = doc_metadata.get('id', 'unknown')
         meta = doc_metadata.get('metadata', doc_metadata)
         filename = meta.get('name', doc_metadata.get('name', 'unknown'))
@@ -87,7 +156,7 @@ class RAGService:
         updated_by = meta.get('updatedBy', 'System')
         updated_on = str(meta.get('updatedOn', meta.get('lastModified', 'N/A')))
         web_url = meta.get('webUrl', '')
-        uuid = meta.get('uuid', '')
+        uuid_val = meta.get('uuid', '')
         display_id = meta.get('displayId', '')
         project_id = meta.get('projectId', '')
         scope_id = meta.get('scopeId', '')
@@ -97,85 +166,53 @@ class RAGService:
         plain_text = re.sub(r'\s+', ' ', plain_text).strip()
 
         if not plain_text:
-            # Fall back to placeholder if content is empty after stripping
             return self.add_placeholder_document(doc_metadata)
 
-        # Delete existing chunks for this document
-        try:
-            existing = self.collection.get()
-            ids_to_delete = [i for i in existing['ids'] if i.startswith(f"{doc_id}_")]
-            if ids_to_delete:
-                self.collection.delete(ids=ids_to_delete)
-        except Exception as e:
-            print(f"Warning: could not delete existing chunks for {doc_id}: {e}")
-
-        chunks = self._chunk_text(plain_text, chunk_size=500, overlap=50)
-
-        # Truncate html_content to fit ChromaDB metadata limit (~1MB, but keep it reasonable)
         MAX_HTML = 50000
         stored_html = html_content[:MAX_HTML] if len(html_content) > MAX_HTML else html_content
 
         base_metadata = {
-            "source": source,
-            "type": doc_type,
-            "project": project,
-            "updatedBy": updated_by,
-            "updatedOn": updated_on,
-            "webUrl": web_url,
-            "is_placeholder": False,
-            "document_name": filename,
-            "document_id": doc_id,
-            "html_content": stored_html,
+            'source': source,
+            'type': doc_type,
+            'project': project,
+            'updatedBy': updated_by,
+            'updatedOn': updated_on,
+            'webUrl': web_url,
+            'is_placeholder': False,
+            'document_name': filename,
+            'uuid': uuid_val,
+            'displayId': display_id,
+            'projectId': project_id,
+            'scopeId': scope_id,
         }
-        if uuid:
-            base_metadata["uuid"] = uuid
-        if display_id:
-            base_metadata["displayId"] = display_id
-        if project_id:
-            base_metadata["projectId"] = project_id
-        if scope_id:
-            base_metadata["scopeId"] = scope_id
 
-        for i, chunk in enumerate(chunks):
-            chunk_meta = dict(base_metadata)
-            # Only store html_content on the first chunk to avoid redundant storage
-            if i > 0:
-                chunk_meta["html_content"] = ""
-            embedding = self._create_embedding(chunk)
-            self.collection.add(
-                embeddings=[embedding],
-                documents=[chunk],
-                ids=[f"{doc_id}_{i}"],
-                metadatas=[chunk_meta]
-            )
+        chunks = self._chunk_text(plain_text, chunk_size=500, overlap=50)
+
+        conn = get_conn()
+        try:
+            # Delete existing chunks for this document
+            self._delete_chunks_for_doc(doc_id, conn)
+
+            for i, chunk in enumerate(chunks):
+                embedding = self._create_embedding(chunk)
+                chunk_meta = dict(base_metadata)
+                # Only store html_content on the first chunk
+                chunk_meta['html_content'] = stored_html if i == 0 else ''
+                self._insert_chunk(conn, f"{doc_id}_{i}", doc_id, chunk, embedding, chunk_meta)
+
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
         return {"status": "success", "chunks": len(chunks), "was_existing": False}
 
-    def get_document_html(self, doc_id: str) -> str:
-        """
-        Retrieve the stored HTML content for a CALM document by its document_id.
-        Returns the html_content from the first chunk, or empty string if not found.
-        """
-        try:
-            result = self.collection.get(
-                where={"document_id": doc_id}
-            )
-            metadatas = result.get('metadatas', [])
-            for m in metadatas:
-                html = m.get('html_content', '')
-                if html:
-                    return html
-            return ''
-        except Exception as e:
-            print(f"Error retrieving html content for {doc_id}: {e}")
-            return ''
-
     def add_placeholder_document(self, doc_metadata):
-        """Add or update a placeholder document in the database (for synced external files)"""
+        """Add or update a placeholder document (for synced external files with no content yet)."""
         try:
-            # Handle nested metadata if present (frontend sends it nested)
             meta = doc_metadata.get('metadata', doc_metadata)
-            
             doc_id = doc_metadata.get('id', 'unknown')
             filename = meta.get('name', doc_metadata.get('name', 'unknown'))
             doc_type = meta.get('type') or meta.get('documentType') or 'Document'
@@ -184,95 +221,81 @@ class RAGService:
             updated_by = meta.get('updatedBy', 'System')
             updated_on = meta.get('updatedOn', meta.get('lastModified', 'N/A'))
             web_url = meta.get('webUrl', '')
-            
-            # Preserve additional SAP Calm metadata
-            uuid = meta.get('uuid', '')
+            uuid_val = meta.get('uuid', '')
             display_id = meta.get('displayId', '')
             project_id = meta.get('projectId', '')
             scope_id = meta.get('scopeId', '')
-            
-            # Check if document already exists
+
             already_exists = self.check_document_exists(doc_id)
-            
-            # Create a placeholder chunk
-            placeholder_text = f"External document synced from {source}. Project: {project}. Type: {doc_type}. Document: {filename}. This is a placeholder for metadata purposes."
-            
-            # Create embedding
+
+            placeholder_text = (
+                f"External document synced from {source}. Project: {project}. "
+                f"Type: {doc_type}. Document: {filename}. "
+                "This is a placeholder for metadata purposes."
+            )
             embedding = self._create_embedding(placeholder_text)
-            
-            chunk_id = f"{doc_id}_0"
-            
-            metadata_obj = {
-                "source": source,
-                "type": doc_type,
-                "project": project,
-                "updatedBy": updated_by,
-                "updatedOn": str(updated_on),
-                "webUrl": web_url,
-                "is_placeholder": True,
-                "document_name": filename,
-                "document_id": doc_id
+
+            chunk_meta = {
+                'source': source,
+                'type': doc_type,
+                'project': project,
+                'updatedBy': updated_by,
+                'updatedOn': str(updated_on),
+                'webUrl': web_url,
+                'is_placeholder': True,
+                'document_name': filename,
+                'uuid': uuid_val,
+                'displayId': display_id,
+                'projectId': project_id,
+                'scopeId': scope_id,
+                'html_content': '',
             }
-            
-            # Add SAP-specific metadata if available
-            if uuid:
-                metadata_obj["uuid"] = uuid
-            if display_id:
-                metadata_obj["displayId"] = display_id
-            if project_id:
-                metadata_obj["projectId"] = project_id
-            if scope_id:
-                metadata_obj["scopeId"] = scope_id
-            
-            if already_exists:
-                # Update existing document
-                try:
-                    # ChromaDB doesn't have direct update, so delete and re-add
-                    self.collection.delete(ids=[chunk_id])
-                    self.collection.add(
-                        embeddings=[embedding],
-                        documents=[placeholder_text],
-                        ids=[chunk_id],
-                        metadatas=[metadata_obj]
-                    )
-                    return {"status": "updated", "message": "Document updated", "was_existing": True}
-                except Exception as e:
-                    print(f"Error updating document: {e}")
-                    return {"status": "error", "error": str(e)}
-            else:
-                # Add new document
-                self.collection.add(
-                    embeddings=[embedding],
-                    documents=[placeholder_text],
-                    ids=[chunk_id],
-                    metadatas=[metadata_obj]
-                )
-                return {"status": "success", "message": "Document added", "was_existing": False}
-                
+
+            conn = get_conn()
+            try:
+                self._insert_chunk(conn, f"{doc_id}_0", doc_id, placeholder_text, embedding, chunk_meta)
+                conn.commit()
+            finally:
+                conn.close()
+
+            status = "updated" if already_exists else "success"
+            return {"status": status, "message": "Document placeholder saved", "was_existing": already_exists}
+
         except Exception as e:
             print(f"Error adding/updating placeholder: {e}")
             return {"status": "error", "error": str(e)}
 
+    def get_document_html(self, doc_id: str) -> str:
+        """Retrieve the stored HTML content for a CALM document by its document_id."""
+        conn = get_conn()
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT html_content FROM documents WHERE document_id = %s AND html_content != '' LIMIT 1",
+                    (doc_id,)
+                )
+                row = cur.fetchone()
+                return row['html_content'] if row else ''
+        except Exception as e:
+            print(f"Error retrieving html content for {doc_id}: {e}")
+            return ''
+        finally:
+            conn.close()
+
     def ingest_documents(self, files, max_zip_size=256000):
-        """Ingest documents into the vector database
-        
-        Args:
-            files: List of files to ingest
-            max_zip_size: Maximum size for ZIP files in bytes (default 250KB = 256000 bytes)
-        """
+        """Ingest uploaded files into the vector database."""
         results = []
-        
+
         for file in files:
             try:
                 filename_lower = file.filename.lower()
-                
-                # Handle ZIP files specially
+
+                # Handle ZIP files
                 if filename_lower.endswith('.zip'):
-                    # Check file size for ZIP files
-                    file.seek(0, 2)  # Seek to end
+                    file.seek(0, 2)
                     file_size = file.tell()
-                    file.seek(0)  # Reset to beginning
-                    
+                    file.seek(0)
+
                     if file_size > max_zip_size:
                         results.append({
                             "filename": file.filename,
@@ -280,18 +303,14 @@ class RAGService:
                             "error": f"ZIP file exceeds 250KB limit ({file_size / 1024:.1f}KB)"
                         })
                         continue
-                    
-                    # Extract and process ZIP contents
+
                     zip_results = self._extract_zip(file)
                     results.extend(zip_results)
                     continue
-                
-                # Check for duplicates
+
                 is_duplicate = self.check_duplicate(file.filename)
-                
-                # Extract text from file
                 text_content = self._extract_text(file)
-                
+
                 if not text_content.strip():
                     results.append({
                         "filename": file.filename,
@@ -299,33 +318,39 @@ class RAGService:
                         "error": "No text content extracted from file"
                     })
                     continue
-                
-                # Split into chunks
+
                 chunks = self._chunk_text(text_content, chunk_size=500, overlap=50)
-                
-                # Create embeddings and store
-                for i, chunk in enumerate(chunks):
-                    embedding = self._create_embedding(chunk)
-                    
-                    self.collection.add(
-                        embeddings=[embedding],
-                        documents=[chunk],
-                        ids=[f"{file.filename}_{i}"],
-                        metadatas=[{
-                            "source": "File Upload",
-                            "type": self._get_file_type(file.filename),
-                            "project": "N/A",
-                            "updatedBy": "System", 
-                            "updatedOn": "N/A"
-                        }]
-                    )
-                
+                doc_id = file.filename
+
+                conn = get_conn()
+                try:
+                    for i, chunk in enumerate(chunks):
+                        embedding = self._create_embedding(chunk)
+                        metadata = {
+                            'source': 'File Upload',
+                            'type': self._get_file_type(file.filename),
+                            'project': 'N/A',
+                            'updatedBy': 'System',
+                            'updatedOn': 'N/A',
+                            'document_name': file.filename,
+                            'is_placeholder': False,
+                            'html_content': '',
+                        }
+                        self._insert_chunk(conn, f"{doc_id}_{i}", doc_id, chunk, embedding, metadata)
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+                finally:
+                    conn.close()
+
                 results.append({
                     "filename": file.filename,
                     "chunks": len(chunks),
                     "status": "success",
                     "was_duplicate": is_duplicate
                 })
+
             except Exception as e:
                 import traceback
                 traceback.print_exc()
@@ -334,39 +359,32 @@ class RAGService:
                     "status": "error",
                     "error": str(e)
                 })
-        
+
         return results
-    
-    def check_duplicate(self, filename):
-        """Check if a document with the same filename already exists"""
-        try:
-            result = self.collection.get()
-            ids = result['ids']
-            
-            # Check if any ID starts with the filename
-            for id in ids:
-                if id.startswith(f"{filename}_"):
-                    return True
-            return False
-        except Exception as e:
-            print(f"Error checking duplicate: {e}")
-            return False
-    
+
     def query(self, query_text, top_k=5, custom_prompt=None):
-        """Query the RAG system"""
-        # Encode query using OpenAI embeddings
+        """Query the RAG system using cosine similarity search."""
         query_embedding = self._create_embedding(query_text)
-        
-        # Search similar documents
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=top_k
-        )
-        
-        # Build context from retrieved documents
-        context = "\n\n".join(results['documents'][0])
-        
-        # Inject global index of documents to allow Yoda to answer metadata/availability questions
+
+        conn = get_conn()
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT content, source, doc_type, project, document_name
+                    FROM documents
+                    ORDER BY embedding <=> %s::vector
+                    LIMIT %s
+                    """,
+                    (query_embedding, top_k)
+                )
+                rows = cur.fetchall()
+        finally:
+            conn.close()
+
+        context = "\n\n".join(row['content'] for row in rows)
+
+        # Inject global document index
         try:
             doc_list = self.list_documents()
             global_index = "Available Documents Index:\n"
@@ -375,9 +393,8 @@ class RAGService:
             context = global_index + "\n\nDetailed Excerpts:\n" + context
         except Exception as e:
             print(f"DEBUG: Failed to append global index to context: {e}")
-        
-        # Generate answer using OpenAI with context
-        # Use custom prompt if provided, otherwise use default from config
+
+        # Build system prompt
         if custom_prompt:
             system_prompt = custom_prompt
         else:
@@ -385,188 +402,148 @@ class RAGService:
                 from config.prompts import get_prompt
                 system_prompt = get_prompt('ask_yoda', 'system')
                 if not system_prompt:
-                    # Fallback to default
-                    system_prompt = """You are Yoda, a wise AI assistant with access to a knowledge base of SAP documents. 
-                    Answer questions based on the provided context. If the context doesn't contain enough information, say so clearly."""
-            except:
-                system_prompt = """You are an expert SAP consultant and developer. 
-                Answer questions based on the provided context from documents, test scripts, and tickets.
-                If the context doesn't contain enough information, say so clearly.
-                Provide clear, concise, and accurate answers."""
-        
-        user_prompt = f"""Context from knowledge base:
-{context}
+                    system_prompt = (
+                        "You are Yoda, a wise AI assistant with access to a knowledge base of SAP documents. "
+                        "Answer questions based on the provided context. If the context doesn't contain enough "
+                        "information, say so clearly."
+                    )
+            except Exception:
+                system_prompt = (
+                    "You are an expert SAP consultant and developer. "
+                    "Answer questions based on the provided context from documents, test scripts, and tickets. "
+                    "If the context doesn't contain enough information, say so clearly. "
+                    "Provide clear, concise, and accurate answers."
+                )
 
-Question: {query_text}
+        user_prompt = (
+            f"Context from knowledge base:\n{context}\n\n"
+            f"Question: {query_text}\n\n"
+            "Please provide a comprehensive answer based on the context above."
+        )
 
-Please provide a comprehensive answer based on the context above."""
-        
         answer = self.openai_service.generate_text(
             user_prompt,
             system_prompt=system_prompt,
             temperature=0.3,
             max_tokens=1000
         )
-        
         return answer
-    
+
     def list_documents(self):
-        """List all documents in the database with metadata"""
-        # Get all documents from collection
-        # Note: ChromaDB doesn't have a direct "list all source files" method efficiently
-        # So we'll get all metadata and extract unique filenames
-        
+        """List all unique documents with their metadata."""
+        conn = get_conn()
         try:
-            result = self.collection.get()
-            ids = result['ids']
-            documents = result.get('documents', [])
-            metadatas = result.get('metadatas', [])
-            
-            # Extract unique filenames and count chunks
-            file_info = {}
-            for i, id in enumerate(ids):
-                # Assuming id format is filename_chunkIndex
-                parts = id.rsplit('_', 1)
-                if len(parts) > 0:
-                    filename = parts[0]
-                    metadata = (metadatas[i] if metadatas and i < len(metadatas) else None) or {}
-                    
-                    if filename not in file_info:
-                        # Extract real document name from metadata if available
-                        real_name = metadata.get('document_name') or metadata.get('name') or metadata.get('title') or filename
-                        
-                        file_info[filename] = {
-                            'name': real_name,
-                            'type': metadata.get('type') or self._get_file_type(filename),
-                            'source': metadata.get('source', 'File Upload'),
-                            'project': metadata.get('project', 'N/A'),
-                            'updatedBy': metadata.get('updatedBy', 'System'),
-                            'updatedOn': metadata.get('updatedOn', 'N/A'),
-                            'webUrl': metadata.get('webUrl'),
-                            'documentId': metadata.get('uuid') or metadata.get('document_id') or metadata.get('id') or filename,
-                            'chunks': 0,
-                            'estimated_size': 0
-                        }
-                    file_info[filename]['chunks'] += 1
-                    # Estimate size from document content
-                    if i < len(documents):
-                        doc_len = len(documents[i]) if documents[i] else 0
-                        file_info[filename]['estimated_size'] += doc_len
-            
-            # Convert to list with formatted size
-            doc_list = []
-            for filename, info in file_info.items():
-                size_kb = info['estimated_size'] / 1024
-                doc_list.append({
-                    'name': info['name'],
-                    'type': info['type'],
-                    'source': info['source'],
-                    'project': info['project'],
-                    'updatedBy': info['updatedBy'],
-                    'updatedOn': info['updatedOn'],
-                    'webUrl': info.get('webUrl'),
-                    'documentId': info.get('documentId'),
-                    'size': f"{size_kb:.1f} KB" if size_kb >= 1 else f"{info['estimated_size']} bytes",
-                    'chunks': info['chunks']
-                })
-            
-            return doc_list
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                # Get the first chunk per document_id (which holds html and full metadata)
+                cur.execute(
+                    """
+                    SELECT DISTINCT ON (document_id)
+                        document_id, document_name, source, doc_type, project,
+                        updated_by, updated_on, web_url, uuid, display_id,
+                        length(content) as content_len,
+                        COUNT(*) OVER (PARTITION BY document_id) as chunk_count
+                    FROM documents
+                    ORDER BY document_id, id
+                    """
+                )
+                rows = cur.fetchall()
         except Exception as e:
             print(f"Error listing documents: {e}")
             import traceback
             traceback.print_exc()
             return []
-    
-    def _get_file_type(self, filename):
-        """Get file type from filename extension"""
-        ext = filename.lower().split('.')[-1] if '.' in filename else 'unknown'
-        type_map = {
-            'pdf': 'PDF',
-            'docx': 'Word',
-            'doc': 'Word',
-            'txt': 'Text',
-            'md': 'Markdown',
-            'py': 'Python',
-            'js': 'JavaScript',
-            'ts': 'TypeScript',
-            'java': 'Java',
-            'abap': 'ABAP',
-            'json': 'JSON',
-            'yaml': 'YAML',
-            'yml': 'YAML',
-            'xml': 'XML'
-        }
-        return type_map.get(ext, ext.upper())
+        finally:
+            conn.close()
 
-    def delete_document(self, filename):
-        """Delete a document from the database"""
+        doc_list = []
+        for row in rows:
+            estimated_size = (row['content_len'] or 0) * (row['chunk_count'] or 1)
+            size_kb = estimated_size / 1024
+            doc_list.append({
+                'name': row['document_name'] or row['document_id'],
+                'type': row['doc_type'] or 'Unknown',
+                'source': row['source'] or 'File Upload',
+                'project': row['project'] or 'N/A',
+                'updatedBy': row['updated_by'] or 'System',
+                'updatedOn': row['updated_on'] or 'N/A',
+                'webUrl': row['web_url'],
+                'documentId': row['uuid'] or row['document_id'],
+                'size': f"{size_kb:.1f} KB" if size_kb >= 1 else f"{estimated_size} bytes",
+                'chunks': row['chunk_count'] or 1,
+            })
+
+        return doc_list
+
+    def delete_document(self, filename: str) -> bool:
+        """Delete all chunks associated with a filename."""
+        conn = get_conn()
         try:
-            # Delete all chunks associated with this filename
-            # We need to find IDs that start with the filename
-            # This is a bit tricky with ChromaDB's delete, so we'll use a where clause on metadata if possible
-            # But we didn't store filename in metadata in ingest_documents (my bad)
-            # So we have to rely on ID matching
-            
-            # First, get all IDs
-            result = self.collection.get()
-            ids = result['ids']
-            
-            ids_to_delete = [id for id in ids if id.startswith(f"{filename}_")]
-            
-            if ids_to_delete:
-                self.collection.delete(ids=ids_to_delete)
-                return True
-            return False
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM documents WHERE id LIKE %s",
+                    (f"{filename}_%",)
+                )
+                deleted = cur.rowcount > 0
+            conn.commit()
+            return deleted
         except Exception as e:
+            conn.rollback()
             print(f"Error deleting document: {e}")
             return False
+        finally:
+            conn.close()
+
+    # ── ZIP extraction ─────────────────────────────────────────────────────────
 
     def _extract_zip(self, file):
-        """Extract and process files from a ZIP archive"""
+        """Extract and process files from a ZIP archive."""
         results = []
-        
         try:
             zip_data = io.BytesIO(file.read())
             with zipfile.ZipFile(zip_data, 'r') as zip_ref:
                 for zip_info in zip_ref.filelist:
-                    # Skip directories
                     if zip_info.is_dir():
                         continue
-                    
+
                     inner_filename = zip_info.filename
                     _, ext = os.path.splitext(inner_filename.lower())
-                    
-                    # Only process supported file types
+
                     if ext not in SUPPORTED_EXTENSIONS:
                         continue
-                    
+
                     try:
-                        # Read file content from ZIP
                         file_content = zip_ref.read(inner_filename)
-                        
-                        # Process the file content
                         text_content = self._process_zip_content(inner_filename, file_content)
-                        
+
                         if not text_content.strip():
                             continue
-                        
-                        # Check for duplicates
+
                         base_name = os.path.basename(inner_filename)
                         is_duplicate = self.check_duplicate(base_name)
-                        
-                        # Split into chunks
                         chunks = self._chunk_text(text_content, chunk_size=500, overlap=50)
-                        
-                        # Create embeddings and store
-                        for i, chunk in enumerate(chunks):
-                            embedding = self._create_embedding(chunk)
-                            
-                            self.collection.add(
-                                embeddings=[embedding],
-                                documents=[chunk],
-                                ids=[f"{base_name}_{i}"]
-                            )
-                        
+
+                        conn = get_conn()
+                        try:
+                            for i, chunk in enumerate(chunks):
+                                embedding = self._create_embedding(chunk)
+                                metadata = {
+                                    'source': 'File Upload',
+                                    'type': self._get_file_type(base_name),
+                                    'project': 'N/A',
+                                    'updatedBy': 'System',
+                                    'updatedOn': 'N/A',
+                                    'document_name': base_name,
+                                    'is_placeholder': False,
+                                    'html_content': '',
+                                }
+                                self._insert_chunk(conn, f"{base_name}_{i}", base_name, chunk, embedding, metadata)
+                            conn.commit()
+                        except Exception:
+                            conn.rollback()
+                            raise
+                        finally:
+                            conn.close()
+
                         results.append({
                             "filename": f"{file.filename}/{inner_filename}",
                             "chunks": len(chunks),
@@ -580,47 +557,33 @@ Please provide a comprehensive answer based on the context above."""
                             "error": str(e)
                         })
         except zipfile.BadZipFile:
-            results.append({
-                "filename": file.filename,
-                "status": "error",
-                "error": "Invalid ZIP file"
-            })
+            results.append({"filename": file.filename, "status": "error", "error": "Invalid ZIP file"})
         except Exception as e:
-            results.append({
-                "filename": file.filename,
-                "status": "error",
-                "error": str(e)
-            })
-        
+            results.append({"filename": file.filename, "status": "error", "error": str(e)})
+
         return results
-    
+
     def _process_zip_content(self, filename, content):
-        """Process file content extracted from ZIP"""
+        """Process file content extracted from a ZIP archive."""
         filename_lower = filename.lower()
-        
         if filename_lower.endswith('.pdf'):
             pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
-            text = ""
-            for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
-            return text
+            return "".join(page.extract_text() + "\n" for page in pdf_reader.pages)
         elif filename_lower.endswith('.docx'):
             doc = Document(io.BytesIO(content))
-            return "\n".join([p.text for p in doc.paragraphs])
+            return "\n".join(p.text for p in doc.paragraphs)
         else:
-            # Try to decode as text (txt, md, py, js, etc.)
             try:
                 return content.decode('utf-8')
             except UnicodeDecodeError:
                 try:
                     return content.decode('latin-1')
-                except:
+                except Exception:
                     return ""
-    
+
     def _extract_text(self, file):
-        """Extract text from various file types"""
+        """Extract text from an uploaded file."""
         filename = file.filename.lower()
-        
         if filename.endswith('.pdf'):
             return self._extract_pdf(file)
         elif filename.endswith('.docx'):
@@ -628,36 +591,17 @@ Please provide a comprehensive answer based on the context above."""
         elif filename.endswith('.txt') or filename.endswith('.md'):
             return file.read().decode('utf-8')
         else:
-            # Try to read as text (for code files, etc.)
             try:
                 return file.read().decode('utf-8')
-            except:
+            except Exception:
                 return ""
-    
-    def _extract_pdf(self, file):
-        """Extract text from PDF"""
-        pdf_reader = PyPDF2.PdfReader(io.BytesIO(file.read()))
-        text = ""
-        for page in pdf_reader.pages:
-            text += page.extract_text() + "\n"
-        return text
-    
-    def _extract_docx(self, file):
-        """Extract text from DOCX"""
-        doc = Document(io.BytesIO(file.read()))
-        text = ""
-        for paragraph in doc.paragraphs:
-            text += paragraph.text + "\n"
-        return text
-    
-    def _chunk_text(self, text, chunk_size=500, overlap=50):
-        """Split text into overlapping chunks"""
-        words = text.split()
-        chunks = []
-        
-        for i in range(0, len(words), chunk_size - overlap):
-            chunk = ' '.join(words[i:i + chunk_size])
-            chunks.append(chunk)
-        
-        return chunks
 
+    def _extract_pdf(self, file):
+        """Extract text from PDF."""
+        pdf_reader = PyPDF2.PdfReader(io.BytesIO(file.read()))
+        return "".join(page.extract_text() + "\n" for page in pdf_reader.pages)
+
+    def _extract_docx(self, file):
+        """Extract text from DOCX."""
+        doc = Document(io.BytesIO(file.read()))
+        return "\n".join(paragraph.text + "\n" for paragraph in doc.paragraphs)
