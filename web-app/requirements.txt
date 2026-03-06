@@ -6,9 +6,9 @@ werkzeug==3.0.1
 # OpenAI Integration
 openai>=1.50.0
 
-# Vector Database and Embeddings
-chromadb==0.4.15
-sentence-transformers>=3.0.0
+# Database: PostgreSQL + pgvector
+psycopg2-binary
+pgvector
 
 # Authentication
 PyJWT==2.11.0
@@ -21,4 +21,8 @@ python-dotenv==1.0.0
 PyPDF2==3.0.1
 python-docx==1.1.0
 openpyxl==3.1.2
+
+# MCP Protocol
+mcp
+requests
 
