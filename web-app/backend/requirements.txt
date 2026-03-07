@@ -21,8 +21,8 @@ PyPDF2
 python-docx
 openpyxl
 
-# ── MCP Protocol ──────────────────────────────────────────────────────────────
-mcp
+# ── MCP Protocol (optional, requires Python 3.10+) ───────────────────────────
+# mcp
 
 # ── HTTP ──────────────────────────────────────────────────────────────────────
 requests
