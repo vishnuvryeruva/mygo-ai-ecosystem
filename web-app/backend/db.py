@@ -9,6 +9,10 @@ import os
 import psycopg2
 import psycopg2.extras
 from pgvector.psycopg2 import register_vector
+from dotenv import load_dotenv
+
+# Load .env before reading DATABASE_URL — db.py may be imported before app.py calls load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/mygo_ai")
 
