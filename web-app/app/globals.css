@@ -3025,7 +3025,7 @@ body {
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  background: var(--accent-primary);
+  background: var(--mygo-orange);
   color: white;
   display: flex;
   align-items: center;

@@ -39,9 +39,10 @@ print(f"DEBUG: App startup - API Key start: {api_key[:8] if api_key else 'None'}
 try:
     from openai import OpenAI
     client = OpenAI(api_key=api_key)
-    print("DEBUG: Startup - Attempting chat completion...")
+    startup_model = os.getenv('OPENAI_MODEL', 'gpt-4.1')
+    print(f"DEBUG: Startup - Attempting chat completion with {startup_model}...")
     client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=startup_model,
         messages=[{"role": "user", "content": "Startup test"}]
     )
     print("DEBUG: Startup - Chat completion SUCCESS")

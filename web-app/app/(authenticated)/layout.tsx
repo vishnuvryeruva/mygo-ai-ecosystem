@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
 import TopHeader from '@/components/TopHeader'
@@ -26,6 +26,23 @@ export default function AuthenticatedLayout({
     // Multi-chat state: one expanded, many minimized
     const [expandedAgent, setExpandedAgent] = useState<string | null>(null)
     const [minimizedChats, setMinimizedChats] = useState<string[]>([])
+    const [currentUserName, setCurrentUserName] = useState('')
+
+    // Read user name from localStorage
+    useEffect(() => {
+        try {
+            const raw = localStorage.getItem('mygo-user')
+            if (raw) {
+                const user = JSON.parse(raw)
+                setCurrentUserName(user.name || '')
+            }
+        } catch { /* ignore */ }
+    }, [])
+
+    const userInitials = useMemo(() => {
+        if (!currentUserName) return ''
+        return currentUserName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
+    }, [currentUserName])
 
     // Agent selection — opens the chatbot with the selected agent
     const handleAgentSelect = useCallback((agentId: string, openModal?: boolean) => {
@@ -106,6 +123,7 @@ export default function AuthenticatedLayout({
             <div className="app-main">
                 <TopHeader
                     onSettingsClick={() => router.push('/settings')}
+                    userName={userInitials}
                 />
 
                 <div className="app-content">

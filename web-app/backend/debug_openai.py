@@ -19,9 +19,10 @@ if not api_key:
 
 try:
     client = OpenAI(api_key=api_key)
-    print("Attempting to generate chat completion with gpt-4o-mini...")
+    model = os.getenv('OPENAI_MODEL', 'gpt-4.1')
+    print(f"Attempting to generate chat completion with {model}...")
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=model,
         messages=[{"role": "user", "content": "Hello"}]
     )
     print("SUCCESS: Chat completion successful.")
