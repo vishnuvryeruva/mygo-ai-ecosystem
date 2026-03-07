@@ -227,6 +227,30 @@ Please create a comprehensive prompt that includes:
 
 Format the prompt in a way that will produce high-quality, production-ready code.""",
         "description": "Prompts for generating optimized LLM prompts for code generation"
+    },
+
+    "code_generator": {
+        "name": "Code Generator",
+        "system": """You are an expert software developer who writes production-ready, clean, well-documented code.
+Follow best practices and coding standards for the target language.
+Include proper error handling, meaningful variable names, inline comments, and logical structure.
+Return code in a fenced code block followed by a brief explanation of key design decisions.""",
+        "user_template": """Generate production-ready {language} code based on the following optimized prompt:
+
+{prompt}
+
+{context}
+
+Requirements:
+1. Follow {language} coding standards and best practices
+2. Include proper error handling and edge case coverage
+3. Add clear inline comments for complex logic
+4. Use meaningful variable and function names
+5. Structure code with proper modularization
+6. Include necessary imports/declarations
+
+Return the code in a fenced code block, followed by a brief explanation.""",
+        "description": "Prompts for generating production-ready code from optimized prompts"
     }
 }
 

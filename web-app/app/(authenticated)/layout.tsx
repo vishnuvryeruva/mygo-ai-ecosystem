@@ -23,24 +23,28 @@ export default function AuthenticatedLayout({
     const pathname = usePathname()
 
     const [activeModal, setActiveModal] = useState<string | null>(null)
-    const [chatbotOpen, setChatbotOpen] = useState(false)
-    const [chatbotMinimized, setChatbotMinimized] = useState(false)
-    const [activeAgent, setActiveAgent] = useState<string | null>('ask-yoda')
+    // Multi-chat state: one expanded, many minimized
+    const [expandedAgent, setExpandedAgent] = useState<string | null>(null)
+    const [minimizedChats, setMinimizedChats] = useState<string[]>([])
 
-    // Agent selection — always opens the chatbot with the selected agent
+    // Agent selection — opens the chatbot with the selected agent
     const handleAgentSelect = useCallback((agentId: string, openModal?: boolean) => {
-        setActiveAgent(agentId)
-        setChatbotOpen(true)
-
         if (openModal) {
             // Open the corresponding modal (chatbot stays minimized)
             setActiveModal(agentId)
-            setChatbotMinimized(true)
+            // If it's currently expanded, minimize it
+            if (expandedAgent === agentId) {
+                setExpandedAgent(null)
+                setMinimizedChats(prev =>
+                    prev.includes(agentId) ? prev : [...prev, agentId]
+                )
+            }
         } else {
-            // Just open the chatbot for this agent
-            setChatbotMinimized(false)
+            // If agent is minimized, restore it
+            setMinimizedChats(prev => prev.filter(id => id !== agentId))
+            setExpandedAgent(agentId)
         }
-    }, [])
+    }, [expandedAgent])
 
     // Listen for agent-select events from child pages & chatbot action buttons
     useEffect(() => {
@@ -63,6 +67,38 @@ export default function AuthenticatedLayout({
 
     const closeModal = () => setActiveModal(null)
 
+    // Minimize: move expanded agent to minimized bubbles
+    const handleMinimize = useCallback(() => {
+        if (expandedAgent) {
+            setMinimizedChats(prev =>
+                prev.includes(expandedAgent) ? prev : [...prev, expandedAgent]
+            )
+            setExpandedAgent(null)
+        }
+    }, [expandedAgent])
+
+    // Close (X) on expanded chat = minimize (same as minimize button)
+    const handleClose = useCallback(() => {
+        handleMinimize()
+    }, [handleMinimize])
+
+    // Restore a minimized bubble to expanded
+    const handleRestoreChat = useCallback((agentId: string) => {
+        // If there's already an expanded agent, minimize it first
+        if (expandedAgent) {
+            setMinimizedChats(prev =>
+                prev.includes(expandedAgent) ? prev : [...prev, expandedAgent]
+            )
+        }
+        setMinimizedChats(prev => prev.filter(id => id !== agentId))
+        setExpandedAgent(agentId)
+    }, [expandedAgent])
+
+    // Fully close a minimized bubble (remove entirely)
+    const handleDismissBubble = useCallback((agentId: string) => {
+        setMinimizedChats(prev => prev.filter(id => id !== agentId))
+    }, [])
+
     return (
         <div className="app-layout">
             <Sidebar />
@@ -78,7 +114,7 @@ export default function AuthenticatedLayout({
             </div>
 
             {/* Quick Actions FAB */}
-            <QuickActionsFAB onAction={handleQuickAction} activeAgent={activeAgent} />
+            <QuickActionsFAB onAction={handleQuickAction} activeAgent={expandedAgent} />
 
             {/* Modals */}
             {activeModal === 'solution-advisor' && (
@@ -99,19 +135,14 @@ export default function AuthenticatedLayout({
 
             {/* Chatbot Widget */}
             <ChatbotWidget
-                isOpen={chatbotOpen}
-                isMinimized={chatbotMinimized}
-                activeAgent={activeAgent}
-                onToggleOpen={() => {
-                    setChatbotOpen(!chatbotOpen)
-                    if (!chatbotOpen) setChatbotMinimized(false)
-                }}
-                onToggleMinimize={() => setChatbotMinimized(!chatbotMinimized)}
-                onClose={() => {
-                    setChatbotOpen(false)
-                    setChatbotMinimized(false)
-                }}
+                expandedAgent={expandedAgent}
+                minimizedChats={minimizedChats}
+                onMinimize={handleMinimize}
+                onClose={handleClose}
+                onRestoreChat={handleRestoreChat}
+                onDismissBubble={handleDismissBubble}
             />
         </div>
     )
 }
+

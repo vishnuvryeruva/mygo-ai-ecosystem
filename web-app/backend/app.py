@@ -316,6 +316,30 @@ def generate_prompt():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+# Code Generator (from optimized prompt)
+@app.route('/api/generate-code', methods=['POST'])
+def generate_code_from_prompt():
+    try:
+        data = request.json
+        language = data.get('language', 'ABAP')
+        prompt = data.get('prompt', '')
+        context = data.get('context', '')
+        
+        if not prompt:
+            return jsonify({"error": "Prompt is required"}), 400
+        
+        result = prompt_service.generate_code(language, prompt, context)
+        
+        return jsonify({
+            "code": result['code'],
+            "explanation": result['explanation'],
+            "language": result['language']
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 # Explain Code
 @app.route('/api/explain-code', methods=['POST'])
 def explain_code():
