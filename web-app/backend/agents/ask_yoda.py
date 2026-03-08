@@ -12,7 +12,7 @@ from services.rag_service import RAGService
 TOOL_NAME = "ask_yoda"
 TOOL_DESCRIPTION = "Ask questions and get answers based on uploaded knowledge documents (RAG)"
 
-def ask_yoda_tool(query: str) -> str:
+def ask_yoda_tool(query: str) -> dict:
     """
     Ask a question and get an answer based on uploaded documents.
     
@@ -20,7 +20,7 @@ def ask_yoda_tool(query: str) -> str:
         query: The question to ask
     
     Returns:
-        An answer based on the knowledge base
+        A dict with 'answer' and 'references' based on the knowledge base
     """
     service = RAGService()
     return service.query(query)

@@ -3076,3 +3076,125 @@ body {
   background: var(--bg-hover);
   color: #dc2626;
 }
+
+/* ============================================
+   SOURCE REFERENCES
+   ============================================ */
+
+.source-references {
+  margin-top: 10px;
+  border-top: 1px solid var(--border-color);
+  padding-top: 8px;
+}
+
+.source-references-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.source-references-toggle:hover {
+  background: #f1f5f9;
+  color: var(--text-heading);
+  border-color: #cbd5e1;
+}
+
+.source-references-chevron {
+  transition: transform 0.2s ease;
+}
+
+.source-references-chevron.expanded {
+  transform: rotate(180deg);
+}
+
+.source-references-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  animation: fadeInContent 0.2s ease;
+}
+
+.ref-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  transition: all var(--transition-fast);
+}
+
+.ref-card:hover {
+  background: #f1f5f9;
+  border-color: var(--border-color);
+}
+
+.ref-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ref-icon {
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.ref-card-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-heading);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ref-card-link {
+  color: var(--mygo-midnight-green);
+  text-decoration: none;
+}
+
+.ref-card-link:hover {
+  text-decoration: underline;
+  color: var(--mygo-orange);
+}
+
+.ref-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 22px;
+}
+
+.ref-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: rgba(3, 67, 84, 0.08);
+  color: var(--mygo-midnight-green);
+}
+
+.ref-project {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.ref-type {
+  font-size: 0.7rem;
+  color: #94a3b8;
+}

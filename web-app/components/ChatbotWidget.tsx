@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import axios from 'axios'
 import RichTextResponse from '@/components/RichTextResponse'
+import SourceReferences, { Reference } from '@/components/SourceReferences'
 
 // ═══════════════════════════════════════════════════════════
 //  SVG Icon Components (replacing emoji)
@@ -67,6 +68,7 @@ interface ChatMessage {
     actions?: ChatAction[]
     isRichText?: boolean
     status?: 'info' | 'success' | 'error' | 'loading'
+    references?: Reference[]
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -199,11 +201,12 @@ async function handleAgentMessage(agentId: string, query: string): Promise<{
     content: string
     actions?: ChatAction[]
     isRichText?: boolean
+    references?: Reference[]
 }> {
     switch (agentId) {
         case 'ask-yoda': {
             const res = await axios.post('/api/ask-yoda', { query })
-            return { content: res.data.answer, isRichText: true }
+            return { content: res.data.answer, isRichText: true, references: res.data.references }
         }
         case 'solution-advisor': {
             const res = await axios.post('/api/solution-advisor/requirements', { user_input: query })
@@ -527,6 +530,7 @@ export default function ChatbotWidget({
             actions: msg.actions,
             isRichText: msg.isRichText,
             status: msg.status,
+            references: msg.references,
         }])
     }
 
@@ -664,6 +668,11 @@ export default function ChatbotWidget({
                                                     ) : (
                                                         <p>{message.content}</p>
                                                     )
+                                                )}
+
+                                                {/* Source references */}
+                                                {message.references && message.references.length > 0 && (
+                                                    <SourceReferences references={message.references} />
                                                 )}
 
                                                 {/* Action buttons */}

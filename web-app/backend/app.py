@@ -198,10 +198,11 @@ def ask_yoda():
             return jsonify({"error": "Query is required"}), 400
         
         # Use RAG to get relevant context and generate answer
-        answer = rag_service.query(query)
+        result = rag_service.query(query)
         
         return jsonify({
-            "answer": answer,
+            "answer": result["answer"],
+            "references": result.get("references", []),
             "query": query
         })
     except Exception as e:

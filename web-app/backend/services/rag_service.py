@@ -363,7 +363,11 @@ class RAGService:
         return results
 
     def query(self, query_text, top_k=5, custom_prompt=None):
-        """Query the RAG system using cosine similarity search."""
+        """Query the RAG system using cosine similarity search.
+        
+        Returns:
+            dict with 'answer' (str) and 'references' (list of source doc dicts)
+        """
         query_embedding = self._create_embedding(query_text)
 
         conn = get_conn()
@@ -371,7 +375,7 @@ class RAGService:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute(
                     """
-                    SELECT content, source, doc_type, project, document_name
+                    SELECT content, source, doc_type, project, document_name, web_url
                     FROM documents
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s
@@ -381,6 +385,21 @@ class RAGService:
                 rows = cur.fetchall()
         finally:
             conn.close()
+
+        # Build deduplicated references from matched chunks
+        seen_names = set()
+        references = []
+        for row in rows:
+            doc_name = row.get('document_name') or ''
+            if doc_name and doc_name not in seen_names:
+                seen_names.add(doc_name)
+                references.append({
+                    'document_name': doc_name,
+                    'source': row.get('source', 'Unknown'),
+                    'project': row.get('project', 'N/A'),
+                    'doc_type': row.get('doc_type', 'Document'),
+                    'web_url': row.get('web_url', ''),
+                })
 
         context = "\n\n".join(row['content'] for row in rows)
 
@@ -427,7 +446,7 @@ class RAGService:
             temperature=0.3,
             max_tokens=1000
         )
-        return answer
+        return {"answer": answer, "references": references}
 
     def list_documents(self):
         """List all unique documents with their metadata."""
