@@ -19,6 +19,7 @@ interface SyncSourceModalProps {
     isOpen: boolean
     onClose: () => void
     onSyncComplete?: () => void
+    preSelectedSourceId?: string | null
 }
 
 // Map SAP document type codes to human-readable names
@@ -31,7 +32,7 @@ const documentTypeNames: Record<string, string> = {
     DP: 'Decision Paper',
 }
 
-export default function SyncSourceModal({ isOpen, onClose, onSyncComplete }: SyncSourceModalProps) {
+export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSelectedSourceId }: SyncSourceModalProps) {
     const [syncStep, setSyncStep] = useState(1) // 1: Source, 2: Project, 3: Fetching/Confirm, 4: Result
     const [sources, setSources] = useState<Source[]>([])
     const [selectedSource, setSelectedSource] = useState('')
@@ -50,6 +51,15 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete }: Syn
             handleResetSync()
         }
     }, [isOpen])
+
+    // Pre-select source if provided
+    useEffect(() => {
+        if (preSelectedSourceId && sources.length > 0) {
+            setSelectedSource(preSelectedSourceId)
+            // Automatically advance to step 2 if source is pre-selected
+            setSyncStep(2)
+        }
+    }, [preSelectedSourceId, sources])
 
     useEffect(() => {
         if (selectedSource && syncStep === 2) {

@@ -13,6 +13,8 @@ import ExplainCodeModal from '@/components/modals/ExplainCodeModal'
 import TestCaseGeneratorModal from '@/components/modals/TestCaseGeneratorModal'
 import CodeAdvisorModal from '@/components/modals/CodeAdvisorModal'
 import SettingsModal from '@/components/modals/SettingsModal'
+import DocumentUploadModal from '@/components/modals/DocumentUploadModal'
+import SyncSourceModal from '@/components/modals/SyncSourceModal'
 
 export default function AuthenticatedLayout({
     children,
@@ -27,6 +29,11 @@ export default function AuthenticatedLayout({
     const [expandedAgent, setExpandedAgent] = useState<string | null>(null)
     const [minimizedChats, setMinimizedChats] = useState<string[]>([])
     const [currentUserName, setCurrentUserName] = useState('')
+    // Code Advisor modal initial data
+    const [codeAdvisorData, setCodeAdvisorData] = useState<{ code: string; codeType: string } | null>(null)
+    // Sync Source modal state
+    const [syncSourceModalOpen, setSyncSourceModalOpen] = useState(false)
+    const [preSelectedSourceId, setPreSelectedSourceId] = useState<string | null>(null)
 
     // Read user name from localStorage
     useEffect(() => {
@@ -75,14 +82,49 @@ export default function AuthenticatedLayout({
         return () => window.removeEventListener('agent-select', handler)
     }, [handleAgentSelect])
 
-    const handleQuickAction = (actionId: string) => {
-        handleAgentSelect(actionId)
-        if (actionId === 'document-upload') {
-            router.push('/document-hub')
+    // Listen for code-advisor-open events with initial data
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent).detail
+            if (detail?.code !== undefined && detail?.codeType !== undefined) {
+                setCodeAdvisorData({ code: detail.code, codeType: detail.codeType })
+                setActiveModal('code-advisor')
+            }
         }
+        window.addEventListener('code-advisor-open', handler)
+        return () => window.removeEventListener('code-advisor-open', handler)
+    }, [])
+
+    // Listen for sync-source-open events with pre-selected source
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent).detail
+            if (detail?.sourceId !== undefined) {
+                setPreSelectedSourceId(detail.sourceId)
+                setSyncSourceModalOpen(true)
+            }
+        }
+        window.addEventListener('sync-source-open', handler)
+        return () => window.removeEventListener('sync-source-open', handler)
+    }, [])
+
+    const handleQuickAction = (actionId: string) => {
+        console.log('handleQuickAction', actionId)
+        handleAgentSelect(actionId)
+        // if (actionId === 'document-upload') {
+        //     router.push('/document-hub')
+        // }
     }
 
-    const closeModal = () => setActiveModal(null)
+    const closeModal = () => {
+        setActiveModal(null)
+        setCodeAdvisorData(null)
+    }
+
+    const closeSyncSourceModal = () => {
+        setSyncSourceModalOpen(false)
+        setPreSelectedSourceId(null)
+    }
 
     // Minimize: move expanded agent to minimized bubbles
     const handleMinimize = useCallback(() => {
@@ -148,8 +190,24 @@ export default function AuthenticatedLayout({
             {activeModal === 'prompt-generator' && <PromptGeneratorModal onClose={closeModal} />}
             {activeModal === 'explain-code' && <ExplainCodeModal onClose={closeModal} />}
             {activeModal === 'test-case-generator' && <TestCaseGeneratorModal onClose={closeModal} />}
-            {activeModal === 'code-advisor' && <CodeAdvisorModal onClose={closeModal} />}
+            {/* {activeModal === 'document-upload' && <DocumentUploadModal onClose={closeModal} />} */}
+            {activeModal === 'code-advisor' && (
+                <CodeAdvisorModal 
+                    onClose={closeModal} 
+                    initialCode={codeAdvisorData?.code}
+                    initialCodeType={codeAdvisorData?.codeType}
+                />
+            )}
             {activeModal === 'settings' && <SettingsModal onClose={closeModal} />}
+
+            {/* Sync Source Modal */}
+            {syncSourceModalOpen && (
+                <SyncSourceModal 
+                    isOpen={syncSourceModalOpen}
+                    onClose={closeSyncSourceModal}
+                    preSelectedSourceId={preSelectedSourceId}
+                />
+            )}
 
             {/* Chatbot Widget */}
             <ChatbotWidget

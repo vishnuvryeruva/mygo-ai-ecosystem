@@ -19,6 +19,7 @@ from services.prompt_service import PromptService
 from services.code_service import CodeService
 from services.test_service import TestService
 from services.advisor_service import AdvisorService
+from services.code_repository_service import CodeRepositoryService
 from services import role_service
 from services import user_service
 from config.prompts import get_all_prompts, get_prompt, update_prompt
@@ -1498,6 +1499,145 @@ def push_test_cases_to_calm(source_id):
             response["message"] += f" with {len(errors)} error(s)"
         
         return jsonify(response)
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  CODE REPOSITORY ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/code-repository', methods=['POST'])
+@token_required
+def save_code_snippet():
+    """Save a code snippet to the user's repository"""
+    try:
+        data = request.get_json() or {}
+        user_id = request.current_user['sub']
+        
+        title = data.get('title', '').strip()
+        code = data.get('code', '').strip()
+        code_type = data.get('code_type', 'ABAP')
+        description = data.get('description', '').strip() or None
+        analysis_data = data.get('analysis_data')
+        
+        if not title:
+            return jsonify({"error": "Title is required"}), 400
+        if not code:
+            return jsonify({"error": "Code is required"}), 400
+        
+        service = CodeRepositoryService()
+        snippet = service.save_code_snippet(
+            user_id=user_id,
+            title=title,
+            code=code,
+            code_type=code_type,
+            description=description,
+            analysis_data=analysis_data
+        )
+        
+        return jsonify(snippet), 201
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/code-repository', methods=['GET'])
+@token_required
+def get_code_snippets():
+    """Get all code snippets for the current user"""
+    try:
+        user_id = request.current_user['sub']
+        limit = int(request.args.get('limit', 100))
+        offset = int(request.args.get('offset', 0))
+        
+        service = CodeRepositoryService()
+        snippets = service.get_user_snippets(user_id, limit, offset)
+        count = service.get_snippet_count(user_id)
+        
+        return jsonify({
+            "snippets": snippets,
+            "total": count
+        })
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/code-repository/<snippet_id>', methods=['GET'])
+@token_required
+def get_code_snippet(snippet_id):
+    """Get a specific code snippet"""
+    try:
+        user_id = request.current_user['sub']
+        
+        service = CodeRepositoryService()
+        snippet = service.get_snippet_by_id(snippet_id, user_id)
+        
+        if not snippet:
+            return jsonify({"error": "Snippet not found"}), 404
+        
+        return jsonify(snippet)
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/code-repository/<snippet_id>', methods=['PUT'])
+@token_required
+def update_code_snippet(snippet_id):
+    """Update a code snippet"""
+    try:
+        user_id = request.current_user['sub']
+        data = request.get_json() or {}
+        
+        title = data.get('title')
+        code = data.get('code')
+        description = data.get('description')
+        
+        service = CodeRepositoryService()
+        snippet = service.update_snippet(
+            snippet_id=snippet_id,
+            user_id=user_id,
+            title=title,
+            code=code,
+            description=description
+        )
+        
+        if not snippet:
+            return jsonify({"error": "Snippet not found"}), 404
+        
+        return jsonify(snippet)
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/code-repository/<snippet_id>', methods=['DELETE'])
+@token_required
+def delete_code_snippet(snippet_id):
+    """Delete a code snippet"""
+    try:
+        user_id = request.current_user['sub']
+        
+        service = CodeRepositoryService()
+        deleted = service.delete_snippet(snippet_id, user_id)
+        
+        if not deleted:
+            return jsonify({"error": "Snippet not found"}), 404
+        
+        return jsonify({"message": "Snippet deleted successfully"})
         
     except Exception as e:
         import traceback

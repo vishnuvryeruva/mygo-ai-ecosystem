@@ -178,7 +178,7 @@ const agentConfigs: Record<string, AgentConfig> = {
         ],
         placeholder: 'Paste code for review...',
     },
-    'sync-documents': {
+    'document-upload': {
         id: 'sync-documents',
         name: 'Sync Documents',
         description: 'Sync from Sources',
@@ -186,8 +186,8 @@ const agentConfigs: Record<string, AgentConfig> = {
         gradient: 'linear-gradient(135deg, #034354, #0891b2)',
         welcomeMessage: 'I can help you sync documents from your connected sources. Choose a source to get started.',
         welcomeActions: [
-            { id: 'sync-calm', label: 'Sync from CALM', variant: 'primary' },
-            { id: 'sync-all', label: 'Sync All Sources', variant: 'outline' },
+            // { id: 'sync-calm', label: 'Sync from CALM', variant: 'primary' },
+            { id: 'sync-all', label: 'Sync All Sources', variant: 'primary' },
             { id: 'check-sources', label: 'View Connected Sources', variant: 'outline' },
         ],
         placeholder: 'Ask about syncing...',
@@ -466,6 +466,19 @@ export default function ChatbotWidget({
             } catch {
                 addAssistantMessage({ content: 'Could not fetch sources. Make sure the backend is running.', status: 'error' })
             }
+            return
+        }
+
+        // Handle sync-source-{sourceId} actions
+        if (action.id.startsWith('sync-source-')) {
+            const sourceId = action.id.replace('sync-source-', '')
+            // Dispatch event to open the Sync Source modal with pre-selected source
+            window.dispatchEvent(new CustomEvent('sync-source-open', { detail: { sourceId } }))
+            addAssistantMessage({
+                content: `Opening Sync From Source dialog with **${action.label.replace('Sync ', '')}** pre-selected...`,
+                status: 'info',
+                isRichText: true,
+            })
             return
         }
 

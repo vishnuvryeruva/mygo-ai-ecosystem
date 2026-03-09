@@ -41,3 +41,21 @@ CREATE TABLE IF NOT EXISTS documents (
 CREATE INDEX IF NOT EXISTS documents_embedding_idx
     ON documents USING ivfflat (embedding vector_cosine_ops)
     WITH (lists = 100);
+
+-- ── Code Snippets table (user's saved code repository) ────────────────────────
+CREATE TABLE IF NOT EXISTS code_snippets (
+    id              TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL,
+    title           TEXT NOT NULL,
+    code            TEXT NOT NULL,
+    code_type       TEXT NOT NULL,
+    description     TEXT,
+    analysis_data   JSONB,          -- Store the analysis results (suggestions, anti-patterns, etc.)
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Index for faster user-specific queries
+CREATE INDEX IF NOT EXISTS code_snippets_user_id_idx ON code_snippets(user_id);
+CREATE INDEX IF NOT EXISTS code_snippets_created_at_idx ON code_snippets(created_at DESC);

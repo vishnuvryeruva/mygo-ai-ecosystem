@@ -115,16 +115,27 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
   }
 
   const handleReviewWithAdvisor = () => {
-    // Dispatch event to open Code Advisor with this code
-    window.dispatchEvent(new CustomEvent('agent-select', {
-      detail: { agentId: 'code-advisor', openModal: false }
+    // Map language to code type for Code Advisor
+    const languageMap: Record<string, string> = {
+      'ABAP': 'ABAP',
+      'ABAP_RAP': 'ABAP',
+      'CAP_NODEJS': 'JavaScript',
+      'CAP_JAVA': 'Java',
+      'Python': 'Python',
+      'JavaScript': 'JavaScript',
+      'Java': 'Java',
+      'TypeScript': 'JavaScript',
+    }
+    
+    const codeType = languageMap[language] || 'ABAP'
+    
+    // Dispatch event to open Code Advisor modal with prepopulated data
+    window.dispatchEvent(new CustomEvent('code-advisor-open', {
+      detail: { 
+        code: generatedCode,
+        codeType: codeType
+      }
     }))
-    // Small delay then dispatch the code to the chat
-    setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('prefill-chat-input', {
-        detail: { text: generatedCode }
-      }))
-    }, 300)
   }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
