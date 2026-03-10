@@ -200,8 +200,7 @@ export default function SettingsPage() {
                 apiEndpoint: connectionForm.apiEndpoint,
                 tokenUrl: connectionForm.tokenUrl,
                 clientId: connectionForm.clientId,
-                clientSecret: connectionForm.clientSecret,
-                authType: connectionForm.authType
+                clientSecret: connectionForm.clientSecret
             })
 
             await refreshSources()
@@ -351,7 +350,15 @@ export default function SettingsPage() {
                                             </div>
                                             <div className="settings-source-info">
                                                 <div className="settings-source-name">{source.name}</div>
-                                                <div className="settings-source-meta">Type: {source.type} · Host: {source.config?.apiEndpoint ? new URL(source.config.apiEndpoint).hostname : 'N/A'}</div>
+                                                <div className="settings-source-meta">
+                                                    Type: {source.type} · Host: {(() => {
+                                                        try {
+                                                            return source.config?.apiEndpoint ? new URL(source.config.apiEndpoint).hostname : 'N/A';
+                                                        } catch (e) {
+                                                            return 'Invalid URL';
+                                                        }
+                                                    })()}
+                                                </div>
                                             </div>
                                             <div className="settings-source-actions">
                                                 <button className="settings-icon-btn danger" title="Delete" onClick={() => handleDeleteSource(source.id)}>

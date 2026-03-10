@@ -997,7 +997,7 @@ def btp_generate_code():
             {"role": "user", "content": user_msg}
         ]
         
-        response = openai_service.generate_response(messages)
+        response = openai_service.chat_completion(messages)
         
         if response.startswith("```"):
             lines = response.splitlines()
@@ -1263,6 +1263,77 @@ def push_test_cases_to_calm(source_id):
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+
+# ============================================================================
+# SAP BTP Code Repository AI & Search Endpoints
+# ============================================================================
+
+@app.route('/api/btp/<source_id>/fetch-code', methods=['GET'])
+def fetch_btp_code(source_id):
+    """Fetch code/data from a specific BTP source with dynamic OData queries"""
+    try:
+        source = source_config_service.get_source(source_id)
+        if not source or source.get('type') != 'BTP':
+            return jsonify({"error": "Invalid BTP source"}), 400
+            
+        entity_set = request.args.get('entity_set', '')
+        filter_query = request.args.get('filter_query', '')
+        skip = request.args.get('skip', '0')
+        top = request.args.get('top', '50')
+            
+        config = source.get('config', {})
+        
+        from services.btp_service import BTPService
+        service = BTPService(config, use_env_fallback=False)
+        
+        btp_data = service.fetch_data(
+            entity_set=entity_set, 
+            filter_query=filter_query, 
+            skip=skip, 
+            top=top
+        )
+        
+        return jsonify({
+            "success": True, 
+            "data": btp_data,
+            "sourceId": source_id
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/btp/<source_id>/fetch-content', methods=['GET'])
+def fetch_btp_object_content(source_id):
+    """Fetch raw content/$value for a specific BTP object"""
+    try:
+        source = source_config_service.get_source(source_id)
+        if not source or source.get('type') != 'BTP':
+            return jsonify({"error": "Invalid BTP source"}), 400
+            
+        entity_set = request.args.get('entity_set', '')
+        object_key = request.args.get('object_id', '') # Key for the entity
+        
+        if not entity_set or not object_key:
+            return jsonify({"error": "entity_set and object_id are required"}), 400
+            
+        config = source.get('config', {})
+        from services.btp_service import BTPService
+        service = BTPService(config, use_env_fallback=False)
+        
+        content = service.fetch_object_content(entity_set, object_key)
+        
+        return jsonify({
+            "success": True, 
+            "content": content
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 
 
 if __name__ == '__main__':
