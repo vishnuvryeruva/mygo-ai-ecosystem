@@ -41,3 +41,5 @@ npm-debug.log*
 *.swp
 *.swo
 *~
+YODA.pem
+*.pem

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import axios from 'axios'
 import LoadingSpinner from '../LoadingSpinner'
 import RichTextResponse from '../RichTextResponse'
+import SourceReferences, { Reference } from '../SourceReferences'
 
 interface AskYodaModalProps {
   onClose: () => void
@@ -13,6 +14,7 @@ export default function AskYodaModal({ onClose }: AskYodaModalProps) {
   console.log('AskYodaModal mounted')
   const [query, setQuery] = useState('')
   const [answer, setAnswer] = useState('')
+  const [references, setReferences] = useState<Reference[]>([])
   const [loading, setLoading] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -20,12 +22,15 @@ export default function AskYodaModal({ onClose }: AskYodaModalProps) {
     if (!query.trim()) return
 
     setLoading(true)
+    setReferences([])
     try {
       const response = await axios.post('/api/ask-yoda', { query })
       setAnswer(response.data.answer)
+      setReferences(response.data.references || [])
     } catch (error) {
       console.error('Error asking Yoda:', error)
       setAnswer('Error: Could not get answer. Please try again.')
+      setReferences([])
     } finally {
       setLoading(false)
     }
@@ -74,7 +79,10 @@ export default function AskYodaModal({ onClose }: AskYodaModalProps) {
 
           {/* Answer with Rich Text */}
           {answer && (
-            <RichTextResponse content={answer} />
+            <>
+              <RichTextResponse content={answer} />
+              <SourceReferences references={references} />
+            </>
           )}
         </div>
       </div>

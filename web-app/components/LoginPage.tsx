@@ -5,7 +5,7 @@ import Link from 'next/link'
 import axios from 'axios'
 
 interface LoginPageProps {
-    onLogin: (token: string, user: { id: string; name: string; email: string }) => void
+    onLogin: (token: string, user: { id: string; name: string; email: string; role?: string }) => void
 }
 
 export default function LoginPage({ onLogin }: LoginPageProps) {

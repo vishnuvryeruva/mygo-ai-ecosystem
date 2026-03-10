@@ -100,6 +100,10 @@ const emptyConnection: ConnectionForm = {
 export default function SettingsPage() {
     const [activeTab, setActiveTab] = useState('prompts')
 
+    /* Auth state */
+    const [currentUser, setCurrentUser] = useState<{ id: string; name: string; email: string; role: string } | null>(null)
+    const [isLoadingAuth, setIsLoadingAuth] = useState(true)
+
     /* Prompts state */
     const [activeScenario, setActiveScenario] = useState('ask-yoda')
     const [systemPrompt, setSystemPrompt] = useState(
@@ -116,17 +120,27 @@ export default function SettingsPage() {
     const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
 
     /* Roles state */
-    const [roles, setRoles] = useState<Role[]>(defaultRoles)
+    const [roles, setRoles] = useState<Role[]>([])
     const [newRoleName, setNewRoleName] = useState('')
+    const [isLoadingRoles, setIsLoadingRoles] = useState(false)
 
     /* Users state */
-    const [users, setUsers] = useState<User[]>(defaultUsers)
-    const [newUser, setNewUser] = useState({ name: '', email: '', role: 'Viewer' })
+    const [users, setUsers] = useState<User[]>([])
+    const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'Viewer' })
+    const [isLoadingUsers, setIsLoadingUsers] = useState(false)
 
     /* ── Effects ────────────────────────────────────────── */
     useEffect(() => {
+        fetchCurrentUser()
+    }, [])
+
+    useEffect(() => {
         if (activeTab === 'sources') {
             refreshSources()
+        } else if (activeTab === 'roles') {
+            refreshRoles()
+        } else if (activeTab === 'users') {
+            refreshUsers()
         }
     }, [activeTab])
 
@@ -137,6 +151,30 @@ export default function SettingsPage() {
         }
     }, [showAddConnection])
 
+    const fetchCurrentUser = async () => {
+        setIsLoadingAuth(true)
+        try {
+            const token = localStorage.getItem('mygo-token')
+            if (!token) {
+                console.log('No token found in localStorage')
+                setIsLoadingAuth(false)
+                return
+            }
+            
+            console.log('Fetching current user with token:', token.substring(0, 20) + '...')
+            const res = await axios.get('/api/auth/me', {
+                headers: { Authorization: `Bearer ${token}` }
+            })
+            console.log('Current user fetched:', res.data)
+            setCurrentUser(res.data)
+        } catch (err) {
+            console.error('Failed to fetch current user:', err)
+            localStorage.removeItem('mygo-token')
+        } finally {
+            setIsLoadingAuth(false)
+        }
+    }
+
     const refreshSources = async () => {
         setIsLoadingSources(true)
         try {
@@ -146,6 +184,36 @@ export default function SettingsPage() {
             console.error('Failed to fetch sources:', err)
         } finally {
             setIsLoadingSources(false)
+        }
+    }
+
+    const refreshRoles = async () => {
+        setIsLoadingRoles(true)
+        try {
+            const token = localStorage.getItem('mygo-token')
+            const res = await axios.get('/api/roles', {
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            })
+            setRoles(res.data.roles || [])
+        } catch (err) {
+            console.error('Failed to fetch roles:', err)
+        } finally {
+            setIsLoadingRoles(false)
+        }
+    }
+
+    const refreshUsers = async () => {
+        setIsLoadingUsers(true)
+        try {
+            const token = localStorage.getItem('mygo-token')
+            const res = await axios.get('/api/users', {
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            })
+            setUsers(res.data.users || [])
+        } catch (err) {
+            console.error('Failed to fetch users:', err)
+        } finally {
+            setIsLoadingUsers(false)
         }
     }
 
@@ -226,49 +294,94 @@ export default function SettingsPage() {
         }
     }
 
-    const handleAddRole = () => {
+    const handleAddRole = async () => {
         if (!newRoleName.trim()) return
-        const newRole: Role = {
-            id: Date.now().toString(),
-            name: newRoleName.trim(),
-            permissions: ['Read'],
+        try {
+            const token = localStorage.getItem('mygo-token')
+            await axios.post('/api/roles', {
+                name: newRoleName.trim(),
+                permissions: ['Read']
+            }, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            })
+            await refreshRoles()
+            setNewRoleName('')
+        } catch (err) {
+            console.error('Failed to add role:', err)
+            alert('Failed to add role')
         }
-        setRoles([...roles, newRole])
-        setNewRoleName('')
     }
 
-    const handleDeleteRole = (id: string) => {
-        setRoles(roles.filter(r => r.id !== id))
-    }
-
-    const handleTogglePermission = (roleId: string, permission: string) => {
-        setRoles(roles.map(r => {
-            if (r.id !== roleId) return r
-            const has = r.permissions.includes(permission)
-            return {
-                ...r,
-                permissions: has
-                    ? r.permissions.filter(p => p !== permission)
-                    : [...r.permissions, permission],
-            }
-        }))
-    }
-
-    const handleAddUser = () => {
-        if (!newUser.name.trim() || !newUser.email.trim()) return
-        const user: User = {
-            id: Date.now().toString(),
-            name: newUser.name.trim(),
-            email: newUser.email.trim(),
-            role: newUser.role,
-            status: 'Active',
+    const handleDeleteRole = async (id: string) => {
+        if (!confirm('Are you sure you want to delete this role?')) return
+        try {
+            const token = localStorage.getItem('mygo-token')
+            await axios.delete(`/api/roles/${id}`, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            })
+            await refreshRoles()
+        } catch (err) {
+            console.error('Failed to delete role:', err)
+            alert('Failed to delete role')
         }
-        setUsers([...users, user])
-        setNewUser({ name: '', email: '', role: 'Viewer' })
     }
 
-    const handleDeleteUser = (id: string) => {
-        setUsers(users.filter(u => u.id !== id))
+    const handleTogglePermission = async (roleId: string, permission: string) => {
+        const role = roles.find(r => r.id === roleId)
+        if (!role) return
+
+        const has = role.permissions.includes(permission)
+        const updatedPermissions = has
+            ? role.permissions.filter(p => p !== permission)
+            : [...role.permissions, permission]
+
+        try {
+            const token = localStorage.getItem('mygo-token')
+            await axios.put(`/api/roles/${roleId}`, {
+                name: role.name,
+                permissions: updatedPermissions
+            }, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            })
+            await refreshRoles()
+        } catch (err) {
+            console.error('Failed to update role permissions:', err)
+            alert('Failed to update role permissions')
+        }
+    }
+
+    const handleAddUser = async () => {
+        if (!newUser.name.trim() || !newUser.email.trim() || !newUser.password.trim()) return
+        try {
+            const token = localStorage.getItem('mygo-token')
+            await axios.post('/api/users', {
+                name: newUser.name.trim(),
+                email: newUser.email.trim(),
+                password: newUser.password,
+                role: newUser.role
+            }, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            })
+            await refreshUsers()
+            setNewUser({ name: '', email: '', password: '', role: 'Viewer' })
+        } catch (err: any) {
+            console.error('Failed to add user:', err)
+            alert(err.response?.data?.error || 'Failed to add user')
+        }
+    }
+
+    const handleDeleteUser = async (id: string) => {
+        if (!confirm('Are you sure you want to delete this user?')) return
+        try {
+            const token = localStorage.getItem('mygo-token')
+            await axios.delete(`/api/users/${id}`, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            })
+            await refreshUsers()
+        } catch (err: any) {
+            console.error('Failed to delete user:', err)
+            alert(err.response?.data?.error || 'Failed to delete user')
+        }
     }
 
     /* ── Tab content renderer ──────────────────────────── */
@@ -519,32 +632,41 @@ export default function SettingsPage() {
                             <button className="btn btn-primary" onClick={handleAddRole}>Add Role</button>
                         </div>
 
-                        <div className="settings-roles-grid">
-                            {roles.map((role) => (
-                                <div key={role.id} className="settings-role-card">
-                                    <div className="settings-role-header">
-                                        <h3 className="settings-role-name">{role.name}</h3>
-                                        <button className="settings-icon-btn danger" title="Delete role" onClick={() => handleDeleteRole(role.id)}>
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                <polyline points="3 6 5 6 21 6" />
-                                                <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-                                            </svg>
-                                        </button>
-                                    </div>
-                                    <div className="settings-role-permissions">
-                                        {['Read', 'Write', 'Delete', 'Manage Users'].map((perm) => (
-                                            <button
-                                                key={perm}
-                                                className={`settings-permission-badge ${role.permissions.includes(perm) ? 'active' : ''}`}
-                                                onClick={() => handleTogglePermission(role.id, perm)}
-                                            >
-                                                {perm}
+                        {isLoadingRoles ? (
+                            <div className="p-8 text-center text-gray-500">Loading roles...</div>
+                        ) : (
+                            <div className="settings-roles-grid">
+                                {roles.map((role) => (
+                                    <div key={role.id} className="settings-role-card">
+                                        <div className="settings-role-header">
+                                            <h3 className="settings-role-name">{role.name}</h3>
+                                            <button className="settings-icon-btn danger" title="Delete role" onClick={() => handleDeleteRole(role.id)}>
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                    <polyline points="3 6 5 6 21 6" />
+                                                    <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                                                </svg>
                                             </button>
-                                        ))}
+                                        </div>
+                                        <div className="settings-role-permissions">
+                                            {['Read', 'Write', 'Delete', 'Manage Users'].map((perm) => (
+                                                <button
+                                                    key={perm}
+                                                    className={`settings-permission-badge ${role.permissions.includes(perm) ? 'active' : ''}`}
+                                                    onClick={() => handleTogglePermission(role.id, perm)}
+                                                >
+                                                    {perm}
+                                                </button>
+                                            ))}
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
-                        </div>
+                                ))}
+                                {roles.length === 0 && (
+                                    <div className="settings-empty-state">
+                                        <p>No roles configured yet. Add a role to get started.</p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 )
 
@@ -611,43 +733,66 @@ export default function SettingsPage() {
                                 value={newUser.email}
                                 onChange={e => setNewUser({ ...newUser, email: e.target.value })}
                             />
+                            <input
+                                type="password"
+                                placeholder="Password"
+                                value={newUser.password}
+                                onChange={e => setNewUser({ ...newUser, password: e.target.value })}
+                            />
                             <select
                                 value={newUser.role}
                                 onChange={e => setNewUser({ ...newUser, role: e.target.value })}
                             >
-                                <option value="Admin">Admin</option>
-                                <option value="Editor">Editor</option>
-                                <option value="Viewer">Viewer</option>
+                                {roles.map(role => (
+                                    <option key={role.id} value={role.name}>{role.name}</option>
+                                ))}
                             </select>
                             <button className="btn btn-primary" onClick={handleAddUser}>Add User</button>
                         </div>
 
-                        <div className="settings-users-list">
-                            {users.map((user) => (
-                                <div key={user.id} className="settings-user-card">
-                                    <div className="settings-user-avatar">
-                                        {user.name.split(' ').map(n => n[0]).join('')}
+                        {isLoadingUsers ? (
+                            <div className="p-8 text-center text-gray-500">Loading users...</div>
+                        ) : (
+                            <div className="settings-users-list">
+                                {users.map((user) => {
+                                    const isCurrentUser = currentUser?.id === user.id
+                                    const isAdminUser = user.role === 'Admin'
+                                    const canDelete = !isCurrentUser && !isAdminUser
+                                    
+                                    return (
+                                        <div key={user.id} className="settings-user-card">
+                                            <div className="settings-user-avatar">
+                                                {user.name.split(' ').map(n => n[0]).join('')}
+                                            </div>
+                                            <div className="settings-user-info">
+                                                <div className="settings-user-name">
+                                                    {user.name}
+                                                    {isCurrentUser && <span style={{ marginLeft: 8, fontSize: 12, color: '#64748b' }}>(You)</span>}
+                                                </div>
+                                                <div className="settings-user-email">{user.email}</div>
+                                            </div>
+                                            <span className={`settings-badge role-${user.role.toLowerCase()}`}>{user.role}</span>
+                                            <span className={`settings-badge status-${user.status.toLowerCase()}`}>{user.status}</span>
+                                            {canDelete ? (
+                                                <button className="settings-icon-btn danger" title="Remove user" onClick={() => handleDeleteUser(user.id)}>
+                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                        <polyline points="3 6 5 6 21 6" />
+                                                        <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                                                    </svg>
+                                                </button>
+                                            ) : (
+                                                <div style={{ width: 32 }} />
+                                            )}
+                                        </div>
+                                    )
+                                })}
+                                {users.length === 0 && (
+                                    <div className="settings-empty-state">
+                                        <p>No users added yet. Use the form above to add users.</p>
                                     </div>
-                                    <div className="settings-user-info">
-                                        <div className="settings-user-name">{user.name}</div>
-                                        <div className="settings-user-email">{user.email}</div>
-                                    </div>
-                                    <span className={`settings-badge role-${user.role.toLowerCase()}`}>{user.role}</span>
-                                    <span className={`settings-badge status-${user.status.toLowerCase()}`}>{user.status}</span>
-                                    <button className="settings-icon-btn danger" title="Remove user" onClick={() => handleDeleteUser(user.id)}>
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <polyline points="3 6 5 6 21 6" />
-                                            <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-                                        </svg>
-                                    </button>
-                                </div>
-                            ))}
-                            {users.length === 0 && (
-                                <div className="settings-empty-state">
-                                    <p>No users added yet. Use the form above to add users.</p>
-                                </div>
-                            )}
-                        </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 )
 
@@ -657,6 +802,29 @@ export default function SettingsPage() {
     }
 
     /* ── Render ─────────────────────────────────────────── */
+    const isAdmin = currentUser?.role === 'Admin'
+    
+    console.log('Current user:', currentUser)
+    console.log('Is admin:', isAdmin)
+    
+    // Filter tabs based on user role
+    const visibleTabs = settingsTabs.filter(tab => {
+        if (tab.id === 'roles' || tab.id === 'users') {
+            return isAdmin
+        }
+        return true
+    })
+    
+    console.log('Visible tabs:', visibleTabs.map(t => t.id))
+
+    if (isLoadingAuth) {
+        return (
+            <div className="settings-page">
+                <div className="p-8 text-center text-gray-500">Loading...</div>
+            </div>
+        )
+    }
+
     return (
         <div className="settings-page">
             <div className="settings-header">
@@ -667,7 +835,7 @@ export default function SettingsPage() {
             <div className="settings-layout">
                 {/* Left Tab Navigation */}
                 <div className="settings-tabs">
-                    {settingsTabs.map((tab) => (
+                    {visibleTabs.map((tab) => (
                         <button
                             key={tab.id}
                             className={`settings-tab ${activeTab === tab.id ? 'active' : ''}`}

@@ -10,6 +10,27 @@ interface TestCaseGeneratorModalProps {
 
 interface Source { id: string; name: string; type: string }
 interface Project { id: string; name: string }
+interface Scope { id: string; name: string; projectId?: string }
+
+interface TestAction {
+  title: string
+  description: string
+  expectedResult: string
+  sequence: number
+  isEvidenceRequired: boolean
+}
+
+interface TestActivity {
+  title: string
+  sequence: number
+  isInScope: boolean
+  toActions: TestAction[]
+}
+
+interface TestCase {
+  title: string
+  toActivities: TestActivity[]
+}
 
 type AlmUploadStep = 'idle' | 'form' | 'uploading' | 'success' | 'error'
 
@@ -18,6 +39,7 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
   const [testType, setTestType] = useState('manual')
   const [loading, setLoading] = useState(false)
   const [testCases, setTestCases] = useState('')
+  const [testCasesStructured, setTestCasesStructured] = useState<TestCase[]>([])
   const [downloadLoading, setDownloadLoading] = useState(false)
 
   // Cloud ALM upload state
@@ -26,7 +48,10 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
   const [almSelectedSource, setAlmSelectedSource] = useState('')
   const [almProjects, setAlmProjects] = useState<Project[]>([])
   const [almSelectedProject, setAlmSelectedProject] = useState('')
-  const [almDocName, setAlmDocName] = useState('')
+  const [almScopes, setAlmScopes] = useState<Scope[]>([])
+  const [almSelectedScope, setAlmSelectedScope] = useState('')
+  const [almPriorityCode, setAlmPriorityCode] = useState(20)
+  const [almNamePrefix, setAlmNamePrefix] = useState('')
   const [almLoadingStep, setAlmLoadingStep] = useState('')
   const [almError, setAlmError] = useState('')
   const [almSuccessDoc, setAlmSuccessDoc] = useState<any>(null)
@@ -34,7 +59,7 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
   const handleOpenAlmUpload = async () => {
     setAlmUploadStep('form')
     setAlmError('')
-    setAlmDocName(`Test Cases - ${new Date().toLocaleDateString()}`)
+    setAlmNamePrefix(`Test Cases - ${new Date().toLocaleDateString()}`)
     setAlmLoadingStep('sources')
     try {
       const res = await axios.get('/api/sources')
@@ -55,6 +80,8 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
     setAlmLoadingStep('projects')
     setAlmProjects([])
     setAlmSelectedProject('')
+    setAlmScopes([])
+    setAlmSelectedScope('')
     try {
       const res = await axios.get(`/api/calm/${sourceId}/projects`)
       setAlmProjects(res.data.projects || [])
@@ -65,19 +92,46 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
     }
   }
 
+  const loadAlmScopes = async (sourceId: string, projectId: string) => {
+    setAlmLoadingStep('scopes')
+    setAlmScopes([])
+    setAlmSelectedScope('')
+    try {
+      const res = await axios.get(`/api/calm/${sourceId}/scopes?projectId=${projectId}`)
+      const allScopes = res.data.scopes || []
+      // Filter scopes to only show those belonging to the selected project
+      const filteredScopes = allScopes.filter((scope: Scope & { projectId?: string }) => 
+        scope.projectId === projectId
+      )
+      setAlmScopes(filteredScopes)
+    } catch {
+      setAlmError('Failed to load scopes.')
+    } finally {
+      setAlmLoadingStep('')
+    }
+  }
+
   const handleAlmUpload = async () => {
-    if (!almSelectedSource || !almSelectedProject || !almDocName.trim()) return
+    if (!almSelectedSource || !almSelectedProject || !almSelectedScope) return
+    if (!testCasesStructured || testCasesStructured.length === 0) {
+      setAlmError('No test cases available to upload. Please generate test cases first.')
+      return
+    }
+    
     setAlmUploadStep('uploading')
     setAlmError('')
     try {
       const res = await axios.post(`/api/calm/${almSelectedSource}/push-test-cases`, {
-        name: almDocName.trim(),
-        content: testCases,
-        projectId: almSelectedProject
+        testCases: testCasesStructured,
+        projectId: almSelectedProject,
+        scopeId: almSelectedScope,
+        priorityCode: almPriorityCode,
+        namePrefix: almNamePrefix.trim()
       })
-      setAlmSuccessDoc(res.data.document)
+      setAlmSuccessDoc(res.data)
       setAlmUploadStep('success')
     } catch (err: any) {
+      console.error('Upload error:', err)
       setAlmError(err?.response?.data?.error || 'Failed to upload to Cloud ALM.')
       setAlmUploadStep('error')
     }
@@ -89,7 +143,10 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
     setAlmSelectedSource('')
     setAlmProjects([])
     setAlmSelectedProject('')
-    setAlmDocName('')
+    setAlmScopes([])
+    setAlmSelectedScope('')
+    setAlmPriorityCode(20)
+    setAlmNamePrefix('')
     setAlmError('')
     setAlmSuccessDoc(null)
     setAlmLoadingStep('')
@@ -101,14 +158,25 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
 
     setLoading(true)
     setTestCases('')
+    setTestCasesStructured([])
 
     try {
-      const response = await axios.post('/api/generate-test-cases', {
-        code,
-        test_type: testType,
-        format: 'preview'
-      })
-      setTestCases(response.data.test_cases || response.data.testCases || response.data)
+      // Generate both preview format (for display) and CALM format (for upload)
+      const [previewResponse, calmResponse] = await Promise.all([
+        axios.post('/api/generate-test-cases', {
+          code,
+          test_type: testType,
+          format: 'preview'
+        }),
+        axios.post('/api/generate-test-cases', {
+          code,
+          test_type: testType,
+          format: 'calm'
+        })
+      ])
+      
+      setTestCases(previewResponse.data.test_cases || previewResponse.data.testCases || previewResponse.data)
+      setTestCasesStructured(calmResponse.data.test_cases || [])
     } catch (error) {
       console.error('Error generating test cases:', error)
       alert('Error generating test cases. Please try again.')
@@ -286,8 +354,28 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
                       <div className="flex flex-col items-center justify-center py-6 gap-3 text-center">
                         <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400 text-xl">✓</div>
                         <p className="text-emerald-300 font-medium">Uploaded successfully!</p>
-                        {almSuccessDoc?.name && (
-                          <p className="text-muted text-sm">"{almSuccessDoc.name}" has been added to Cloud ALM.</p>
+                        {almSuccessDoc?.message && (
+                          <p className="text-muted text-sm">{almSuccessDoc.message}</p>
+                        )}
+                        {almSuccessDoc?.testCases && almSuccessDoc.testCases.length > 0 && (
+                          <div className="mt-2 text-left w-full max-h-40 overflow-y-auto">
+                            <p className="text-xs text-muted mb-2">Created test cases:</p>
+                            <ul className="text-xs space-y-1">
+                              {almSuccessDoc.testCases.map((tc: any, idx: number) => (
+                                <li key={idx} className="text-emerald-300">✓ {tc.title}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {almSuccessDoc?.errors && almSuccessDoc.errors.length > 0 && (
+                          <div className="mt-2 text-left w-full max-h-40 overflow-y-auto">
+                            <p className="text-xs text-red-400 mb-2">Errors:</p>
+                            <ul className="text-xs space-y-1">
+                              {almSuccessDoc.errors.map((err: string, idx: number) => (
+                                <li key={idx} className="text-red-300">✗ {err}</li>
+                              ))}
+                            </ul>
+                          </div>
                         )}
                         <button onClick={resetAlmUpload} className="mt-2 text-sm text-muted hover:text-main underline">Done</button>
                       </div>
@@ -316,14 +404,17 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
                         )}
 
                         <div className="input-group mb-0">
-                          <label className="input-label text-xs">Document Name</label>
+                          <label className="input-label text-xs">Test Case Name Prefix (Optional)</label>
                           <input
                             type="text"
-                            value={almDocName}
-                            onChange={e => setAlmDocName(e.target.value)}
+                            value={almNamePrefix}
+                            onChange={e => setAlmNamePrefix(e.target.value)}
                             className="input text-sm"
-                            placeholder="Enter document name..."
+                            placeholder="e.g., Sprint 1 - Login Module"
                           />
+                          <p className="text-xs text-muted mt-1">
+                            This prefix will be added to all test case titles
+                          </p>
                         </div>
 
                         {almSources.length > 1 && (
@@ -356,7 +447,10 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
                             </label>
                             <select
                               value={almSelectedProject}
-                              onChange={e => setAlmSelectedProject(e.target.value)}
+                              onChange={e => {
+                                setAlmSelectedProject(e.target.value)
+                                if (e.target.value) loadAlmScopes(almSelectedSource, e.target.value)
+                              }}
                               className="input select text-sm"
                               disabled={almLoadingStep === 'projects' || almProjects.length === 0}
                             >
@@ -366,12 +460,45 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
                           </div>
                         )}
 
+                        {almSelectedProject && (
+                          <div className="input-group mb-0">
+                            <label className="input-label text-xs">
+                              Scope
+                              {almLoadingStep === 'scopes' && <span className="ml-2 text-muted">(loading...)</span>}
+                            </label>
+                            <select
+                              value={almSelectedScope}
+                              onChange={e => setAlmSelectedScope(e.target.value)}
+                              className="input select text-sm"
+                              disabled={almLoadingStep === 'scopes' || almScopes.length === 0}
+                            >
+                              <option value="">Select scope...</option>
+                              {almScopes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                            </select>
+                          </div>
+                        )}
+
+                        {almSelectedScope && (
+                          <div className="input-group mb-0">
+                            <label className="input-label text-xs">Priority</label>
+                            <select
+                              value={almPriorityCode}
+                              onChange={e => setAlmPriorityCode(Number(e.target.value))}
+                              className="input select text-sm"
+                            >
+                              <option value={10}>Low</option>
+                              <option value={20}>Medium</option>
+                              <option value={30}>High</option>
+                            </select>
+                          </div>
+                        )}
+
                         <button
                           onClick={handleAlmUpload}
-                          disabled={!almSelectedProject || !almDocName.trim() || !!almLoadingStep}
+                          disabled={!almSelectedProject || !almSelectedScope || !!almLoadingStep}
                           className="w-full btn btn-primary text-sm mt-1"
                         >
-                          Upload to Cloud ALM
+                          Upload as Manual Test Cases
                         </button>
                       </>
                     )}

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import axios from 'axios'
 import AIAgentsDropdown from '@/components/AIAgentsDropdown'
+import SyncSourceModal from '@/components/modals/SyncSourceModal'
 
 interface DocumentHubPageProps {
     onAgentSelect: (agentId: string) => void
@@ -30,6 +31,7 @@ interface Document {
     updatedOn: string
     webUrl?: string
     documentId?: string
+    documentTypeCode?: string
 }
 
 const sourceColors: Record<string, { bg: string; text: string }> = {
@@ -58,22 +60,7 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
     const [typeFilter, setTypeFilter] = useState('All Types')
     const [projectFilter, setProjectFilter] = useState('All Projects')
 
-    // Sync Modal State
     const [showSyncModal, setShowSyncModal] = useState(false)
-    const [syncStep, setSyncStep] = useState(1) // 1: Source, 2: Project, 3: Fetching/Confirm, 4: Result
-
-    // Sync Data State
-    const [sources, setSources] = useState<Source[]>([])
-    const [selectedSource, setSelectedSource] = useState('')
-
-    const [projects, setProjects] = useState<Project[]>([])
-    const [selectedProject, setSelectedProject] = useState('')
-
-    const [docsToSync, setDocsToSync] = useState<any[]>([])
-    const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set())
-    const [syncStatus, setSyncStatus] = useState<Record<string, boolean>>({})
-    const [isSyncing, setIsSyncing] = useState(false)
-    const [syncResult, setSyncResult] = useState<{ message: string; count: number; updated: number; added: number } | null>(null)
 
     // Document selection & delete state
     const [selectedDocumentIds, setSelectedDocumentIds] = useState<Set<string>>(new Set())
@@ -84,18 +71,10 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
     const [viewerDoc, setViewerDoc] = useState<{ name: string; content: string } | null>(null)
     const [isLoadingContent, setIsLoadingContent] = useState(false)
 
-    // Load initial documents and filter data on mount
     useEffect(() => {
         fetchDocuments()
-        fetchSources()
     }, [])
 
-    // Load projects when source selected in sync modal
-    useEffect(() => {
-        if (selectedSource && syncStep === 2) {
-            fetchProjects(selectedSource)
-        }
-    }, [selectedSource, syncStep])
 
     const fetchDocuments = async () => {
         setIsLoading(true)
@@ -129,144 +108,7 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
         }
     }
 
-    const fetchSources = async () => {
-        try {
-            const res = await axios.get('/api/sources')
-            setSources(res.data.sources || [])
-        } catch (err) {
-            console.error('Failed to fetch sources:', err)
-        }
-    }
 
-    const fetchProjects = async (sourceId: string) => {
-        setProjects([]) // Clear previous
-        try {
-            const res = await axios.get(`/api/calm/${sourceId}/projects`)
-            setProjects(res.data.projects || [])
-        } catch (err) {
-            console.error('Failed to fetch projects:', err)
-        }
-    }
-
-    const handleSyncNext = async () => {
-        if (syncStep === 1 && selectedSource) {
-            setSyncStep(2)
-        } else if (syncStep === 2 && selectedProject) {
-            setSyncStep(3)
-            // Fetch potential docs to sync
-            setIsSyncing(true)
-            try {
-                const res = await axios.get(`/api/calm/${selectedSource}/documents?projectId=${selectedProject}`)
-                const docs = res.data.documents || []
-                setDocsToSync(docs)
-
-                // Check sync status for all documents
-                const docIds = docs.map((doc: any) => doc.uuid || doc.id)
-                const statusRes = await axios.post('/api/sync/check', {
-                    documentIds: docIds
-                })
-                setSyncStatus(statusRes.data.syncStatus || {})
-
-                // Select all documents by default
-                setSelectedDocIds(new Set(docIds))
-            } catch (err) {
-                console.error('Failed to fetch docs from source:', err)
-            } finally {
-                setIsSyncing(false)
-            }
-        } else if (syncStep === 3) {
-            // Perform actual sync (only selected documents)
-            setIsSyncing(true)
-            try {
-                // Filter to only sync selected documents
-                const selectedDocs = docsToSync.filter(doc => {
-                    const docId = doc.uuid || doc.id
-                    return selectedDocIds.has(docId)
-                })
-
-                if (selectedDocs.length === 0) {
-                    alert('Please select at least one document to sync.')
-                    setIsSyncing(false)
-                    return
-                }
-
-                const res = await axios.post('/api/sync', {
-                    sourceId: selectedSource,
-                    documents: selectedDocs.map(doc => ({
-                        ...doc,
-                        id: doc.uuid || doc.id,
-                        name: doc.title || doc.name,
-                        type: doc.documentTypeCode || doc.documentType || doc.type,
-                        metadata: {
-                            ...doc,
-                            uuid: doc.uuid,
-                            title: doc.title,
-                            displayId: doc.displayId,
-                            documentTypeCode: doc.documentTypeCode,
-                            projectId: doc.projectId,
-                            scopeId: doc.scopeId,
-                            statusCode: doc.statusCode,
-                            createdAt: doc.createdAt,
-                            modifiedAt: doc.modifiedAt,
-                            source: sources.find(s => s.id === selectedSource)?.type || 'CALM',
-                            project: projects.find(p => p.id === selectedProject)?.name || 'Unknown Project'
-                        }
-                    }))
-                })
-
-                // Count updated vs newly added
-                const results = res.data.results || []
-                const updated = results.filter((r: any) => r.wasExisting).length
-                const added = results.filter((r: any) => !r.wasExisting && r.status === 'success').length
-
-                setSyncResult({
-                    message: res.data.message,
-                    count: results.length,
-                    updated: updated,
-                    added: added
-                })
-                setSyncStep(4)
-                fetchDocuments() // Refresh main list
-            } catch (err) {
-                console.error('Sync failed:', err)
-                alert('Sync failed. Check console.')
-            } finally {
-                setIsSyncing(false)
-            }
-        }
-    }
-
-    const handleResetSync = () => {
-        setShowSyncModal(false)
-        setSyncStep(1)
-        setSelectedSource('')
-        setSelectedProject('')
-        setSyncResult(null)
-        setDocsToSync([])
-        setSelectedDocIds(new Set())
-        setSyncStatus({})
-    }
-
-    const toggleDocSelection = (docId: string) => {
-        const newSelected = new Set(selectedDocIds)
-        if (newSelected.has(docId)) {
-            newSelected.delete(docId)
-        } else {
-            newSelected.add(docId)
-        }
-        setSelectedDocIds(newSelected)
-    }
-
-    const toggleSelectAll = () => {
-        if (selectedDocIds.size === docsToSync.length) {
-            // Deselect all
-            setSelectedDocIds(new Set())
-        } else {
-            // Select all
-            const allIds = docsToSync.map(doc => doc.uuid || doc.id)
-            setSelectedDocIds(new Set(allIds))
-        }
-    }
 
     const toggleDocumentSelection = (id: string) => {
         setSelectedDocumentIds(prev => {
@@ -307,10 +149,137 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
         setIsLoadingContent(true)
         setViewerDoc({ name: doc.name, content: '' })
         try {
-            const res = await axios.get(`/api/documents/${doc.documentId}/view`)
-            setViewerDoc({ name: doc.name, content: res.data.content || '' })
+            // Check if this is a test case
+            const isTestCase = doc.type === 'Manual Test Case' || doc.documentTypeCode === 'TEST_CASE'
+
+            if (isTestCase) {
+                // Fetch test case details
+                const res = await axios.get(`/api/test-cases/${doc.documentId}`)
+                const testCase = res.data
+
+                console.log('Test case data:', testCase)
+
+                // Format test case as HTML for display with better styling
+                let html = `
+                    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; line-height: 1.6;">
+                        <h1 style="color: #1f2937; margin-bottom: 20px; font-size: 24px; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px;">
+                            ${testCase.title || 'Test Case'}
+                        </h1>
+                        
+                        <div style="background: #f9fafb; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                            <p style="margin: 5px 0;">
+                                <strong style="color: #374151;">Priority:</strong> 
+                                <span style="padding: 4px 12px; border-radius: 4px; font-size: 14px; font-weight: 500; ${testCase.priorityCode === 30 ? 'background: #fee2e2; color: #991b1b;' :
+                        testCase.priorityCode === 20 ? 'background: #fef3c7; color: #92400e;' :
+                            'background: #dbeafe; color: #1e40af;'
+                    }">
+                                    ${testCase.priorityCode === 10 ? 'Low' : testCase.priorityCode === 20 ? 'Medium' : testCase.priorityCode === 30 ? 'High' : 'Unknown'}
+                                </span>
+                            </p>
+                            <p style="margin: 5px 0;">
+                                <strong style="color: #374151;">Status:</strong> 
+                                <span style="padding: 4px 12px; border-radius: 4px; font-size: 14px; font-weight: 500; ${testCase.isPrepared ? 'background: #d1fae5; color: #065f46;' : 'background: #e5e7eb; color: #6b7280;'
+                    }">
+                                    ${testCase.isPrepared ? 'Prepared' : 'Not Prepared'}
+                                </span>
+                            </p>
+                        </div>
+                `
+
+                if (testCase.toActivities && testCase.toActivities.length > 0) {
+                    html += '<h2 style="color: #1f2937; margin-top: 30px; margin-bottom: 15px; font-size: 20px;">Test Activities</h2>'
+
+                    testCase.toActivities.forEach((activity: any, actIdx: number) => {
+                        html += `
+                            <div style="margin-bottom: 25px; padding: 20px; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                                <h3 style="color: #7c3aed; margin: 0 0 15px 0; font-size: 18px; display: flex; align-items: center;">
+                                    <span style="background: #7c3aed; color: white; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-right: 10px; font-size: 14px; font-weight: bold;">
+                                        ${activity.sequence || actIdx + 1}
+                                    </span>
+                                    ${activity.title}
+                                </h3>
+                        `
+
+                        if (activity.toActions && activity.toActions.length > 0) {
+                            html += '<div style="margin-left: 38px;">'
+
+                            activity.toActions.forEach((action: any, actionIdx: number) => {
+                                html += `
+                                    <div style="margin-bottom: 15px; padding: 15px; background: #f9fafb; border-left: 3px solid #7c3aed; border-radius: 4px;">
+                                        <div style="display: flex; align-items: start; margin-bottom: 8px;">
+                                            <span style="background: #e9d5ff; color: #6b21a8; min-width: 24px; height: 24px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; margin-right: 10px; font-size: 12px; font-weight: bold;">
+                                                ${action.sequence || actionIdx + 1}
+                                            </span>
+                                            <strong style="color: #1f2937; font-size: 15px;">${action.title}</strong>
+                                        </div>
+                                `
+
+                                if (action.description && action.description.trim()) {
+                                    html += `
+                                        <div style="margin: 10px 0 10px 34px; padding: 10px; background: white; border-radius: 4px;">
+                                            <div style="color: #6b7280; font-size: 12px; font-weight: 600; text-transform: uppercase; margin-bottom: 5px;">Description</div>
+                                            <div style="color: #374151;">${action.description}</div>
+                                        </div>
+                                    `
+                                }
+
+                                if (action.expectedResult && action.expectedResult.trim()) {
+                                    html += `
+                                        <div style="margin: 10px 0 10px 34px; padding: 10px; background: #ecfdf5; border-radius: 4px; border-left: 3px solid #10b981;">
+                                            <div style="color: #047857; font-size: 12px; font-weight: 600; text-transform: uppercase; margin-bottom: 5px;">✓ Expected Result</div>
+                                            <div style="color: #065f46; font-weight: 500;">${action.expectedResult}</div>
+                                        </div>
+                                    `
+                                }
+
+                                if (action.isEvidenceRequired) {
+                                    html += `
+                                        <div style="margin: 10px 0 0 34px;">
+                                            <span style="display: inline-block; padding: 4px 8px; background: #fef3c7; color: #92400e; border-radius: 4px; font-size: 12px; font-weight: 500;">
+                                                📸 Evidence Required
+                                            </span>
+                                        </div>
+                                    `
+                                }
+
+                                html += '</div>'
+                            })
+
+                            html += '</div>'
+                        }
+
+                        html += '</div>'
+                    })
+                }
+
+                // Add references if available
+                if (testCase.toReferences && testCase.toReferences.length > 0) {
+                    html += '<h2 style="color: #1f2937; margin-top: 30px; margin-bottom: 15px; font-size: 20px;">References</h2>'
+                    html += '<div style="background: #f9fafb; padding: 15px; border-radius: 8px;">'
+
+                    testCase.toReferences.forEach((ref: any) => {
+                        html += `
+                            <div style="margin-bottom: 10px;">
+                                <a href="${ref.url}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: none; font-weight: 500;">
+                                    🔗 ${ref.name}
+                                </a>
+                            </div>
+                        `
+                    })
+
+                    html += '</div>'
+                }
+
+                html += '</div>'
+
+                setViewerDoc({ name: doc.name, content: html })
+            } else {
+                // Regular document
+                const res = await axios.get(`/api/documents/${doc.documentId}/view`)
+                setViewerDoc({ name: doc.name, content: res.data.content || '' })
+            }
         } catch (err: any) {
-            const errMsg = err?.response?.data?.error || 'Failed to load document content.'
+            const errMsg = err?.response?.data?.error || 'Failed to load content.'
             setViewerDoc({ name: doc.name, content: `<p style="color:red">${errMsg}</p>` })
         } finally {
             setIsLoadingContent(false)
@@ -576,188 +545,11 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
             )}
 
             {/* Sync Modal */}
-            {showSyncModal && (
-                <div className="settings-modal-overlay" onClick={() => setShowSyncModal(false)}>
-                    <div className="settings-modal sync-modal" onClick={e => e.stopPropagation()}>
-                        <div className="settings-modal-header">
-                            <div>
-                                <h3 className="settings-modal-title">Sync From Source</h3>
-                                <p className="settings-modal-desc">Step {syncStep} of 3: {
-                                    syncStep === 1 ? 'Select Source' :
-                                        syncStep === 2 ? 'Select Project' :
-                                            syncStep === 3 ? 'Confirm Sync' : 'Complete'
-                                }</p>
-                            </div>
-                            <button className="settings-modal-close" onClick={() => setShowSyncModal(false)}>×</button>
-                        </div>
-
-                        <div className="settings-modal-body">
-                            {syncStep === 1 && (
-                                <div className="settings-form-group">
-                                    <label>Select Source</label>
-                                    <select
-                                        value={selectedSource}
-                                        onChange={e => setSelectedSource(e.target.value)}
-                                        className="w-full p-2 border rounded-lg"
-                                    >
-                                        <option value="">-- Choose a source --</option>
-                                        {sources.map(s => (
-                                            <option key={s.id} value={s.id}>{s.name} ({s.type})</option>
-                                        ))}
-                                    </select>
-                                    {sources.length === 0 && (
-                                        <p className="text-sm text-gray-500 mt-2">No sources configured. Go to Settings to add one.</p>
-                                    )}
-                                </div>
-                            )}
-
-                            {syncStep === 2 && (
-                                <div className="settings-form-group">
-                                    <label>Select Project</label>
-                                    {projects.length === 0 ? (
-                                        <p>Loading projects...</p>
-                                    ) : (
-                                        <select
-                                            value={selectedProject}
-                                            onChange={e => setSelectedProject(e.target.value)}
-                                            className="w-full p-2 border rounded-lg"
-                                        >
-                                            <option value="">-- Choose a project --</option>
-                                            {projects.map(p => (
-                                                <option key={p.id} value={p.id}>{p.name}</option>
-                                            ))}
-                                        </select>
-                                    )}
-                                </div>
-                            )}
-
-                            {syncStep === 3 && (
-                                <div>
-                                    {isSyncing ? (
-                                        <div className="text-center p-4">
-                                            <div className="animate-spin h-8 w-8 border-4 border-blue-500 rounded-full border-t-transparent mx-auto mb-4"></div>
-                                            <p>Fetching documents...</p>
-                                        </div>
-                                    ) : (
-                                        <>
-                                            <div className="mb-4 flex justify-between items-center">
-                                                <p>Found <strong>{docsToSync.length}</strong> documents in this project.</p>
-                                                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={selectedDocIds.size === docsToSync.length && docsToSync.length > 0}
-                                                        onChange={toggleSelectAll}
-                                                        className="cursor-pointer"
-                                                    />
-                                                    <span>Select All</span>
-                                                </label>
-                                            </div>
-                                            <div className="max-h-60 overflow-y-auto border rounded p-2 bg-gray-50">
-                                                {docsToSync.map(doc => {
-                                                    const docId = doc.uuid || doc.id
-                                                    const typeCode = doc.documentTypeCode || doc.documentType || doc.type
-                                                    const typeName = documentTypeNames[typeCode] || typeCode || 'Document'
-                                                    const isSelected = selectedDocIds.has(docId)
-                                                    const isSynced = syncStatus[docId]
-
-                                                    return (
-                                                        <div
-                                                            key={docId}
-                                                            className="text-sm py-2 px-2 border-b last:border-0 flex items-center gap-3 hover:bg-gray-100 cursor-pointer"
-                                                            onClick={() => toggleDocSelection(docId)}
-                                                        >
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={isSelected}
-                                                                onChange={() => toggleDocSelection(docId)}
-                                                                className="cursor-pointer"
-                                                                onClick={(e) => e.stopPropagation()}
-                                                            />
-                                                            <div className="flex-1 flex justify-between items-center">
-                                                                <span className="flex-1">{doc.title || doc.name}</span>
-                                                                <div className="flex items-center gap-2">
-                                                                    <span className="text-gray-500 text-xs">{typeName}</span>
-                                                                    {isSynced && (
-                                                                        <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
-                                                                            Synced
-                                                                        </span>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    )
-                                                })}
-                                            </div>
-                                            <p className="mt-4 text-sm text-gray-600">
-                                                Selected <strong>{selectedDocIds.size}</strong> document(s).
-                                                {selectedDocIds.size > 0 && Object.values(syncStatus).filter(Boolean).length > 0 && (
-                                                    <span className="ml-2 text-blue-600">
-                                                        Existing documents will be updated.
-                                                    </span>
-                                                )}
-                                            </p>
-                                        </>
-                                    )}
-                                </div>
-                            )}
-
-                            {syncStep === 4 && (
-                                <div className="text-center p-8">
-                                    <div className="text-green-500 text-4xl mb-4">✓</div>
-                                    <h3 className="text-xl font-bold mb-2">Sync Complete!</h3>
-                                    <p className="mb-4">{syncResult?.message}</p>
-                                    {syncResult && (
-                                        <div className="text-sm text-gray-600 space-y-1">
-                                            {syncResult.added > 0 && (
-                                                <p className="text-green-600">✓ {syncResult.added} document(s) newly added</p>
-                                            )}
-                                            {syncResult.updated > 0 && (
-                                                <p className="text-blue-600">↻ {syncResult.updated} document(s) updated</p>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="settings-modal-footer">
-                            {syncStep < 4 && (
-                                <button className="btn btn-secondary" onClick={() => {
-                                    if (syncStep > 1) setSyncStep(syncStep - 1)
-                                    else setShowSyncModal(false)
-                                }}>Back</button>
-                            )}
-
-                            {syncStep < 3 && (
-                                <button
-                                    className="btn btn-primary"
-                                    onClick={handleSyncNext}
-                                    disabled={
-                                        (syncStep === 1 && !selectedSource) ||
-                                        (syncStep === 2 && !selectedProject)
-                                    }
-                                >
-                                    Next
-                                </button>
-                            )}
-
-                            {syncStep === 3 && (
-                                <button
-                                    className="btn btn-primary"
-                                    onClick={handleSyncNext}
-                                    disabled={isSyncing}
-                                >
-                                    {isSyncing ? 'Syncing...' : 'Sync Now'}
-                                </button>
-                            )}
-
-                            {syncStep === 4 && (
-                                <button className="btn btn-primary" onClick={handleResetSync}>Close</button>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
+            <SyncSourceModal
+                isOpen={showSyncModal}
+                onClose={() => setShowSyncModal(false)}
+                onSyncComplete={fetchDocuments}
+            />
         </div>
     )
 }

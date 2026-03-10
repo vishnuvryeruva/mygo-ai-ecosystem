@@ -2,13 +2,16 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import os
 import io
-import sqlite3
 import uuid
 import jwt
 import bcrypt
 import datetime
 from functools import wraps
 from dotenv import load_dotenv
+import psycopg2
+import psycopg2.extras
+import psycopg2.errorcodes
+from db import get_conn, init_db
 from services.openai_service import OpenAIService
 from services.rag_service import RAGService
 from services.spec_service import SpecService
@@ -16,6 +19,9 @@ from services.prompt_service import PromptService
 from services.code_service import CodeService
 from services.test_service import TestService
 from services.advisor_service import AdvisorService
+from services.code_repository_service import CodeRepositoryService
+from services import role_service
+from services import user_service
 from config.prompts import get_all_prompts, get_prompt, update_prompt
 
 # Import MCP tools
@@ -34,9 +40,10 @@ print(f"DEBUG: App startup - API Key start: {api_key[:8] if api_key else 'None'}
 try:
     from openai import OpenAI
     client = OpenAI(api_key=api_key)
-    print("DEBUG: Startup - Attempting chat completion...")
+    startup_model = os.getenv('OPENAI_MODEL', 'gpt-4.1')
+    print(f"DEBUG: Startup - Attempting chat completion with {startup_model}...")
     client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=startup_model,
         messages=[{"role": "user", "content": "Startup test"}]
     )
     print("DEBUG: Startup - Chat completion SUCCESS")
@@ -50,28 +57,7 @@ JWT_SECRET = os.getenv('JWT_SECRET', 'mygo-yoda-secret-key-change-in-production'
 JWT_ALGORITHM = 'HS256'
 JWT_EXPIRY_DAYS = 7
 
-# ── SQLite user database ────────────────────────────────────────────────────
-DB_PATH = os.path.join(basedir, 'users.db')
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def init_db():
-    conn = get_db()
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
+# ── PostgreSQL user database (via db.py) ────────────────────────────────────
 init_db()
 
 # ── JWT helper ──────────────────────────────────────────────────────────────
@@ -141,22 +127,26 @@ def register():
     password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     user_id = str(uuid.uuid4())
     created_at = datetime.datetime.utcnow().isoformat()
+    
+    # All users who sign up through the registration flow get Admin role by default
+    role = 'Admin'
 
     try:
-        conn = get_db()
-        conn.execute(
-            'INSERT INTO users (id, name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)',
-            (user_id, name, email, password_hash, created_at)
-        )
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                'INSERT INTO users (id, name, email, password_hash, role, created_at) VALUES (%s, %s, %s, %s, %s, %s)',
+                (user_id, name, email, password_hash, role, created_at)
+            )
         conn.commit()
         conn.close()
-    except sqlite3.IntegrityError:
+    except psycopg2.errors.UniqueViolation:
         return jsonify({'error': 'An account with this email already exists'}), 409
 
     token = create_token(user_id, email)
     return jsonify({
         'token': token,
-        'user': {'id': user_id, 'name': name, 'email': email}
+        'user': {'id': user_id, 'name': name, 'email': email, 'role': role}
     }), 201
 
 
@@ -169,8 +159,10 @@ def login():
     if not email or not password:
         return jsonify({'error': 'Email and password are required'}), 400
 
-    conn = get_db()
-    row = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
+    conn = get_conn()
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute('SELECT * FROM users WHERE email = %s', (email,))
+        row = cur.fetchone()
     conn.close()
 
     if not row or not bcrypt.checkpw(password.encode('utf-8'), row['password_hash'].encode('utf-8')):
@@ -179,7 +171,7 @@ def login():
     token = create_token(row['id'], row['email'])
     return jsonify({
         'token': token,
-        'user': {'id': row['id'], 'name': row['name'], 'email': row['email']}
+        'user': {'id': row['id'], 'name': row['name'], 'email': row['email'], 'role': row['role'] or 'Viewer'}
     })
 
 
@@ -187,12 +179,14 @@ def login():
 @token_required
 def me():
     payload = request.current_user
-    conn = get_db()
-    row = conn.execute('SELECT id, name, email, created_at FROM users WHERE id = ?', (payload['sub'],)).fetchone()
+    conn = get_conn()
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute('SELECT id, name, email, role, created_at FROM users WHERE id = %s', (payload['sub'],))
+        row = cur.fetchone()
     conn.close()
     if not row:
         return jsonify({'error': 'User not found'}), 404
-    return jsonify({'id': row['id'], 'name': row['name'], 'email': row['email'], 'created_at': row['created_at']})
+    return jsonify({'id': row['id'], 'name': row['name'], 'email': row['email'], 'role': row['role'] or 'Viewer', 'created_at': row['created_at']})
 
 # Ask Yoda - RAG-based Q&A
 @app.route('/api/ask-yoda', methods=['POST'])
@@ -205,10 +199,11 @@ def ask_yoda():
             return jsonify({"error": "Query is required"}), 400
         
         # Use RAG to get relevant context and generate answer
-        answer = rag_service.query(query)
+        result = rag_service.query(query)
         
         return jsonify({
-            "answer": answer,
+            "answer": result["answer"],
+            "references": result.get("references", []),
             "query": query
         })
     except Exception as e:
@@ -324,6 +319,30 @@ def generate_prompt():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+# Code Generator (from optimized prompt)
+@app.route('/api/generate-code', methods=['POST'])
+def generate_code_from_prompt():
+    try:
+        data = request.json
+        language = data.get('language', 'ABAP')
+        prompt = data.get('prompt', '')
+        context = data.get('context', '')
+        
+        if not prompt:
+            return jsonify({"error": "Prompt is required"}), 400
+        
+        result = prompt_service.generate_code(language, prompt, context)
+        
+        return jsonify({
+            "code": result['code'],
+            "explanation": result['explanation'],
+            "language": result['language']
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 # Explain Code
 @app.route('/api/explain-code', methods=['POST'])
 def explain_code():
@@ -351,7 +370,7 @@ def generate_test_cases():
         data = request.json
         code = data.get('code', '')
         test_type = data.get('test_type', 'manual')  # manual or unit
-        format_type = data.get('format', 'excel')  # excel, word, jira, preview
+        format_type = data.get('format', 'excel')  # excel, word, jira, preview, calm
         
         # For preview, return raw text for inline display
         if format_type == 'preview':
@@ -360,6 +379,15 @@ def generate_test_cases():
                 "test_cases": test_content,
                 "test_type": test_type,
                 "format": "preview"
+            })
+        
+        # For CALM format, return structured JSON
+        if format_type == 'calm':
+            test_cases = test_service.generate_test_cases(code, test_type, 'calm')
+            return jsonify({
+                "test_cases": test_cases,
+                "test_type": test_type,
+                "format": "calm"
             })
         
         test_cases = test_service.generate_test_cases(code, test_type, format_type)
@@ -788,6 +816,179 @@ def test_new_connection():
 
 
 # ============================================================================
+# Role Management Endpoints
+# ============================================================================
+
+@app.route('/api/roles', methods=['GET'])
+def list_roles():
+    """List all roles"""
+    try:
+        roles = role_service.list_roles()
+        return jsonify({"roles": roles})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/roles', methods=['POST'])
+def create_role():
+    """Create a new role"""
+    try:
+        data = request.json
+        role = role_service.create_role(data)
+        return jsonify({"role": role, "message": "Role created successfully"})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/roles/<role_id>', methods=['GET'])
+def get_role(role_id):
+    """Get a specific role"""
+    try:
+        role = role_service.get_role(role_id)
+        if role:
+            return jsonify(role)
+        return jsonify({"error": "Role not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/roles/<role_id>', methods=['PUT'])
+def update_role(role_id):
+    """Update a role"""
+    try:
+        data = request.json
+        role = role_service.update_role(role_id, data)
+        if role:
+            return jsonify({"role": role, "message": "Role updated successfully"})
+        return jsonify({"error": "Role not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/roles/<role_id>', methods=['DELETE'])
+def delete_role(role_id):
+    """Delete a role"""
+    try:
+        success = role_service.delete_role(role_id)
+        if success:
+            return jsonify({"message": "Role deleted successfully"})
+        return jsonify({"error": "Role not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ============================================================================
+# User Management Endpoints (Admin only)
+# ============================================================================
+
+def admin_required(f):
+    """Decorator to require admin role"""
+    @wraps(f)
+    @token_required
+    def decorated(*args, **kwargs):
+        user_id = request.current_user['sub']
+        user = user_service.get_user_by_id(user_id)
+        if not user or user['role'] != 'Admin':
+            return jsonify({"error": "Admin access required"}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
+@app.route('/api/users', methods=['GET'])
+@admin_required
+def list_users():
+    """List users created by current admin (Admin only)"""
+    try:
+        current_user_id = request.current_user['sub']
+        users = user_service.list_users(created_by=current_user_id)
+        return jsonify({"users": users})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users', methods=['POST'])
+@admin_required
+def create_user():
+    """Create a new user (Admin only)"""
+    try:
+        data = request.json
+        name = data.get('name', '').strip()
+        email = data.get('email', '').strip()
+        password = data.get('password', '')
+        role = data.get('role', 'Viewer')
+        
+        if not name or not email or not password:
+            return jsonify({"error": "Name, email, and password are required"}), 400
+        
+        # Set the current admin as the creator
+        current_user_id = request.current_user['sub']
+        user = user_service.create_user(name, email, password, role, created_by=current_user_id)
+        return jsonify({"user": user, "message": "User created successfully"})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>', methods=['PUT'])
+@admin_required
+def update_user(user_id):
+    """Update a user (Admin only)"""
+    try:
+        data = request.json
+        name = data.get('name')
+        role = data.get('role')
+        
+        user = user_service.update_user(user_id, name, role)
+        if user:
+            return jsonify({"user": user, "message": "User updated successfully"})
+        return jsonify({"error": "User not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>', methods=['DELETE'])
+@admin_required
+def delete_user(user_id):
+    """Delete a user (Admin only)"""
+    try:
+        current_user_id = request.current_user['sub']
+        
+        # Get the user to be deleted
+        user_to_delete = user_service.get_user_by_id(user_id)
+        
+        if not user_to_delete:
+            return jsonify({"error": "User not found"}), 404
+        
+        # Prevent admin from deleting themselves
+        if user_id == current_user_id:
+            return jsonify({"error": "You cannot delete your own account"}), 400
+        
+        # Prevent deleting Admin users
+        if user_to_delete['role'] == 'Admin':
+            return jsonify({"error": "Cannot delete Admin users"}), 403
+        
+        # Verify the user was created by the current admin
+        if user_to_delete.get('created_by') != current_user_id:
+            return jsonify({"error": "You can only delete users you created"}), 403
+        
+        success = user_service.delete_user(user_id)
+        if success:
+            return jsonify({"message": "User deleted successfully"})
+        return jsonify({"error": "User not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ============================================================================
 # Cloud ALM Browser Endpoints
 # ============================================================================
 
@@ -852,27 +1053,100 @@ def calm_list_solution_processes(source_id):
 
 @app.route('/api/calm/<source_id>/documents', methods=['GET'])
 def calm_list_documents(source_id):
-    """List documents from Cloud ALM"""
+    """List documents and test cases from Cloud ALM"""
     try:
         process_id = request.args.get('processId')
         doc_type = request.args.get('type')
         project_id = request.args.get('projectId')
+        scope_id = request.args.get('scopeId')
+        include_test_cases = request.args.get('includeTestCases', 'false').lower() == 'true'
         
         source = source_config_service.get_source(source_id)
         if not source:
             return jsonify({"error": "Source not found"}), 404
         
         service = get_calm_service(source.get('config'))
+        
+        # Fetch documents
         result = service.list_documents(  # Returns {documents, isDemo, error?}
             process_id=process_id,
             document_type=doc_type,
             project_id=project_id
         )
+        
+        # Fetch test cases if requested
+        test_cases = []
+        if include_test_cases and project_id:
+            print(f"DEBUG: Fetching test cases for project_id={project_id}, scope_id={scope_id}")
+            try:
+                test_cases = service.list_manual_test_cases(
+                    project_id=project_id,
+                    scope_id=scope_id
+                )
+                print(f"DEBUG: Fetched {len(test_cases)} test cases")
+                # Add type indicator to test cases
+                for tc in test_cases:
+                    tc['itemType'] = 'test_case'
+                    tc['name'] = tc.get('title', 'Untitled Test Case')
+                    tc['id'] = tc.get('uuid', tc.get('id'))
+                    tc['type'] = 'Manual Test Case'
+                    tc['documentTypeCode'] = 'TEST_CASE'
+            except Exception as e:
+                print(f"ERROR fetching test cases: {e}")
+                import traceback
+                traceback.print_exc()
+                # Continue even if test cases fail
+        
+        # Add type indicator to documents
+        documents = result.get('documents', [])
+        for doc in documents:
+            doc['itemType'] = 'document'
+            if 'name' not in doc and 'title' in doc:
+                doc['name'] = doc['title']
+        
+        # Combine results
+        result['testCases'] = test_cases
+        result['totalDocuments'] = len(documents)
+        result['totalTestCases'] = len(test_cases)
+        
         return jsonify(result)
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/test-cases/<test_case_id>', methods=['GET'])
+def get_test_case(test_case_id):
+    """Get test case details from CALM"""
+    try:
+        import re
+        is_uuid = bool(re.match(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$', str(test_case_id)))
+        if not is_uuid:
+            return jsonify({"error": "Invalid test case ID"}), 400
+
+        source_id = request.args.get('sourceId')
+
+        if not source_id:
+            # Fallback to the first CALM source if not explicitly provided
+            sources = source_config_service.list_sources()
+            calm_source = next((s for s in sources if s['type'] == 'CALM'), None)
+            if not calm_source:
+                return jsonify({"error": "No CALM source found"}), 404
+            source_id = calm_source['id']
+
+        source = source_config_service.get_source(source_id)
+        if not source:
+            return jsonify({"error": "Source not found"}), 404
+
+        service = get_calm_service(source.get('config'))
+        test_case = service.get_manual_test_case(test_case_id)
+
+        return jsonify(test_case)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/documents/<document_id>/download', methods=['GET'])
 def download_calm_document(document_id):
@@ -885,7 +1159,7 @@ def download_calm_document(document_id):
             return jsonify({"error": "This document was synced using an older version. Please re-sync the project from the Data Sources tab to download it."}), 400
 
         source_id = request.args.get('sourceId')
-        
+
         if not source_id:
             # Fallback to the first CALM source if not explicitly provided
             sources = source_config_service.list_sources()
@@ -893,14 +1167,14 @@ def download_calm_document(document_id):
             if not calm_source:
                 return jsonify({"error": "No CALM source found"}), 404
             source_id = calm_source['id']
-            
+
         source = source_config_service.get_source(source_id)
         if not source:
             return jsonify({"error": "Source not found"}), 404
-            
+
         service = get_calm_service(source.get('config'))
         content = service.get_document_content(document_id)
-        
+
         from flask import make_response
         response = make_response(content)
         # Content-Type will be application/octet-stream if unknown, or text/html if returned by CALM
@@ -1226,16 +1500,20 @@ def push_spec_to_calm(source_id):
 
 @app.route('/api/calm/<source_id>/push-test-cases', methods=['POST'])
 def push_test_cases_to_calm(source_id):
-    """Push test cases to Cloud ALM"""
+    """Push test cases to Cloud ALM as Manual Test Cases"""
     try:
         data = request.json
-        name = data.get('name')
-        content = data.get('content')
+        test_cases = data.get('testCases', [])
         project_id = data.get('projectId')
-        process_id = data.get('processId', '')
+        scope_id = data.get('scopeId')
+        priority_code = data.get('priorityCode', 20)
+        name_prefix = data.get('namePrefix', '')  # Optional prefix for test case names
         
-        if not all([name, content, project_id]):
-            return jsonify({"error": "name, content, and projectId are required"}), 400
+        if not all([test_cases, project_id, scope_id]):
+            return jsonify({"error": "testCases, projectId, and scopeId are required"}), 400
+        
+        if not isinstance(test_cases, list) or len(test_cases) == 0:
+            return jsonify({"error": "testCases must be a non-empty array"}), 400
         
         source = source_config_service.get_source(source_id)
         if not source:
@@ -1243,22 +1521,196 @@ def push_test_cases_to_calm(source_id):
         
         service = get_calm_service(source.get('config'))
         
-        # Convert content to bytes if string
-        if isinstance(content, str):
-            content = content.encode('utf-8')
+        # Create each test case in Cloud ALM
+        created_test_cases = []
+        errors = []
         
-        result = service.push_document(
-            name=name,
-            content=content,
-            document_type='test_case',
-            process_id=process_id,
-            project_id=project_id
+        for idx, test_case in enumerate(test_cases):
+            try:
+                # Apply name prefix if provided
+                original_title = test_case.get('title', f'Test Case {idx + 1}')
+                if name_prefix and name_prefix.strip():
+                    title = f"{name_prefix.strip()} - {original_title}"
+                else:
+                    title = original_title
+                
+                activities = test_case.get('toActivities', [])
+                
+                if not activities:
+                    errors.append(f"Test case '{title}' has no activities")
+                    continue
+                
+                result = service.create_manual_test_case(
+                    title=title,
+                    project_id=project_id,
+                    scope_id=scope_id,
+                    activities=activities,
+                    priority_code=priority_code,
+                    is_prepared=False
+                )
+                
+                created_test_cases.append({
+                    'title': title,
+                    'id': result.get('uuid', result.get('id')),  # SAP Cloud ALM uses 'uuid'
+                    'status': 'created'
+                })
+            except Exception as e:
+                error_msg = f"Failed to create test case '{test_case.get('title', idx + 1)}': {str(e)}"
+                print(error_msg)
+                errors.append(error_msg)
+        
+        response = {
+            "message": f"Successfully created {len(created_test_cases)} test case(s)",
+            "testCases": created_test_cases,
+            "totalRequested": len(test_cases),
+            "totalCreated": len(created_test_cases)
+        }
+        
+        if errors:
+            response["errors"] = errors
+            response["message"] += f" with {len(errors)} error(s)"
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  CODE REPOSITORY ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/code-repository', methods=['POST'])
+@token_required
+def save_code_snippet():
+    """Save a code snippet to the user's repository"""
+    try:
+        data = request.get_json() or {}
+        user_id = request.current_user['sub']
+        
+        title = data.get('title', '').strip()
+        code = data.get('code', '').strip()
+        code_type = data.get('code_type', 'ABAP')
+        description = data.get('description', '').strip() or None
+        analysis_data = data.get('analysis_data')
+        
+        if not title:
+            return jsonify({"error": "Title is required"}), 400
+        if not code:
+            return jsonify({"error": "Code is required"}), 400
+        
+        service = CodeRepositoryService()
+        snippet = service.save_code_snippet(
+            user_id=user_id,
+            title=title,
+            code=code,
+            code_type=code_type,
+            description=description,
+            analysis_data=analysis_data
         )
         
+        return jsonify(snippet), 201
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/code-repository', methods=['GET'])
+@token_required
+def get_code_snippets():
+    """Get all code snippets for the current user"""
+    try:
+        user_id = request.current_user['sub']
+        limit = int(request.args.get('limit', 100))
+        offset = int(request.args.get('offset', 0))
+        
+        service = CodeRepositoryService()
+        snippets = service.get_user_snippets(user_id, limit, offset)
+        count = service.get_snippet_count(user_id)
+        
         return jsonify({
-            "message": "Test cases pushed successfully",
-            "document": result
+            "snippets": snippets,
+            "total": count
         })
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/code-repository/<snippet_id>', methods=['GET'])
+@token_required
+def get_code_snippet(snippet_id):
+    """Get a specific code snippet"""
+    try:
+        user_id = request.current_user['sub']
+        
+        service = CodeRepositoryService()
+        snippet = service.get_snippet_by_id(snippet_id, user_id)
+        
+        if not snippet:
+            return jsonify({"error": "Snippet not found"}), 404
+        
+        return jsonify(snippet)
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/code-repository/<snippet_id>', methods=['PUT'])
+@token_required
+def update_code_snippet(snippet_id):
+    """Update a code snippet"""
+    try:
+        user_id = request.current_user['sub']
+        data = request.get_json() or {}
+        
+        title = data.get('title')
+        code = data.get('code')
+        description = data.get('description')
+        
+        service = CodeRepositoryService()
+        snippet = service.update_snippet(
+            snippet_id=snippet_id,
+            user_id=user_id,
+            title=title,
+            code=code,
+            description=description
+        )
+        
+        if not snippet:
+            return jsonify({"error": "Snippet not found"}), 404
+        
+        return jsonify(snippet)
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/code-repository/<snippet_id>', methods=['DELETE'])
+@token_required
+def delete_code_snippet(snippet_id):
+    """Delete a code snippet"""
+    try:
+        user_id = request.current_user['sub']
+        
+        service = CodeRepositoryService()
+        deleted = service.delete_snippet(snippet_id, user_id)
+        
+        if not deleted:
+            return jsonify({"error": "Snippet not found"}), 404
+        
+        return jsonify({"message": "Snippet deleted successfully"})
+        
     except Exception as e:
         import traceback
         traceback.print_exc()

@@ -5,6 +5,8 @@ import axios from 'axios'
 
 interface CodeAdvisorModalProps {
   onClose: () => void
+  initialCode?: string
+  initialCodeType?: string
 }
 
 interface Suggestion {
@@ -23,21 +25,26 @@ interface AntiPattern {
   suggestion: string
 }
 
-export default function CodeAdvisorModal({ onClose }: CodeAdvisorModalProps) {
-  const [code, setCode] = useState('')
-  const [codeType, setCodeType] = useState('ABAP')
+export default function CodeAdvisorModal({ onClose, initialCode = '', initialCodeType = 'ABAP' }: CodeAdvisorModalProps) {
+  const [code, setCode] = useState(initialCode)
+  const [codeType, setCodeType] = useState(initialCodeType)
   const [analysis, setAnalysis] = useState<{
     suggestions: Suggestion[]
     anti_patterns: AntiPattern[]
     improvements: any[]
   } | null>(null)
   const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [showSaveDialog, setShowSaveDialog] = useState(false)
+  const [saveForm, setSaveForm] = useState({ title: '', description: '' })
 
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!code.trim()) return
 
     setLoading(true)
+    setSaved(false)
     try {
       const response = await axios.post('/api/analyze-code', {
         code,
@@ -49,6 +56,38 @@ export default function CodeAdvisorModal({ onClose }: CodeAdvisorModalProps) {
       alert('Error analyzing code. Please try again.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleAddToRepository = () => {
+    setSaveForm({ title: `${codeType} Code Snippet`, description: '' })
+    setShowSaveDialog(true)
+  }
+
+  const handleSaveToRepository = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!saveForm.title.trim()) return
+
+    setSaving(true)
+    try {
+      const token = localStorage.getItem('mygo-token')
+      await axios.post('/api/code-repository', {
+        title: saveForm.title.trim(),
+        code,
+        code_type: codeType,
+        description: saveForm.description.trim() || undefined,
+        analysis_data: analysis
+      }, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      })
+      setSaved(true)
+      setShowSaveDialog(false)
+      setSaveForm({ title: '', description: '' })
+    } catch (error) {
+      console.error('Error saving code snippet:', error)
+      alert('Error saving code snippet. Please try again.')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -106,6 +145,63 @@ export default function CodeAdvisorModal({ onClose }: CodeAdvisorModalProps) {
 
           {analysis && (
             <div className="mt-6 space-y-6">
+              {/* Add to Repository Button */}
+              <div style={{
+                display: 'flex', gap: '12px', padding: '16px',
+                background: 'linear-gradient(135deg, #ecfdf5, #f0fdf4)',
+                border: '1px solid #86efac',
+                borderRadius: '12px',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}>
+                <div>
+                  <h4 style={{ fontWeight: 700, color: '#065f46', margin: '0 0 4px 0', fontSize: '0.9rem' }}>
+                    {saved ? '✓ Saved to Repository' : 'Save this code for later'}
+                  </h4>
+                  <p style={{ color: '#047857', fontSize: '0.8rem', margin: 0 }}>
+                    {saved ? 'You can view it in your Code Repository' : 'Add this analyzed code to your personal repository'}
+                  </p>
+                </div>
+                <button
+                  onClick={handleAddToRepository}
+                  disabled={saving || saved}
+                  className="btn"
+                  style={{
+                    background: saved ? '#10b981' : '#059669',
+                    color: 'white',
+                    border: `1px solid ${saved ? '#10b981' : '#059669'}`,
+                    boxShadow: '0 2px 8px rgba(5, 150, 105, 0.25)',
+                    opacity: saved ? 0.7 : 1,
+                    cursor: saved ? 'default' : 'pointer',
+                    flexShrink: 0
+                  }}
+                >
+                  {saving ? (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span className="spinner" style={{ width: '16px', height: '16px' }} />
+                      Saving...
+                    </span>
+                  ) : saved ? (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
+                        <polyline points="22 4 12 14.01 9 11.01" />
+                      </svg>
+                      Saved
+                    </span>
+                  ) : (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
+                        <polyline points="17 21 17 13 7 13 7 21" />
+                        <polyline points="7 3 7 8 15 8" />
+                      </svg>
+                      Add to Repository
+                    </span>
+                  )}
+                </button>
+              </div>
+
               {/* Anti-patterns */}
               {analysis.anti_patterns && analysis.anti_patterns.length > 0 && (
                 <div>
@@ -183,6 +279,89 @@ export default function CodeAdvisorModal({ onClose }: CodeAdvisorModalProps) {
           )}
         </div>
       </div>
+
+      {/* Save to Repository Dialog */}
+      {showSaveDialog && (
+        <div className="modal-overlay" style={{ zIndex: 1001 }} onClick={() => setShowSaveDialog(false)}>
+          <div className="modal" style={{ maxWidth: '500px' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
+                  <polyline points="17 21 17 13 7 13 7 21" />
+                  <polyline points="7 3 7 8 15 8" />
+                </svg>
+                Save to Repository
+              </h2>
+              <button onClick={() => setShowSaveDialog(false)} className="modal-close">✕</button>
+            </div>
+
+            <div className="modal-body">
+              <form onSubmit={handleSaveToRepository}>
+                <div className="input-group">
+                  <label className="input-label">Title *</label>
+                  <input
+                    type="text"
+                    value={saveForm.title}
+                    onChange={(e) => setSaveForm(prev => ({ ...prev, title: e.target.value }))}
+                    placeholder="Enter a title for this code snippet"
+                    className="input"
+                    required
+                    autoFocus
+                  />
+                </div>
+
+                <div className="input-group">
+                  <label className="input-label">Description (Optional)</label>
+                  <textarea
+                    value={saveForm.description}
+                    onChange={(e) => setSaveForm(prev => ({ ...prev, description: e.target.value }))}
+                    placeholder="Add a description or notes about this code..."
+                    className="input"
+                    rows={4}
+                    style={{ resize: 'vertical' }}
+                  />
+                </div>
+
+                <div style={{
+                  background: '#f8fafc', border: '1px solid #e2e8f0',
+                  borderRadius: '8px', padding: '12px', marginBottom: '16px'
+                }}>
+                  <div style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '8px' }}>
+                    <strong>Code Type:</strong> {codeType}
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                    <strong>Lines:</strong> {code.split('\n').length}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button
+                    type="submit"
+                    disabled={saving || !saveForm.title.trim()}
+                    className="btn btn-primary"
+                    style={{ flex: 1 }}
+                  >
+                    {saving ? (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
+                        <span className="spinner" style={{ width: '16px', height: '16px' }} />
+                        Saving...
+                      </span>
+                    ) : 'Save to Repository'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowSaveDialog(false)}
+                    className="btn btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

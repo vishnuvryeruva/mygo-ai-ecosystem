@@ -23,7 +23,7 @@ class OpenAIService:
             api_key=api_key,
             timeout=120.0  # 120 second timeout instead of default 10s
         )
-        self.model = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
+        self.model = os.getenv('OPENAI_MODEL', 'gpt-4.1')
     
     def chat_completion(self, messages, temperature=0.3, max_tokens=2000):
         """Generic chat completion method"""

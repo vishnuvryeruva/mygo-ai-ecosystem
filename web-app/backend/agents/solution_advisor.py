@@ -7,7 +7,7 @@ from openai import OpenAI
 import os
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1")
 
 
 def gather_requirements(user_input: str) -> dict:
@@ -144,19 +144,21 @@ def search_similar_solutions(solution_summary: str, rag_service) -> dict:
     """
     # Use the RAG service to find similar documents
     try:
-        results = rag_service.query(solution_summary, top_k=5)
+        result = rag_service.query(solution_summary, top_k=5)
         
+        # Build similar solutions from references
         similar_solutions = []
-        for result in results:
+        for ref in result.get("references", []):
             similar_solutions.append({
-                "title": result.get("metadata", {}).get("filename", "Unknown Document"),
-                "summary": result.get("content", "")[:500] + "...",
-                "relevance": result.get("score", 0.5)
+                "title": ref.get("document_name", "Unknown Document"),
+                "summary": f"Source: {ref.get('source', 'N/A')}, Project: {ref.get('project', 'N/A')}, Type: {ref.get('doc_type', 'Document')}",
+                "relevance": 0.5
             })
         
         return {
             "similar_solutions": similar_solutions,
-            "count": len(similar_solutions)
+            "count": len(similar_solutions),
+            "analysis": result.get("answer", "")
         }
     except Exception as e:
         return {

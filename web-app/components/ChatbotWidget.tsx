@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import axios from 'axios'
 import RichTextResponse from '@/components/RichTextResponse'
+import SourceReferences, { Reference } from '@/components/SourceReferences'
 
 // ═══════════════════════════════════════════════════════════
 //  SVG Icon Components (replacing emoji)
@@ -67,6 +68,7 @@ interface ChatMessage {
     actions?: ChatAction[]
     isRichText?: boolean
     status?: 'info' | 'success' | 'error' | 'loading'
+    references?: Reference[]
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -176,7 +178,7 @@ const agentConfigs: Record<string, AgentConfig> = {
         ],
         placeholder: 'Paste code for review...',
     },
-    'sync-documents': {
+    'document-upload': {
         id: 'sync-documents',
         name: 'Sync Documents',
         description: 'Sync from Sources',
@@ -184,8 +186,8 @@ const agentConfigs: Record<string, AgentConfig> = {
         gradient: 'linear-gradient(135deg, #034354, #0891b2)',
         welcomeMessage: 'I can help you sync documents from your connected sources. Choose a source to get started.',
         welcomeActions: [
-            { id: 'sync-calm', label: 'Sync from CALM', variant: 'primary' },
-            { id: 'sync-all', label: 'Sync All Sources', variant: 'outline' },
+            // { id: 'sync-calm', label: 'Sync from CALM', variant: 'primary' },
+            { id: 'sync-all', label: 'Sync All Sources', variant: 'primary' },
             { id: 'check-sources', label: 'View Connected Sources', variant: 'outline' },
         ],
         placeholder: 'Ask about syncing...',
@@ -199,11 +201,12 @@ async function handleAgentMessage(agentId: string, query: string): Promise<{
     content: string
     actions?: ChatAction[]
     isRichText?: boolean
+    references?: Reference[]
 }> {
     switch (agentId) {
         case 'ask-yoda': {
             const res = await axios.post('/api/ask-yoda', { query })
-            return { content: res.data.answer, isRichText: true }
+            return { content: res.data.answer, isRichText: true, references: res.data.references }
         }
         case 'solution-advisor': {
             const res = await axios.post('/api/solution-advisor/requirements', { user_input: query })
@@ -230,10 +233,17 @@ async function handleAgentMessage(agentId: string, query: string): Promise<{
             }
         }
         case 'prompt-generator': {
-            const res = await axios.post('/api/prompt-generator', { description: query })
+            const res = await axios.post('/api/generate-prompt', {
+                language: 'ABAP',
+                task: query,
+                context: ''
+            })
             return {
                 content: res.data.prompt || res.data.error || 'Here is your generated prompt.',
                 isRichText: true,
+                actions: [
+                    { id: 'open-modal', label: 'Open Prompt & Code Studio', variant: 'primary' },
+                ],
             }
         }
         case 'test-case-generator': {
@@ -348,38 +358,47 @@ function StatusBubble({ status, content }: { status: string; content: string }) 
 //  Main ChatbotWidget Component
 // ═══════════════════════════════════════════════════════════
 interface ChatbotWidgetProps {
-    isOpen: boolean
-    isMinimized: boolean
-    activeAgent?: string | null
-    onToggleOpen: () => void
-    onToggleMinimize: () => void
+    expandedAgent: string | null
+    minimizedChats: string[]
+    onMinimize: () => void
     onClose: () => void
+    onRestoreChat: (agentId: string) => void
+    onDismissBubble: (agentId: string) => void
 }
 
 export default function ChatbotWidget({
-    isOpen,
-    isMinimized,
-    activeAgent,
-    onToggleOpen,
-    onToggleMinimize,
+    expandedAgent,
+    minimizedChats,
+    onMinimize,
     onClose,
+    onRestoreChat,
+    onDismissBubble,
 }: ChatbotWidgetProps) {
+    // Per-agent message storage (persists across minimize/restore)
+    const messagesStore = useRef<Record<string, ChatMessage[]>>({})
     const [messages, setMessages] = useState<ChatMessage[]>([])
     const [input, setInput] = useState('')
     const [loading, setLoading] = useState(false)
-    const [prevAgent, setPrevAgent] = useState<string | null>(null)
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
-    const agentId = activeAgent || 'ask-yoda'
+    const agentId = expandedAgent || 'ask-yoda'
     const agent = agentConfigs[agentId] || agentConfigs['ask-yoda']
 
-    // Clear messages when agent changes
+    // Sync messages when expanded agent changes
     useEffect(() => {
-        if (activeAgent && activeAgent !== prevAgent) {
-            setMessages([])
-            setPrevAgent(activeAgent)
+        if (expandedAgent) {
+            // Load messages for this agent (or empty if new)
+            const stored = messagesStore.current[expandedAgent] || []
+            setMessages(stored)
         }
-    }, [activeAgent, prevAgent])
+    }, [expandedAgent])
+
+    // Save messages whenever they change (for the current expanded agent)
+    useEffect(() => {
+        if (expandedAgent) {
+            messagesStore.current[expandedAgent] = messages
+        }
+    }, [messages, expandedAgent])
 
     const scrollToBottom = useCallback(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -450,6 +469,19 @@ export default function ChatbotWidget({
             return
         }
 
+        // Handle sync-source-{sourceId} actions
+        if (action.id.startsWith('sync-source-')) {
+            const sourceId = action.id.replace('sync-source-', '')
+            // Dispatch event to open the Sync Source modal with pre-selected source
+            window.dispatchEvent(new CustomEvent('sync-source-open', { detail: { sourceId } }))
+            addAssistantMessage({
+                content: `Opening Sync From Source dialog with **${action.label.replace('Sync ', '')}** pre-selected...`,
+                status: 'info',
+                isRichText: true,
+            })
+            return
+        }
+
         // Example/quick actions — treat as a user query
         if (action.id.startsWith('example-') || action.id.startsWith('quick-') || action.id === 'paste-code' || action.id === 'gen-from-desc') {
             setInput(action.label)
@@ -511,6 +543,7 @@ export default function ChatbotWidget({
             actions: msg.actions,
             isRichText: msg.isRichText,
             status: msg.status,
+            references: msg.references,
         }])
     }
 
@@ -540,156 +573,184 @@ export default function ChatbotWidget({
         }
     }
 
-    if (!isOpen && !isMinimized) return null
+    // Nothing to render if no expanded agent and no minimized chats
+    if (!expandedAgent && minimizedChats.length === 0) return null
 
-    // ── Minimized state ──────────────────────────
-    if (isMinimized) {
-        return (
-            <div className="fixed bottom-6 right-6" style={{ zIndex: 100 }}>
-                <button
-                    onClick={onToggleMinimize}
-                    className="yoda-mini-btn"
-                    title={agent.name}
-                    style={{ background: agent.gradient }}
-                >
-                    <div className="yoda-mini-icon">{agent.icon}</div>
-                    <div className="yoda-mini-pulse" />
-                    {messages.length > 0 && (
-                        <div className="yoda-mini-badge">
-                            {messages.filter(m => m.type === 'assistant').length}
-                        </div>
-                    )}
-                </button>
-            </div>
-        )
-    }
-
-    // ── Expanded chat ────────────────────────────
     return (
-        <div className="chatbot-container">
-            <div className="chatbot-panel">
-                {/* Header */}
-                <div className="chatbot-header" style={{ background: agent.gradient }}>
-                    <div className="chatbot-header-info">
-                        <div className="chatbot-header-icon">{agent.icon}</div>
-                        <div>
-                            <h3 className="chatbot-header-title">{agent.name}</h3>
-                            <p className="chatbot-header-desc">{agent.description}</p>
-                        </div>
-                    </div>
-                    <div className="chatbot-header-actions">
-                        <button onClick={onToggleMinimize} className="chatbot-header-btn" title="Minimize">
-                            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                            </svg>
-                        </button>
-                        <button onClick={onClose} className="chatbot-header-btn" title="Close">
-                            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-
-                {/* Messages */}
-                <div className="chatbot-messages">
-                    {messages.length === 0 ? (
-                        <div className="chatbot-welcome">
-                            <div className="chatbot-welcome-icon" style={{ color: '#034354' }}>{agent.icon}</div>
-                            <h4>Welcome to {agent.name}!</h4>
-                            <p style={{ fontSize: '0.83rem', color: '#64748b', lineHeight: 1.5, marginBottom: '16px' }}>
-                                {agent.welcomeMessage}
-                            </p>
-                            {agent.welcomeActions && (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center' }}>
-                                    {agent.welcomeActions.map(action => (
-                                        <ActionButton key={action.id} action={action} onClick={() => handleAction(action)} />
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    ) : (
-                        <>
-                            {messages.map((message) => (
-                                <div
-                                    key={message.id}
-                                    className={`chatbot-msg ${message.type === 'user' ? 'chatbot-msg-user' : 'chatbot-msg-assistant'}`}
+        <>
+            {/* ── Minimized Chat Bubbles (Messenger-style) ── */}
+            {minimizedChats.length > 0 && (
+                <div className="minimized-chat-bar">
+                    {minimizedChats.map((chatAgentId) => {
+                        const chatAgent = agentConfigs[chatAgentId] || agentConfigs['ask-yoda']
+                        const storedMessages = messagesStore.current[chatAgentId] || []
+                        const unreadCount = storedMessages.filter(m => m.type === 'assistant').length
+                        return (
+                            <div key={chatAgentId} className="minimized-chat-bubble-wrapper">
+                                <button
+                                    className="minimized-chat-bubble"
+                                    onClick={() => onRestoreChat(chatAgentId)}
+                                    title={chatAgent.name}
+                                    style={{ background: chatAgent.gradient }}
                                 >
-                                    <div className={`chatbot-msg-bubble ${message.type === 'user' ? 'chatbot-msg-bubble-user' : 'chatbot-msg-bubble-assistant'}`}>
-                                        {/* Status indicator */}
-                                        {message.status && (
-                                            <StatusBubble status={message.status} content={message.content} />
-                                        )}
+                                    <div className="minimized-chat-bubble-icon">{chatAgent.icon}</div>
+                                    {unreadCount > 0 && (
+                                        <div className="minimized-chat-bubble-badge">{unreadCount}</div>
+                                    )}
+                                </button>
+                                <button
+                                    className="minimized-chat-bubble-close"
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        onDismissBubble(chatAgentId)
+                                    }}
+                                    title={`Close ${chatAgent.name}`}
+                                >
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                                    </svg>
+                                </button>
+                                <span className="minimized-chat-bubble-label">{chatAgent.name}</span>
+                            </div>
+                        )
+                    })}
+                </div>
+            )}
 
-                                        {/* Text content */}
-                                        {!message.status && (
-                                            message.isRichText ? (
-                                                <RichTextResponse content={message.content} />
-                                            ) : (
-                                                <p>{message.content}</p>
-                                            )
-                                        )}
-
-                                        {/* Action buttons */}
-                                        {message.actions && message.actions.length > 0 && (
-                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
-                                                {message.actions.map(action => (
-                                                    <ActionButton key={action.id} action={action} onClick={() => handleAction(action)} />
-                                                ))}
-                                            </div>
-                                        )}
-
-                                        <span className="chatbot-msg-time">
-                                            {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                        </span>
-                                    </div>
+            {/* ── Expanded Chat Panel ── */}
+            {expandedAgent && (
+                <div className="chatbot-container" style={{ bottom: minimizedChats.length > 0 ? '84px' : '24px' }}>
+                    <div className="chatbot-panel">
+                        {/* Header */}
+                        <div className="chatbot-header" style={{ background: agent.gradient }}>
+                            <div className="chatbot-header-info">
+                                <div className="chatbot-header-icon">{agent.icon}</div>
+                                <div>
+                                    <h3 className="chatbot-header-title">{agent.name}</h3>
+                                    <p className="chatbot-header-desc">{agent.description}</p>
                                 </div>
-                            ))}
-                            {loading && (
-                                <div className="chatbot-msg chatbot-msg-assistant">
-                                    <div className="chatbot-msg-bubble chatbot-msg-bubble-assistant">
-                                        <div className="chatbot-typing">
-                                            <div className="chatbot-typing-dot" style={{ animationDelay: '0ms' }} />
-                                            <div className="chatbot-typing-dot" style={{ animationDelay: '150ms' }} />
-                                            <div className="chatbot-typing-dot" style={{ animationDelay: '300ms' }} />
+                            </div>
+                            <div className="chatbot-header-actions">
+                                <button onClick={onMinimize} className="chatbot-header-btn" title="Minimize">
+                                    <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                </button>
+                                <button onClick={onClose} className="chatbot-header-btn" title="Close">
+                                    <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Messages */}
+                        <div className="chatbot-messages">
+                            {messages.length === 0 ? (
+                                <div className="chatbot-welcome">
+                                    <div className="chatbot-welcome-icon" style={{ color: '#034354' }}>{agent.icon}</div>
+                                    <h4>Welcome to {agent.name}!</h4>
+                                    <p style={{ fontSize: '0.83rem', color: '#64748b', lineHeight: 1.5, marginBottom: '16px' }}>
+                                        {agent.welcomeMessage}
+                                    </p>
+                                    {agent.welcomeActions && (
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center' }}>
+                                            {agent.welcomeActions.map(action => (
+                                                <ActionButton key={action.id} action={action} onClick={() => handleAction(action)} />
+                                            ))}
                                         </div>
-                                    </div>
+                                    )}
                                 </div>
-                            )}
-                            <div ref={messagesEndRef} />
-                        </>
-                    )}
-                </div>
+                            ) : (
+                                <>
+                                    {messages.map((message) => (
+                                        <div
+                                            key={message.id}
+                                            className={`chatbot-msg ${message.type === 'user' ? 'chatbot-msg-user' : 'chatbot-msg-assistant'}`}
+                                        >
+                                            <div className={`chatbot-msg-bubble ${message.type === 'user' ? 'chatbot-msg-bubble-user' : 'chatbot-msg-bubble-assistant'}`}>
+                                                {/* Status indicator */}
+                                                {message.status && (
+                                                    <StatusBubble status={message.status} content={message.content} />
+                                                )}
 
-                {/* Input */}
-                <div className="chatbot-input-area">
-                    <form onSubmit={handleSubmit} className="chatbot-input-form">
-                        <input
-                            type="text"
-                            value={input}
-                            onChange={(e) => setInput(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault()
-                                    handleSubmit(e)
-                                }
-                            }}
-                            placeholder={agent.placeholder}
-                            className="chatbot-input"
-                            disabled={loading}
-                        />
-                        <button
-                            type="submit"
-                            disabled={loading || !input.trim()}
-                            className="chatbot-send-btn"
-                        >
-                            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                            </svg>
-                        </button>
-                    </form>
+                                                {/* Text content */}
+                                                {!message.status && (
+                                                    message.isRichText ? (
+                                                        <RichTextResponse content={message.content} />
+                                                    ) : (
+                                                        <p>{message.content}</p>
+                                                    )
+                                                )}
+
+                                                {/* Source references */}
+                                                {message.references && message.references.length > 0 && (
+                                                    <SourceReferences references={message.references} />
+                                                )}
+
+                                                {/* Action buttons */}
+                                                {message.actions && message.actions.length > 0 && (
+                                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
+                                                        {message.actions.map(action => (
+                                                            <ActionButton key={action.id} action={action} onClick={() => handleAction(action)} />
+                                                        ))}
+                                                    </div>
+                                                )}
+
+                                                <span className="chatbot-msg-time">
+                                                    {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {loading && (
+                                        <div className="chatbot-msg chatbot-msg-assistant">
+                                            <div className="chatbot-msg-bubble chatbot-msg-bubble-assistant">
+                                                <div className="chatbot-typing">
+                                                    <div className="chatbot-typing-dot" style={{ animationDelay: '0ms' }} />
+                                                    <div className="chatbot-typing-dot" style={{ animationDelay: '150ms' }} />
+                                                    <div className="chatbot-typing-dot" style={{ animationDelay: '300ms' }} />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div ref={messagesEndRef} />
+                                </>
+                            )}
+                        </div>
+
+                        {/* Input */}
+                        <div className="chatbot-input-area">
+                            <form onSubmit={handleSubmit} className="chatbot-input-form">
+                                <input
+                                    type="text"
+                                    value={input}
+                                    onChange={(e) => setInput(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault()
+                                            handleSubmit(e)
+                                        }
+                                    }}
+                                    placeholder={agent.placeholder}
+                                    className="chatbot-input"
+                                    disabled={loading}
+                                />
+                                <button
+                                    type="submit"
+                                    disabled={loading || !input.trim()}
+                                    className="chatbot-send-btn"
+                                >
+                                    <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                    </svg>
+                                </button>
+                            </form>
+                        </div>
+                    </div>
                 </div>
-            </div>
-        </div>
+            )}
+        </>
     )
 }
+

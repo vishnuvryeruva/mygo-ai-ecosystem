@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import SyncSourceModal from '@/components/modals/SyncSourceModal'
 
 interface Agent {
     id: string
@@ -164,6 +165,7 @@ const categoryIcons: Record<string, React.ReactNode> = {
 export default function AgentBuilderPage({ onAgentSelect }: AgentBuilderPageProps) {
     const [activeCategory, setActiveCategory] = useState<string>('all')
     const [searchQuery, setSearchQuery] = useState('')
+    const [showSyncModal, setShowSyncModal] = useState(false)
 
     const categories = ['all', 'knowledge', 'generation', 'analysis']
 
@@ -259,7 +261,16 @@ export default function AgentBuilderPage({ onAgentSelect }: AgentBuilderPageProp
                                 {categoryIcons[agent.category]} {categoryLabels[agent.category]}
                             </span>
                             <button
-                                onClick={() => onAgentSelect(agent.id)}
+                                type="button"
+                                onClick={(e) => {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                    if (agent.id.trim() === 'sync-documents') {
+                                        setShowSyncModal(true)
+                                    } else {
+                                        onAgentSelect(agent.id)
+                                    }
+                                }}
                                 className="agent-card-launch"
                                 style={{ background: agent.color }}
                                 disabled={agent.status === 'coming-soon'}
@@ -270,6 +281,11 @@ export default function AgentBuilderPage({ onAgentSelect }: AgentBuilderPageProp
                     </div>
                 ))}
             </div>
+
+            <SyncSourceModal
+                isOpen={showSyncModal}
+                onClose={() => setShowSyncModal(false)}
+            />
         </div>
     )
 }
