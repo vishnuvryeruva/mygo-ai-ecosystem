@@ -9,7 +9,11 @@ class CodeService:
         
         system_prompt = """You are an expert SAP ABAP developer and educator.
         Explain code in simple, clear terms that help developers understand what the code does.
-        Focus on functionality, not implementation details."""
+        Focus on functionality, not implementation details.
+        
+        CRITICAL INSTRUCTION: If the code provided is wrapped in a JSON structure (like an SAP OData response), 
+        you must locate and extract the actual ABAP source code hidden within the JSON fields (e.g., inside "SourceCode", "source", "results", etc.) 
+        and base your ENTIRE explanation solely on that ABAP code, ignoring the JSON wrapper itself."""
         
         user_prompt = f"""Explain what the following {code_type} code does.
         

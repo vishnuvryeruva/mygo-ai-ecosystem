@@ -19,9 +19,10 @@ export default function CodeRepositoryPage() {
     const [fetchedRecords, setFetchedRecords] = useState<any[]>([])
     const [selectedRecords, setSelectedRecords] = useState<Set<string>>(new Set())
     const [previewRecord, setPreviewRecord] = useState<any>(null)
-    const [advisorQuery, setAdvisorQuery] = useState('')
-    const [advisorResponse, setAdvisorResponse] = useState('')
     const [isAdvising, setIsAdvising] = useState(false)
+    const [showExplainPopup, setShowExplainPopup] = useState(false)
+    const [explainResponse, setExplainResponse] = useState('')
+    const [fetchedRawCode, setFetchedRawCode] = useState('')
     const [viewMode, setViewMode] = useState<'table' | 'json'>('table')
 
     // Toast State
@@ -95,71 +96,82 @@ export default function CodeRepositoryPage() {
         }
     }
 
-    const handleAskAgent = async () => {
-        if (!advisorQuery) return
+    const handleExplainCode = async () => {
         setIsAdvising(true)
-        setAdvisorResponse('')
+        setExplainResponse('')
+        setShowExplainPopup(true)
         try {
             const selectedItems = fetchedRecords.filter(r => selectedRecords.has(r.id))
 
-            // 1. Fetch actual source code for each selected object
-            const codeContents: string[] = []
+            const codeContents: any[] = []
 
             for (const item of selectedItems) {
                 // Determine the correct object name field from raw data
                 const objName = item.rawData.Objname || item.rawData.ObjectName || item.rawData.name || item.rawData.Object
+                const objType = item.rawData.Objtype || item.rawData.ObjectType || item.rawData.type || item.rawData.Type
                 if (!objName) continue
 
                 try {
                     setToastMessage({ text: `Fetching source for ${objName}...`, type: 'success' })
+
+                    let filterQuery = ''
+                    if (objType) {
+                        filterQuery = `ObjectType eq '${objType}' and ObjectName eq '${objName}'`
+                    } else {
+                        filterQuery = `ObjectName eq '${objName}'`
+                    }
+
                     const res = await axios.get(`/api/btp/${selectedSourceId}/fetch-code`, {
                         params: {
                             entity_set: 'sourcecodeSet',
-                            filter_query: `Objname eq '${objName}'`,
+                            filter_query: filterQuery,
                             top: '1000'
                         }
                     })
 
-                    // Extract code lines from the response
-                    let lines: any[] = []
+                    // Get the exact raw JSON from the source code set
                     const responseData = res.data.data
-                    if (Array.isArray(responseData)) lines = responseData
-                    else if (responseData?.value && Array.isArray(responseData.value)) lines = responseData.value
-                    else if (responseData?.d?.results && Array.isArray(responseData.d.results)) lines = responseData.d.results
+                    codeContents.push({
+                        object_name: objName,
+                        object_type: objType,
+                        raw_sourcecode_response: responseData
+                    })
 
-                    // Join the code lines (assuming SAP returns objects with 'Line' or 'Content' fields)
-                    const fullCode = lines.map(line => line.Line || line.Content || line.Linecontent || JSON.stringify(line)).join('\n')
-                    if (fullCode.trim()) {
-                        codeContents.push(`--- OBJECT: ${objName} ---\n${fullCode}`)
-                    }
                 } catch (fetchErr) {
                     console.error(`Failed to fetch code for ${objName}:`, fetchErr)
                 }
             }
 
             if (codeContents.length === 0) {
-                setAdvisorResponse('Could not retrieve any source code for the selected objects. Please ensure "sourcecodeSet" is available.')
+                setExplainResponse('Could not retrieve any source code.')
                 setIsAdvising(false)
                 return
             }
 
-            const promptContext = codeContents.join('\n\n')
+            let rawJsonString = ''
+            if (codeContents.length === 1) {
+                rawJsonString = JSON.stringify(codeContents[0].raw_sourcecode_response, null, 2)
+            } else {
+                rawJsonString = JSON.stringify(codeContents, null, 2)
+            }
+            setFetchedRawCode(rawJsonString)
 
-            // 2. Call the AI Explainer with the actual code
             setToastMessage({ text: `Analyzing code with AI...`, type: 'success' })
-            const res = await axios.post('/api/explain-code', {
-                code: promptContext,
-                code_type: 'ABAP',
+
+            // Post the raw json directly to our explanation endpoint
+            const aiRes = await axios.post('/api/explain-code', {
+                code: rawJsonString,
+                code_type: 'JSON (Raw Source Code)',
                 program_name: selectedItems.length === 1 ? selectedItems[0].name : 'Multiple Objects'
             })
 
-            setAdvisorResponse(res.data.explanation || JSON.stringify(res.data))
+            setExplainResponse(aiRes.data.explanation || JSON.stringify(aiRes.data))
             setToastMessage({ text: `Analysis complete!`, type: 'success' })
             setTimeout(() => setToastMessage(null), 3000)
-        } catch (err: any) {
+        } catch (err) {
             console.error(err)
-            setAdvisorResponse('Error communicating with AI Agent.')
-            setToastMessage({ text: 'AI analysis failed', type: 'error' })
+            setExplainResponse('Failed to prepare code for explanation or communicate with AI Agent.')
+            setToastMessage({ text: 'AI explanation failed', type: 'error' })
             setTimeout(() => setToastMessage(null), 5000)
         } finally {
             setIsAdvising(false)
@@ -352,36 +364,27 @@ export default function CodeRepositoryPage() {
 
             {/* AI Agent Interaction */}
             {selectedRecords.size > 0 && (
-                <div className="mt-8 bg-white border border-slate-200 rounded-xl p-6 shadow-sm mb-8">
-                    <div className="flex items-center gap-3 mb-4">
-                        <div className="w-8 h-8 rounded bg-blue-100 flex items-center justify-center text-blue-600">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+                <div className="mt-8 bg-white border border-slate-200 rounded-xl p-6 shadow-sm mb-8 flex justify-between items-center">
+                    <div>
+                        <div className="flex items-center gap-3 mb-2">
+                            <div className="w-8 h-8 rounded bg-blue-100 flex items-center justify-center text-blue-600">
+                                <span className="text-xl">💻</span>
+                            </div>
+                            <h2 className="text-lg font-bold text-slate-800">AI Code Explanation</h2>
                         </div>
-                        <h2 className="text-lg font-bold text-slate-800">AI Code Agent</h2>
+                        <p className="text-sm text-slate-600">
+                            {selectedRecords.size} record(s) selected.
+                        </p>
                     </div>
-                    <p className="text-sm text-slate-600 mb-4">
-                        {selectedRecords.size} record(s) selected for analysis.
-                    </p>
-                    <textarea
-                        className="w-full border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:blue-500 focus:outline-none mb-3"
-                        rows={3}
-                        placeholder="Ask the AI agent about the selected data (e.g., 'What does this class do?' or 'Summarize these objects')"
-                        value={advisorQuery}
-                        onChange={(e) => setAdvisorQuery(e.target.value)}
-                    />
-                    <button
-                        className="btn btn-primary px-4 py-2 rounded-lg text-sm font-medium"
-                        onClick={handleAskAgent}
-                        disabled={isAdvising || !advisorQuery}
-                    >
-                        {isAdvising ? 'Agent is analyzing...' : 'Ask AI Agent'}
-                    </button>
-                    {advisorResponse && (
-                        <div className="mt-4 p-4 bg-slate-800 rounded-lg text-sm text-emerald-400 whitespace-pre-wrap font-mono relative overflow-x-auto shadow-inner">
-                            <div className="absolute top-2 right-2 text-xs text-slate-500">AI Response</div>
-                            {advisorResponse}
-                        </div>
-                    )}
+                    <div>
+                        <button
+                            className="btn btn-primary px-6 py-3 rounded-lg text-sm font-medium flex items-center gap-2 shadow-lg hover:shadow-xl transition-all"
+                            onClick={handleExplainCode}
+                            disabled={isAdvising}
+                        >
+                            {isAdvising ? 'Explaining...' : 'Explain Code'}
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -402,6 +405,45 @@ export default function CodeRepositoryPage() {
                             <pre className="text-sm font-mono text-emerald-400">
                                 {JSON.stringify(previewRecord.rawData, null, 2)}
                             </pre>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showExplainPopup && (
+                <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4" onClick={() => setShowExplainPopup(false)}>
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 rounded-t-xl">
+                            <div className="flex items-center gap-2">
+                                <span className="text-2xl">💻</span>
+                                <h3 className="font-bold text-lg text-slate-800">AI Code Explanation</h3>
+                            </div>
+                            <button onClick={() => setShowExplainPopup(false)} className="text-slate-400 hover:text-slate-700">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                            </button>
+                        </div>
+                        <div className="p-6 overflow-auto flex-1 bg-slate-50 rounded-b-xl relative flex flex-col gap-6">
+                            {fetchedRawCode && (
+                                <div className="border border-slate-200 rounded-lg overflow-hidden flex flex-col flex-shrink-0" style={{ maxHeight: '40vh' }}>
+                                    <div className="bg-slate-800 text-slate-300 text-xs font-mono p-2 flex justify-between items-center">
+                                        <span>Raw Source Code Received</span>
+                                    </div>
+                                    <div className="p-4 bg-slate-900 overflow-auto flex-1">
+                                        <pre className="text-emerald-400 text-xs font-mono">{fetchedRawCode}</pre>
+                                    </div>
+                                </div>
+                            )}
+
+                            {isAdvising ? (
+                                <div className="flex flex-col items-center justify-center py-20 flex-shrink-0">
+                                    <div className="animate-spin h-10 w-10 border-4 border-emerald-500 rounded-full border-t-transparent mb-4"></div>
+                                    <p className="text-slate-600 font-medium">Analyzing source code...</p>
+                                </div>
+                            ) : (
+                                <div className="prose max-w-none text-slate-700 whitespace-pre-wrap font-sans bg-white p-6 rounded-lg border border-slate-200 shadow-sm flex-shrink-0">
+                                    {explainResponse}
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
