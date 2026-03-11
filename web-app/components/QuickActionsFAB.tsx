@@ -49,6 +49,11 @@ const fabIcons: Record<string, React.ReactNode> = {
             <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
         </svg>
     ),
+    'sync-sources': (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0891b2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" /><path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+        </svg>
+    ),
 }
 
 export default function QuickActionsFAB({ onAction, activeAgent }: QuickActionsFABProps) {
@@ -74,6 +79,7 @@ export default function QuickActionsFAB({ onAction, activeAgent }: QuickActionsF
         { id: 'prompt-generator', label: 'Prompt Gen' },
         { id: 'explain-code', label: 'Explain Code' },
         { id: 'document-upload', label: 'Upload Docs' },
+        { id: 'sync-sources', label: 'Sync Sources' },
     ]
 
     return (
