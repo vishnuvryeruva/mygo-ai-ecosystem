@@ -2161,7 +2161,7 @@ body {
 }
 
 .fab-menu-closed {
-  opacity: 0;
+  display: none;
   transform: translateY(12px);
   pointer-events: none;
 }

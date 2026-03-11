@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import axios from 'axios'
 import RichTextResponse from '../RichTextResponse'
 
@@ -20,7 +20,13 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
 
   // Conversational refinement state
   const [refinementInput, setRefinementInput] = useState('')
-  const [refinementHistory, setRefinementHistory] = useState<{ role: 'user' | 'assistant', content: string }[]>([])
+  const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'assistant', content: string }[]>([])
+  const chatEndRef = useRef<HTMLDivElement>(null)
+
+  // Auto-scroll to bottom when chat history updates
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chatHistory])
 
   // Code generation state
   const [generatedCode, setGeneratedCode] = useState('')
@@ -33,7 +39,7 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
     if (!taskDescription.trim()) return
 
     setLoading(true)
-    setRefinementHistory([])
+    setChatHistory([])
     setGeneratedCode('')
     setCodeExplanation('')
 
@@ -43,7 +49,10 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
         task: taskDescription,
         context
       })
-      setPrompt(response.data.prompt)
+      const generatedPrompt = response.data.prompt
+      setPrompt(generatedPrompt)
+      // Add initial prompt to chat history
+      setChatHistory([{ role: 'assistant', content: generatedPrompt }])
       setCurrentStep('refine')
     } catch (error) {
       console.error('Error generating prompt:', error)
@@ -59,7 +68,8 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
 
     const userRequest = refinementInput.trim()
     setRefinementInput('')
-    setRefinementHistory(prev => [...prev, { role: 'user', content: userRequest }])
+    // Add user message to chat history
+    setChatHistory(prev => [...prev, { role: 'user', content: userRequest }])
     setLoading(true)
 
     try {
@@ -69,14 +79,16 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
         context
       })
 
-      setPrompt(response.data.prompt)
-      setRefinementHistory(prev => [...prev, {
+      const newPrompt = response.data.prompt
+      setPrompt(newPrompt)
+      // Add new prompt to chat history
+      setChatHistory(prev => [...prev, {
         role: 'assistant',
-        content: 'I\'ve updated the prompt based on your feedback.'
+        content: newPrompt
       }])
     } catch (error) {
       console.error('Error refining prompt:', error)
-      setRefinementHistory(prev => [...prev, {
+      setChatHistory(prev => [...prev, {
         role: 'assistant',
         content: 'Error refining prompt. Please try again.'
       }])
@@ -148,7 +160,7 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
   const handleStartOver = () => {
     setCurrentStep('describe')
     setPrompt('')
-    setRefinementHistory([])
+    setChatHistory([])
     setGeneratedCode('')
     setCodeExplanation('')
   }
@@ -296,36 +308,61 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
           {/* ── Step 2: Refine ── */}
           {currentStep === 'refine' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {/* Refinement History */}
-              {refinementHistory.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {refinementHistory.map((msg, index) => (
-                    <div
-                      key={index}
-                      style={{
-                        padding: '10px 14px', borderRadius: '12px', fontSize: '0.85rem',
-                        ...(msg.role === 'user'
-                          ? { background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', marginLeft: '32px' }
-                          : { background: '#f1f5f9', border: '1px solid #e2e8f0', color: '#475569', marginRight: '32px' }
+              {/* Chat History */}
+              <div style={{ 
+                display: 'flex', 
+                flexDirection: 'column', 
+                gap: '12px',
+                maxHeight: '400px',
+                overflowY: 'auto',
+                padding: '4px'
+              }}>
+                {chatHistory.map((msg, index) => (
+                  <div
+                    key={index}
+                    style={{
+                      ...(msg.role === 'user'
+                        ? { 
+                            padding: '10px 14px', 
+                            borderRadius: '12px', 
+                            fontSize: '0.85rem',
+                            background: '#fff7ed', 
+                            border: '1px solid #fed7aa', 
+                            color: '#9a3412', 
+                            marginLeft: '32px',
+                            alignSelf: 'flex-end',
+                            maxWidth: '85%'
+                          }
+                        : { 
+                            padding: '16px',
+                            borderRadius: '12px',
+                            background: '#f8fafc',
+                            border: '1px solid #e2e8f0',
+                            marginRight: '32px',
+                            alignSelf: 'flex-start',
+                            maxWidth: '85%'
+                          }
                         )
-                      }}
-                    >
-                      <strong>{msg.role === 'user' ? 'You: ' : 'Assistant: '}</strong>
-                      {msg.content}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Generated Prompt */}
-              <div className="glass-subtle" style={{ padding: '16px' }}>
-                <RichTextResponse
-                  content={prompt}
-                  title="Generated Prompt"
-                  showCopy={true}
-                  showDownload={false}
-                  collapsible={false}
-                />
+                    }}
+                  >
+                    {msg.role === 'user' ? (
+                      <>
+                        <strong style={{ display: 'block', marginBottom: '4px' }}>You:</strong>
+                        {msg.content}
+                      </>
+                    ) : (
+                      <RichTextResponse
+                        content={msg.content}
+                        title={index === 0 ? "Generated Prompt" : "Refined Prompt"}
+                        showCopy={true}
+                        showDownload={false}
+                        collapsible={false}
+                      />
+                    )}
+                  </div>
+                ))}
+                {/* Auto-scroll anchor */}
+                <div ref={chatEndRef} />
               </div>
 
               {/* Refinement suggestions */}
