@@ -116,7 +116,10 @@ class BTPService:
             if filter_query:
                 clean_filter = filter_query.replace('$filter=', '').strip()
                 if clean_filter:
-                    encoded_filter = clean_filter.replace(' ', '%20')
+                    import urllib.parse
+                    # Encode while keeping some OData-friendly characters literal if possible,
+                    # but quote is generally safest for all special chars.
+                    encoded_filter = urllib.parse.quote(clean_filter)
                     query_params.append(f"$filter={encoded_filter}")
             
             # Handle $skip

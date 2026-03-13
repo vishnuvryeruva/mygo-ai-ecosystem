@@ -1232,16 +1232,34 @@ def view_calm_document(document_id):
 # SAP BTP Code Repository Endpoints
 # ============================================================================
 
-@app.route('/api/btp/<source_id>/fetch-code', methods=['GET'])
+@app.route('/api/btp/<source_id>/fetch-code', methods=['GET', 'POST'])
 def btp_fetch_code(source_id):
     try:
         source = source_config_service.get_source(source_id)
         if not source or source['type'] != 'BTP':
             return jsonify({"error": "Valid BTP Source not found"}), 404
             
+        # Extract parameters from GET or POST
+        if request.method == 'POST':
+            data = request.json or {}
+            entity_set = data.get('entity_set')
+            filter_query = data.get('filter_query')
+            top = data.get('top')
+            skip = data.get('skip')
+        else:
+            entity_set = request.args.get('entity_set')
+            filter_query = request.args.get('filter_query')
+            top = request.args.get('top')
+            skip = request.args.get('skip')
+
         from services.btp_service import BTPService
         service = BTPService(source.get('config', {}))
-        data = service.fetch_data()
+        data = service.fetch_data(
+            entity_set=entity_set,
+            filter_query=filter_query,
+            top=top,
+            skip=skip
+        )
         
         return jsonify({"data": data})
     except Exception as e:
