@@ -178,7 +178,7 @@ const agentConfigs: Record<string, AgentConfig> = {
         ],
         placeholder: 'Paste code for review...',
     },
-    'document-upload': {
+    'sync-sources': {
         id: 'sync-documents',
         name: 'Sync Documents',
         description: 'Sync from Sources',
