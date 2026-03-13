@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
 
     if (!backendRes.ok) {
       const errorText = await backendRes.text()
-      console.error('Backend error:', errorText)
+      console.error('Backend error (GET /api/sources):', errorText)
       return NextResponse.json(
         { error: errorText || 'Failed to fetch sources' },
         { status: backendRes.status }
@@ -20,7 +20,39 @@ export async function GET(req: NextRequest) {
     const data = await backendRes.json()
     return NextResponse.json(data)
   } catch (error) {
-    console.error('Sources proxy error:', error)
+    console.error('Sources proxy error (GET /api/sources):', error)
+    return NextResponse.json(
+      { error: 'Failed to reach backend' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json()
+
+    const backendRes = await fetch(`${BACKEND_URL}/api/sources`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+
+    if (!backendRes.ok) {
+      const errorText = await backendRes.text()
+      console.error('Backend error (POST /api/sources):', errorText)
+      return NextResponse.json(
+        { error: errorText || 'Failed to create source' },
+        { status: backendRes.status }
+      )
+    }
+
+    const data = await backendRes.json()
+    return NextResponse.json(data)
+  } catch (error) {
+    console.error('Sources proxy error (POST /api/sources):', error)
     return NextResponse.json(
       { error: 'Failed to reach backend' },
       { status: 500 }
