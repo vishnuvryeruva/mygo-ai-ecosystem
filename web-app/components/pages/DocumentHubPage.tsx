@@ -145,16 +145,17 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
     }
 
     const openDocumentViewer = async (doc: Document) => {
-        if (!doc.documentId) return
+        const docId = doc.documentId || doc.id
+        if (!docId) return
         setIsLoadingContent(true)
         setViewerDoc({ name: doc.name, content: '' })
         try {
             // Check if this is a test case
-            const isTestCase = doc.type === 'Manual Test Case' || doc.documentTypeCode === 'TEST_CASE'
+            const isTestCase = doc.type === 'Manual Test Case' || (doc as any).documentTypeCode === 'TEST_CASE'
 
             if (isTestCase) {
                 // Fetch test case details
-                const res = await axios.get(`/api/test-cases/${doc.documentId}`)
+                const res = await axios.get(`/api/test-cases/${docId}`)
                 const testCase = res.data
 
                 console.log('Test case data:', testCase)
@@ -274,8 +275,8 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
 
                 setViewerDoc({ name: doc.name, content: html })
             } else {
-                // Regular document
-                const res = await axios.get(`/api/documents/${doc.documentId}/view`)
+                // Regular document (CALM or File Upload)
+                const res = await axios.get(`/api/documents/${encodeURIComponent(docId)}/view`)
                 setViewerDoc({ name: doc.name, content: res.data.content || '' })
             }
         } catch (err: any) {
@@ -442,7 +443,7 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                                             <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
                                             <polyline points="14 2 14 8 20 8" />
                                         </svg>
-                                        {doc.source === 'CALM' && doc.documentId ? (
+                                        {(doc.source === 'CALM' || doc.source === 'File Upload') && (doc.documentId || doc.id) ? (
                                             <button
                                                 onClick={() => openDocumentViewer(doc)}
                                                 className="hover:underline text-left text-blue-600 font-medium"

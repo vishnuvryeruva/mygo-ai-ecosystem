@@ -13,8 +13,8 @@ import ExplainCodeModal from '@/components/modals/ExplainCodeModal'
 import TestCaseGeneratorModal from '@/components/modals/TestCaseGeneratorModal'
 import CodeAdvisorModal from '@/components/modals/CodeAdvisorModal'
 import SettingsModal from '@/components/modals/SettingsModal'
-import DocumentUploadModal from '@/components/modals/DocumentUploadModal'
 import SyncSourceModal from '@/components/modals/SyncSourceModal'
+import FileUploadModal from '@/components/modals/FileUploadModal'
 
 export default function AuthenticatedLayout({
     children,
@@ -110,10 +110,19 @@ export default function AuthenticatedLayout({
 
     const handleQuickAction = (actionId: string) => {
         console.log('handleQuickAction', actionId)
+        
+        // Handle special actions that open modals directly
+        if (actionId === 'document-upload') {
+            setActiveModal('document-upload')
+            return
+        }
+        if (actionId === 'sync-sources') {
+            setSyncSourceModalOpen(true)
+            return
+        }
+        
+        // For other actions, open the chatbot
         handleAgentSelect(actionId)
-        // if (actionId === 'document-upload') {
-        //     router.push('/document-hub')
-        // }
     }
 
     const closeModal = () => {
@@ -190,7 +199,7 @@ export default function AuthenticatedLayout({
             {activeModal === 'prompt-generator' && <PromptGeneratorModal onClose={closeModal} />}
             {activeModal === 'explain-code' && <ExplainCodeModal onClose={closeModal} />}
             {activeModal === 'test-case-generator' && <TestCaseGeneratorModal onClose={closeModal} />}
-            {/* {activeModal === 'document-upload' && <DocumentUploadModal onClose={closeModal} />} */}
+            {activeModal === 'document-upload' && <FileUploadModal onClose={closeModal} />}
             {activeModal === 'code-advisor' && (
                 <CodeAdvisorModal 
                     onClose={closeModal} 

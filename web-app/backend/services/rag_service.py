@@ -266,16 +266,29 @@ class RAGService:
             return {"status": "error", "error": str(e)}
 
     def get_document_html(self, doc_id: str) -> str:
-        """Retrieve the stored HTML content for a CALM document by its document_id."""
+        """Retrieve the stored HTML content for a CALM document by its document_id.
+        For File Upload docs (no html_content), returns concatenated chunk content wrapped in <pre>."""
         conn = get_conn()
         try:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute(
-                    "SELECT html_content FROM documents WHERE document_id = %s AND html_content != '' LIMIT 1",
+                    "SELECT html_content FROM documents WHERE document_id = %s AND html_content != '' AND html_content IS NOT NULL LIMIT 1",
                     (doc_id,)
                 )
                 row = cur.fetchone()
-                return row['html_content'] if row else ''
+                if row and row['html_content']:
+                    return row['html_content']
+                # File Upload docs: no html_content, get chunk text
+                cur.execute(
+                    "SELECT content FROM documents WHERE document_id = %s ORDER BY id",
+                    (doc_id,)
+                )
+                rows = cur.fetchall()
+                if not rows:
+                    return ''
+                import html
+                combined = "\n\n".join(r['content'] or '' for r in rows)
+                return "<pre style='white-space:pre-wrap;font-family:inherit;'>" + html.escape(combined) + "</pre>"
         except Exception as e:
             print(f"Error retrieving html content for {doc_id}: {e}")
             return ''
