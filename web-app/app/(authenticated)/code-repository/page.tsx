@@ -80,6 +80,7 @@ export default function CodeRepositoryPage() {
     const [fetchedRawCode, setFetchedRawCode] = useState('')
     const [viewMode, setViewMode] = useState<'table' | 'json'>('table')
     const [requestedUrl, setRequestedUrl] = useState<string>('')
+    const [activeAgentId, setActiveAgentId] = useState<string>('')
 
     // Toast State
     const [toastMessage, setToastMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null)
@@ -172,17 +173,18 @@ export default function CodeRepositoryPage() {
         }
     }
 
-    const handleExplainCode = async () => {
+    const handleAgentAction = async (agentId: string) => {
         setIsAdvising(true)
         setExplainResponse('')
         setShowExplainPopup(true)
         setFetchedRawCode('')
         setRequestedUrl('')
+        setActiveAgentId(agentId)
 
         try {
             const selectedItems = fetchedRecords.filter(r => selectedRecords.has(r.id))
             if (selectedItems.length === 0) {
-                setExplainResponse('Please select at least one object to explain.')
+                setExplainResponse('Please select at least one object to process.')
                 setIsAdvising(false)
                 return
             }
@@ -191,8 +193,6 @@ export default function CodeRepositoryPage() {
             const token = localStorage.getItem('mygo-token')
 
             for (const item of selectedItems) {
-                // Determine the correct object name and type field from raw data
-                // Patterns: ObjectName/ObjectType, Objname/Objtype, Object/Type
                 const raw = item.rawData
                 const objName = raw.ObjectName || raw.Objname || raw.Object || raw.name
                 const objType = raw.ObjectType || raw.Objtype || raw.Type || raw.type || '-'
@@ -202,20 +202,17 @@ export default function CodeRepositoryPage() {
                 try {
                     setToastMessage({ text: `Fetching source for ${objName}...`, type: 'success' })
 
-                    // Construct the specific OData filter as requested
                     let filterQuery = `ObjectName eq '${objName}'`
                     if (objType && objType !== '-') {
                         filterQuery = `ObjectType eq '${objType}' and ObjectName eq '${objName}'`
                     }
 
-                    // For UI visibility, construct what the expected final URL would look like
                     const source = sources.find(s => s.id === selectedSourceId)
                     const baseUrl = source?.config?.apiEndpoint || ''
                     const rootUrl = getServiceRoot(baseUrl)
                     const displayUrl = `${rootUrl}sourcecodeSet?$filter=${encodeURIComponent(filterQuery)}`
                     setRequestedUrl(displayUrl)
 
-                    // Use POST as requested, passing params in body
                     const res = await axios.post(`/api/btp/${selectedSourceId}/fetch-code`, {
                         entity_set: 'sourcecodeSet',
                         filter_query: filterQuery,
@@ -226,7 +223,6 @@ export default function CodeRepositoryPage() {
                         }
                     })
 
-                    // Get the exact raw JSON from the response
                     const responseData = res.data.data
                     codeContents.push({
                         object_name: objName,
@@ -253,17 +249,91 @@ export default function CodeRepositoryPage() {
             }
             setFetchedRawCode(rawJsonString)
 
-            setToastMessage({ text: `Analyzing with AI Advisor...`, type: 'success' })
+            setToastMessage({ text: `Running AI Agent...`, type: 'success' })
 
-            // Post the raw json directly to our explanation endpoint
-            const aiRes = await axios.post('/api/explain-code', {
+            // Determine endpoint and payload based on agentId
+            let endpoint = '/api/explain-code'
+            let payload: any = {
                 code: rawJsonString,
                 code_type: 'SAP ABAP (Raw JSON Metadata)',
                 program_name: selectedItems.length === 1 ? selectedItems[0].name : 'Multiple Objects'
-            })
+            }
 
-            setExplainResponse(aiRes.data.explanation || 'No explanation generated.')
-            setToastMessage({ text: `Analysis complete!`, type: 'success' })
+            if (agentId === 'spec-assistant') {
+                endpoint = '/api/generate-spec'
+                payload = { 
+                    requirements: `ABAP Object Metadata:\n${rawJsonString}`,
+                    type: 'technical',
+                    format: 'preview'
+                }
+            } else if (agentId === 'test-case-generator') {
+                endpoint = '/api/generate-test-cases'
+                payload = {
+                    code: rawJsonString,
+                    test_type: 'manual',
+                    format: 'preview'
+                }
+            } else if (agentId === 'solution-advisor') {
+                endpoint = '/api/analyze-code'
+                payload = {
+                    code: rawJsonString,
+                    code_type: 'ABAP'
+                }
+            } else if (agentId === 'prompt-generator') {
+                endpoint = '/api/generate-prompt'
+                payload = {
+                    language: 'ABAP',
+                    task: 'Improve or understand this code',
+                    context: rawJsonString
+                }
+            } else if (agentId === 'ask-yoda') {
+                endpoint = '/api/ask-yoda'
+                payload = {
+                    question: 'Analyze this SAP object and explain its business implications and technical logic in a clear way.',
+                    context: rawJsonString
+                }
+            }
+
+            const aiRes = await axios.post(endpoint, payload)
+            
+            // Format response if specialized
+            let finalOutput = ''
+            if (agentId === 'solution-advisor') {
+                const data = aiRes.data
+                finalOutput = `## Code Analysis & Recommendations\n\n### Anti-Patterns Found\n`
+                if (data.anti_patterns?.length) {
+                    data.anti_patterns.forEach((ap: any) => {
+                        finalOutput += `- **${ap.pattern}** (${ap.severity}): ${ap.description}\n  *Suggestion: ${ap.suggestion}*\n`
+                    })
+                } else finalOutput += "_No obvious anti-patterns detected._\n"
+
+                finalOutput += `\n### Suggested Improvements\n`
+                if (data.suggestions?.length) {
+                    data.suggestions.forEach((s: any) => {
+                        finalOutput += `#### ${s.type}\n- **Reason**: ${s.reason}\n- **Suggested**: \`${s.suggested}\`\n`
+                    })
+                }
+
+                finalOutput += `\n### Strategic Roadmap\n`
+                if (data.improvements?.length) {
+                    data.improvements.forEach((i: any) => {
+                        finalOutput += `- [${i.priority}] **${i.category}**: ${i.description}\n`
+                    })
+                }
+            } else if (agentId === 'test-case-generator') {
+                finalOutput = aiRes.data.test_cases || aiRes.data.explanation || 'No test cases generated.'
+            } else if (agentId === 'spec-assistant') {
+                finalOutput = aiRes.data.spec || aiRes.data.explanation || 'No spec generated.'
+            } else if (agentId === 'prompt-generator') {
+                finalOutput = `### Optimized System Prompt\n\n${aiRes.data.prompt}`
+            } else if (agentId === 'ask-yoda') {
+                finalOutput = aiRes.data.answer || aiRes.data.explanation || 'Yoda has no answer today.'
+            } else {
+                finalOutput = aiRes.data.explanation || aiRes.data.answer || JSON.stringify(aiRes.data, null, 2)
+            }
+
+            setExplainResponse(finalOutput)
+            setToastMessage({ text: `Task complete!`, type: 'success' })
             setTimeout(() => setToastMessage(null), 3000)
         } catch (err) {
             console.error(err)
@@ -276,12 +346,11 @@ export default function CodeRepositoryPage() {
     }
 
     const onAgentSelect = (agentId: string) => {
-        if (agentId === 'code-explainer') {
-            handleExplainCode()
-        } else {
-            setToastMessage({ text: `Agent '${agentId}' is not configured for this page yet.`, type: 'error' })
-            setTimeout(() => setToastMessage(null), 3000)
+        if (agentId === 'sync-documents') {
+            handleSync()
+            return
         }
+        handleAgentAction(agentId)
     }
 
     const filteredRecords = fetchedRecords.filter(r => {
@@ -560,7 +629,14 @@ export default function CodeRepositoryPage() {
                                 <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-200">
                                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" /></svg>
                                 </div>
-                                <h3 className="font-extrabold text-xl text-slate-800 tracking-tight">AI Advisor: Code Insights</h3>
+                                <h3 className="font-extrabold text-xl text-slate-800 tracking-tight">
+                                    {activeAgentId === 'spec-assistant' ? 'AI Spec Agent: Technical Design' :
+                                     activeAgentId === 'test-case-generator' ? 'AI Test Agent: Manual Scenarios' :
+                                     activeAgentId === 'solution-advisor' ? 'AI Advisor: SAP Best Practices' :
+                                     activeAgentId === 'ask-yoda' ? 'Ask Yoda: Expert Insights' :
+                                     activeAgentId === 'prompt-generator' ? 'AI Prompt: Prompt Refinement' :
+                                     'AI Advisor: Code Insights'}
+                                </h3>
                             </div>
                             <button onClick={() => setShowExplainPopup(false)} className="w-10 h-10 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-all">
                                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>

@@ -836,7 +836,7 @@ def create_role():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-
+    
 @app.route('/api/roles/<role_id>', methods=['GET'])
 def get_role(role_id):
     """Get a specific role"""
