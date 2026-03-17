@@ -21,6 +21,7 @@ from services.code_service import CodeService
 from services.test_service import TestService
 from services.advisor_service import AdvisorService
 from services.code_repository_service import CodeRepositoryService
+from services.btp_service import BTPService, BtpODataError
 from services import role_service
 from services import user_service
 from config.prompts import get_all_prompts, get_prompt, update_prompt
@@ -129,8 +130,8 @@ def register():
     user_id = str(uuid.uuid4())
     created_at = datetime.datetime.utcnow().isoformat()
     
-    # All users who sign up through the registration flow get Admin role by default
-    role = 'Admin'
+    # Default role for new signups
+    role = 'Viewer'
 
     conn = get_conn()
     try:
@@ -155,21 +156,40 @@ def register():
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
-    # BYPASS LOGIC: Always log the user in as an Admin silently ignoring the input
-    token = create_token('dummy-bypass-id', 'bypass@mygo.com')
+    data = request.json or {}
+    email = (data.get('email') or '').strip().lower()
+    password = data.get('password') or ''
+
+    if not email or not password:
+        return jsonify({'error': 'Email and password are required'}), 400
+
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute('SELECT id, name, email, password_hash, role FROM users WHERE lower(email) = %s', (email,))
+            user = cur.fetchone()
+    finally:
+        conn.close()
+
+    if not user or not bcrypt.checkpw(password.encode('utf-8'), user['password_hash'].encode('utf-8')):
+        return jsonify({'error': 'Invalid email or password'}), 401
+
+    token = create_token(user['id'], user['email'])
     return jsonify({
         'token': token,
-        'user': {'id': 'dummy-bypass-id', 'name': 'Bypass Admin', 'email': 'bypass@mygo.com', 'role': 'Admin'}
-    })
+        'user': {
+            'id': user['id'],
+            'name': user['name'],
+            'email': user['email'],
+            'role': user.get('role') or 'Viewer'
+        }
+    }), 200
 
 
 @app.route('/api/auth/me', methods=['GET'])
 @token_required
 def me():
     payload = request.current_user
-    if payload['sub'] == 'dummy-bypass-id':
-        return jsonify({'id': 'dummy-bypass-id', 'name': 'Bypass Admin', 'email': payload['email'], 'role': 'Admin', 'created_at': datetime.datetime.utcnow().isoformat()})
-
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -747,7 +767,7 @@ def test_new_connection():
     try:
         data = request.json
         from services.calm_service import CALMService
-        from services.btp_service import BTPService
+        from services.btp_service import BTPService, BtpODataError
         
         if data.get('type') == 'CALM':
             # Validate required fields
@@ -1252,7 +1272,6 @@ def btp_fetch_code(source_id):
             top = request.args.get('top')
             skip = request.args.get('skip')
 
-        from services.btp_service import BTPService
         service = BTPService(source.get('config', {}))
         data = service.fetch_data(
             entity_set=entity_set,
@@ -1262,6 +1281,15 @@ def btp_fetch_code(source_id):
         )
         
         return jsonify({"data": data})
+    except BtpODataError as e:
+        import traceback
+        traceback.print_exc()
+        # Propagate the actual BTP status code and error payload to the frontend
+        body = getattr(e, "raw_body", None) or {"message": str(e)}
+        # Ensure JSON-serializable shape
+        if isinstance(body, str):
+            body = {"message": body}
+        return jsonify({"error": body}), getattr(e, "status_code", 500)
     except Exception as e:
         import traceback
         traceback.print_exc()
