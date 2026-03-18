@@ -206,27 +206,44 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                     <button onClick={onClose} className="modal-close">✕</button>
                 </div>
 
-                {/* Progress Steps */}
-                <div className="px-6 py-4 border-b border-[var(--glass-border)] bg-gray-50/50 dark:bg-black/20">
-                    <div className="flex justify-between items-center">
-                        {(['requirements', 'solution', 'search', 'improvise', 'complete'] as Step[]).map((step, index) => (
-                            <div key={step} className="flex items-center">
-                                <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium transition-all ${currentStep === step
-                                    ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-500/30'
-                                    : index < ['requirements', 'solution', 'search', 'improvise', 'complete'].indexOf(currentStep)
-                                        ? 'bg-green-500/10 text-green-500 border border-green-500/20'
-                                        : 'bg-white dark:bg-white/5 text-muted border border-gray-200 dark:border-white/10'
-                                    }`}>
-                                    {index < ['requirements', 'solution', 'search', 'improvise', 'complete'].indexOf(currentStep) ? '✓' : index + 1}
-                                </div>
-                                <span className={`ml-2 text-sm hidden md:inline ${currentStep === step ? 'font-medium text-indigo-400' : 'text-muted'}`}>
-                                    {stepLabels[step]}
-                                </span>
-                                {index < 4 && <div className="w-8 lg:w-12 h-0.5 mx-2 bg-white/10" />}
+                {/* Progress Steps - Stacked: number top, label below */}
+                {(() => {
+                    const steps = ['requirements', 'solution', 'search', 'improvise', 'complete'] as Step[]
+                    const activeIndex = steps.indexOf(currentStep)
+                    return (
+                        <div className="px-6 py-4 border-b border-[var(--glass-border)] flex-shrink-0">
+                            {/* Step circles row */}
+                            <div className="relative flex justify-between items-start">
+                                {/* Progress track background */}
+                                <div className="absolute top-[18px] left-[10%] right-[10%] h-0.5 -translate-y-1/2 bg-gray-200 dark:bg-white/10 rounded-full" />
+                                {/* Progress fill */}
+                                <div
+                                    className="absolute top-[18px] left-[10%] h-0.5 -translate-y-1/2 bg-gradient-to-r from-green-500 via-indigo-400 to-indigo-500 rounded-full transition-all duration-500"
+                                    style={{ width: `${(activeIndex / 4) * 80 + 10}%` }}
+                                />
+                                {steps.map((step, index) => {
+                                    const isActive = currentStep === step
+                                    const isComplete = index < activeIndex
+                                    return (
+                                        <div key={step} className="relative flex flex-1 flex-col items-center min-w-0 z-10">
+                                            <div className={`flex items-center justify-center w-9 h-9 rounded-full text-sm font-semibold transition-all flex-shrink-0 ${isActive
+                                                ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-500/25 ring-2 ring-indigo-400/40'
+                                                : isComplete
+                                                    ? 'bg-green-500/20 text-green-600 dark:text-green-400 border-2 border-green-500/40'
+                                                    : 'bg-white dark:bg-white/10 text-muted border-2 border-gray-200 dark:border-white/20'
+                                                }`}>
+                                                {isComplete ? '✓' : index + 1}
+                                            </div>
+                                            <span className={`mt-2 text-[10px] sm:text-[11px] leading-tight text-center line-clamp-2 px-0.5 min-h-[2rem] flex items-end justify-center ${isActive ? 'font-semibold text-indigo-600 dark:text-indigo-400' : 'text-muted'}`}>
+                                                {stepLabels[step]}
+                                            </span>
+                                        </div>
+                                    )
+                                })}
                             </div>
-                        ))}
-                    </div>
-                </div>
+                        </div>
+                    )
+                })()}
 
                 {/* Chat Messages */}
                 <div className="modal-body space-y-4" style={{ maxHeight: '400px' }}>
