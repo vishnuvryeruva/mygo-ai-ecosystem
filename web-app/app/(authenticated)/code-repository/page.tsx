@@ -72,7 +72,7 @@ export default function CodeRepositoryPage() {
 
     const [rawJsonResponse, setRawJsonResponse] = useState<any>(null)
     const [fetchedRecords, setFetchedRecords] = useState<any[]>([])
-    const [selectedRecords, setSelectedRecords] = useState<Set<string>>(new Set())
+    const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null)
     const [isAdvising, setIsAdvising] = useState(false)
     const [showExplainPopup, setShowExplainPopup] = useState(false)
     const [explainResponse, setExplainResponse] = useState('')
@@ -170,6 +170,7 @@ export default function CodeRepositoryPage() {
             })
 
             setFetchedRecords(mappedRecords)
+            setSelectedRecordId(null)
             // setViewMode('table') // This line was removed as it's not in the new code
             setRawJsonResponse(res.data.data)
             setToastMessage({ text: `Found ${mappedRecords.length} objects.`, type: 'success' })
@@ -193,7 +194,7 @@ export default function CodeRepositoryPage() {
         resetAlmUpload() // Reset CALM state when starting a new action
 
         try {
-            const selectedItems = fetchedRecords.filter(r => selectedRecords.has(r.id))
+            const selectedItems = selectedRecordId ? fetchedRecords.filter(r => r.id === selectedRecordId) : []
             if (selectedItems.length === 0) {
                 setExplainResponse('Please select at least one object to process.')
                 setIsAdvising(false)
@@ -372,19 +373,8 @@ export default function CodeRepositoryPage() {
         return matchesSearch && matchesType && matchesPackage
     })
 
-    const toggleSelectAll = () => {
-        if (selectedRecords.size === filteredRecords.length && filteredRecords.length > 0) {
-            setSelectedRecords(new Set())
-        } else {
-            setSelectedRecords(new Set(filteredRecords.map(r => r.id)))
-        }
-    }
-
-    const toggleRecord = (id: string) => {
-        const next = new Set(selectedRecords)
-        if (next.has(id)) next.delete(id)
-        else next.add(id)
-        setSelectedRecords(next)
+    const selectRecord = (id: string) => {
+        setSelectedRecordId(id)
     }
 
     // Cloud ALM Integration Functions
@@ -607,14 +597,7 @@ export default function CodeRepositoryPage() {
                     <table className="doc-hub-table">
                         <thead>
                             <tr>
-                                <th style={{ width: 40, textAlign: 'center' }}>
-                                    <input 
-                                        type="checkbox" 
-                                        checked={filteredRecords.length > 0 && selectedRecords.size === filteredRecords.length}
-                                        onChange={toggleSelectAll}
-                                        className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                                    />
-                                </th>
+                                <th style={{ width: 40, textAlign: 'center' }}></th>
                                 <th>OBJECT NAME</th>
                                 <th>TYPE</th>
                                 <th>DESCRIPTION</th>
@@ -624,13 +607,14 @@ export default function CodeRepositoryPage() {
                         </thead>
                         <tbody>
                             {filteredRecords.map((record) => (
-                                <tr key={record.id} className={selectedRecords.has(record.id) ? 'bg-emerald-50/30' : ''}>
+                                <tr key={record.id} className={selectedRecordId === record.id ? 'bg-emerald-50/30' : ''}>
                                     <td style={{ textAlign: 'center' }}>
                                         <input 
-                                            type="checkbox" 
-                                            checked={selectedRecords.has(record.id)}
-                                            onChange={() => toggleRecord(record.id)}
-                                            className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                            type="radio" 
+                                            name="code-repo-record"
+                                            checked={selectedRecordId === record.id}
+                                            onChange={() => selectRecord(record.id)}
+                                            className="border-slate-300 text-emerald-600 focus:ring-emerald-500"
                                         />
                                     </td>
                                     <td>
