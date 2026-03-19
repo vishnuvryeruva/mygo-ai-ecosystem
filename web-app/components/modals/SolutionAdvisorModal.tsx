@@ -167,19 +167,21 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
         }
     }
 
+    /** Advance to the final stepper step so the user can review the solution before opening Spec Assistant. */
     const handleProceedToSpec = () => {
-        setCurrentStep('complete')
         const solutionContext = finalSolution || generatedSolution
         setFinalSolution(solutionContext)
+        setCurrentStep('complete')
         setMessages(prev => [...prev, {
             role: 'assistant',
-            content: "Your solution is ready! Click 'Create Functional Spec' to generate a detailed specification document based on this solution."
+            content: "Your solution is ready for review. Check the summary above, then click 'Create Functional Spec' to open the Spec Assistant—you can refine the spec or upload to Cloud ALM there."
         }])
     }
 
     const handleCreateFunctionalSpec = () => {
         if (onCreateSpec) {
             onCreateSpec(finalSolution || generatedSolution)
+            return
         }
         onClose()
     }

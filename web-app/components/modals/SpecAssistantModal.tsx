@@ -37,12 +37,57 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
   const [almError, setAlmError] = useState('')
   const [almSuccessDoc, setAlmSuccessDoc] = useState<any>(null)
 
-  // Check for context from Solution Advisor
+  // Handoff from Solution Advisor: pre-fill requirements and optionally auto-generate into refinement mode.
+  // Session keys for auto-generate must stay until success: React Strict Mode remounts the effect once; if we
+  // clear storage synchronously, the second run sees nothing and the first request's completion is skipped
+  // (cancelled) without ever calling setLoading(false), leaving the UI stuck on "Generating...".
   useEffect(() => {
     const context = sessionStorage.getItem('solutionAdvisorContext')
-    if (context) {
-      setRequirements(context)
+    const autoGenerate = sessionStorage.getItem('specAssistantAutoGenerate') === '1'
+
+    if (!context?.trim()) return
+
+    setRequirements(context)
+
+    if (!autoGenerate) {
       sessionStorage.removeItem('solutionAdvisorContext')
+      return
+    }
+
+    setLoading(true)
+    setSpecContent('')
+    setRefinementMode(false)
+    setRefinementHistory([])
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const response = await axios.post('/api/generate-spec', {
+          type: 'functional',
+          requirements: context,
+          format: 'preview'
+        })
+        if (!cancelled) {
+          setSpecContent(response.data?.spec ?? '')
+          setRefinementMode(true)
+          sessionStorage.removeItem('solutionAdvisorContext')
+          sessionStorage.removeItem('specAssistantAutoGenerate')
+        }
+      } catch (error) {
+        console.error('Error generating specification:', error)
+        if (!cancelled) {
+          alert('Error generating specification. You can edit requirements and click Generate Specification.')
+          sessionStorage.removeItem('solutionAdvisorContext')
+          sessionStorage.removeItem('specAssistantAutoGenerate')
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      setLoading(false)
     }
   }, [])
 
