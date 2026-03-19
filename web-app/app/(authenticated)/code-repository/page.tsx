@@ -62,7 +62,7 @@ export default function CodeRepositoryPage() {
     const [isLoading, setIsLoading] = useState(false)
 
     // OData Filter State
-    const [entitySet, setEntitySet] = useState('ObjlistSet') // Default for this view
+    const [entitySet, setEntitySet] = useState('') // Blank by default as requested
     const [filterQuery, setFilterQuery] = useState('')
     const [top, setTop] = useState('100')
     const [skip, setSkip] = useState('0')
@@ -73,7 +73,6 @@ export default function CodeRepositoryPage() {
     const [rawJsonResponse, setRawJsonResponse] = useState<any>(null)
     const [fetchedRecords, setFetchedRecords] = useState<any[]>([])
     const [selectedRecords, setSelectedRecords] = useState<Set<string>>(new Set())
-    const [previewRecord, setPreviewRecord] = useState<any>(null)
     const [isAdvising, setIsAdvising] = useState(false)
     const [showExplainPopup, setShowExplainPopup] = useState(false)
     const [explainResponse, setExplainResponse] = useState('')
@@ -84,6 +83,17 @@ export default function CodeRepositoryPage() {
 
     // Toast State
     const [toastMessage, setToastMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null)
+
+    // Cloud ALM push state
+    const [almUploadStep, setAlmUploadStep] = useState<'idle' | 'form' | 'uploading' | 'success' | 'error'>('idle')
+    const [almSources, setAlmSources] = useState<any[]>([])
+    const [almSelectedSource, setAlmSelectedSource] = useState('')
+    const [almProjects, setAlmProjects] = useState<any[]>([])
+    const [almSelectedProject, setAlmSelectedProject] = useState('')
+    const [almDocName, setAlmDocName] = useState('')
+    const [almLoadingStep, setAlmLoadingStep] = useState('')
+    const [almError, setAlmError] = useState('')
+    const [almSuccessDoc, setAlmSuccessDoc] = useState<any>(null)
 
     useEffect(() => {
         fetchSources()
@@ -180,6 +190,7 @@ export default function CodeRepositoryPage() {
         setFetchedRawCode('')
         setRequestedUrl('')
         setActiveAgentId(agentId)
+        resetAlmUpload() // Reset CALM state when starting a new action
 
         try {
             const selectedItems = fetchedRecords.filter(r => selectedRecords.has(r.id))
@@ -376,104 +387,186 @@ export default function CodeRepositoryPage() {
         setSelectedRecords(next)
     }
 
+    // Cloud ALM Integration Functions
+    const handleOpenAlmUpload = async () => {
+        setAlmUploadStep('form')
+        setAlmError('')
+        setAlmDocName(`${activeAgentId === 'spec-assistant' ? 'Technical' : 'AI'} Specification - ${new Date().toLocaleDateString()}`)
+        setAlmLoadingStep('sources')
+        try {
+            const res = await axios.get('/api/sources')
+            const calmSources = (res.data.sources || []).filter((s: any) => s.type === 'CALM')
+            setAlmSources(calmSources)
+            if (calmSources.length === 1) {
+                setAlmSelectedSource(calmSources[0].id)
+                await loadAlmProjects(calmSources[0].id)
+            }
+        } catch {
+            setAlmError('Failed to load Cloud ALM sources.')
+        } finally {
+            setAlmLoadingStep('')
+        }
+    }
+
+    const loadAlmProjects = async (sourceId: string) => {
+        setAlmLoadingStep('projects')
+        setAlmProjects([])
+        setAlmSelectedProject('')
+        try {
+            const res = await axios.get(`/api/calm/${sourceId}/projects`)
+            setAlmProjects(res.data.projects || [])
+        } catch {
+            setAlmError('Failed to load projects.')
+        } finally {
+            setAlmLoadingStep('')
+        }
+    }
+
+    const handleAlmUpload = async () => {
+        if (!almSelectedSource || !almSelectedProject || !almDocName.trim()) return
+        setAlmUploadStep('uploading')
+        setAlmError('')
+        try {
+            await axios.post(`/api/calm/${almSelectedSource}/push-spec`, {
+                name: almDocName.trim(),
+                content: explainResponse,
+                projectId: almSelectedProject,
+                documentType: 'technical_spec'
+            })
+            setAlmSuccessDoc({ name: almDocName.trim() })
+            setAlmUploadStep('success')
+        } catch (err: any) {
+            setAlmError(err?.response?.data?.error || 'Failed to upload to Cloud ALM.')
+            setAlmUploadStep('error')
+        }
+    }
+
+    const resetAlmUpload = () => {
+        setAlmUploadStep('idle')
+        setAlmSources([])
+        setAlmSelectedSource('')
+        setAlmProjects([])
+        setAlmSelectedProject('')
+        setAlmDocName('')
+        setAlmError('')
+        setAlmSuccessDoc(null)
+        setAlmLoadingStep('')
+    }
+
     return (
         <div className="doc-hub-page scrollbar-hide">
-            {/* Page Header */}
-            <div className="doc-hub-header">
-                <div className="doc-hub-header-left">
-                    <div className="doc-hub-icon">
-                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#034354" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            {/* Page Header - BEAUTIFIED & STICKY */}
+            <div className="doc-hub-header sticky top-0 z-40 bg-[#f8fafc]/95 backdrop-blur-md border-b border-slate-200 px-10 py-5 -mx-10 -mt-8 mb-8 flex items-center justify-between transition-all duration-300">
+                <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-teal-500/10 flex items-center justify-center border border-emerald-100 shadow-sm">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <polyline points="16 18 22 12 16 6" />
                             <polyline points="8 6 2 12 8 18" />
-                            <line x1="12" y1="2" x2="12" y2="22" strokeDasharray="2 2" />
+                            <line x1="12" y1="2" x2="12" y2="22" strokeDasharray="3 3" />
                         </svg>
                     </div>
                     <div>
-                        <h1 className="doc-hub-title">Custom SAP Development Objects</h1>
-                        <p className="doc-hub-subtitle">
-                            Package: <span className="text-emerald-600 font-semibold">{packageFilter || 'All'}</span>
-                        </p>
+                        <h1 className="text-2xl font-extrabold text-[#034354] tracking-tight leading-none mb-1">SAP BTP Code Repository</h1>
+                        <div className="flex items-center gap-2">
+                            <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                            <p className="text-[13px] font-medium text-slate-500">
+                                Source: <span className="text-emerald-700 font-bold">{sources.find(s => s.id === selectedSourceId)?.name || 'Not Selected'}</span>
+                            </p>
+                        </div>
                     </div>
                 </div>
-                <div className="flex gap-3">
-                    <button className="top-header-btn bg-white border border-slate-200" onClick={() => setViewMode(viewMode === 'table' ? 'json' : 'table')}>
-                        <span className="text-xs font-bold uppercase">{viewMode === 'table' ? '{}' : 'T'}</span>
+                <div className="flex items-center gap-3">
+                    <button 
+                        className="flex items-center gap-2 px-5 py-2.5 bg-[#059669] hover:bg-[#047857] text-white rounded-xl font-bold text-[13px] transition-all shadow-lg shadow-emerald-200/50 hover:shadow-emerald-300/60 active:scale-95 disabled:opacity-50" 
+                        onClick={handleSync} 
+                        disabled={isLoading}
+                    >
+                        {isLoading ? (
+                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        ) : (
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                                <path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                            </svg>
+                        )}
+                        FETCH CODE
                     </button>
+                    <button 
+                        className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-slate-500 hover:text-emerald-600 hover:border-emerald-200 transition-all hover:shadow-sm" 
+                        title="Toggle View Mode" 
+                        onClick={() => setViewMode(viewMode === 'table' ? 'json' : 'table')}
+                    >
+                        <span className="text-[11px] font-black uppercase tracking-tighter">{viewMode === 'table' ? '{...}' : 'T'}</span>
+                    </button>
+                    <div className="h-8 w-[1px] bg-slate-200 mx-1"></div>
                     <AIAgentsDropdown onAgentSelect={onAgentSelect} />
                 </div>
             </div>
 
-            {/* OData Configuration Panel (Same as previous flow) */}
-            <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm mb-6">
-                <div className="flex items-center justify-between mb-4 border-b border-slate-50 pb-3">
-                    <h2 className="text-xs font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                        OData Request Configuration
-                    </h2>
-                    <div className="flex gap-2">
-                        <button 
-                            className={`px-3 py-1 text-[10px] font-bold rounded transition-all ${viewMode === 'table' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                            onClick={() => setViewMode('table')}
-                        >
-                            TABLE
-                        </button>
-                        <button 
-                            className={`px-3 py-1 text-[10px] font-bold rounded transition-all ${viewMode === 'json' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                            onClick={() => setViewMode('json')}
-                        >
-                            RAW JSON
-                        </button>
-                    </div>
+            {/* Combined Filter Bar - PREMIUM MINIMAL TOOLBAR */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm mb-8 flex flex-wrap items-center gap-5">
+                <div className="flex items-center gap-3">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">BTP SOURCE</label>
+                    <select 
+                        className="bg-slate-50 border border-slate-100 rounded-xl py-2 px-3 text-xs font-bold text-[#034354] outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all w-40 cursor-pointer"
+                        value={selectedSourceId}
+                        onChange={(e) => setSelectedSourceId(e.target.value)}
+                    >
+                        <option value="">Select Instance</option>
+                        {sources.map(s => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                    </select>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                    <div className="flex flex-col gap-1.5">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">BTP Source</label>
-                        <select 
-                            className="bg-slate-50 border border-slate-200 rounded-lg py-2 px-3 text-sm outline-none focus:border-emerald-500 transition-colors"
-                            value={selectedSourceId}
-                            onChange={(e) => setSelectedSourceId(e.target.value)}
-                        >
-                            <option value="">Select BTP Source</option>
-                            {sources.map(s => (
-                                <option key={s.id} value={s.id}>{s.name}</option>
-                            ))}
-                        </select>
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Entity Set</label>
+                <div className="flex items-center gap-3">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">ENTITY SET</label>
+                    <input 
+                        className="bg-slate-50 border border-slate-100 rounded-xl py-2 px-3 text-xs font-bold text-[#034354] outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all w-32"
+                        placeholder="ObjlistSet"
+                        value={entitySet}
+                        onChange={(e) => setEntitySet(e.target.value)}
+                    />
+                </div>
+
+                <div className="flex items-center gap-3 flex-1 min-w-[200px]">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">ODATA FILTER</label>
+                    <div className="relative w-full">
                         <input 
-                            className="bg-slate-50 border border-slate-200 rounded-lg py-2 px-3 text-sm outline-none focus:border-emerald-500 transition-colors"
-                            placeholder="e.g. ObjlistSet"
-                            value={entitySet}
-                            onChange={(e) => setEntitySet(e.target.value)}
-                        />
-                    </div>
-                    <div className="flex flex-col gap-1.5 md:col-span-2">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">OData $filter</label>
-                        <input 
-                            className="bg-slate-50 border border-slate-200 rounded-lg py-2 px-3 text-sm outline-none focus:border-emerald-500 transition-colors"
+                            className="w-full bg-slate-50 border border-slate-100 rounded-xl py-2 px-3 text-xs font-medium text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                             placeholder="e.g. ObjectType eq 'CLAS'"
                             value={filterQuery}
                             onChange={(e) => setFilterQuery(e.target.value)}
                         />
                     </div>
-                    <div className="flex flex-col gap-1.5">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">$top (limit)</label>
+                </div>
+
+                <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">TOP</span>
                         <input 
                             type="number"
-                            className="bg-slate-50 border border-slate-200 rounded-lg py-2 px-3 text-sm outline-none focus:border-emerald-500 transition-colors"
+                            className="bg-slate-50 border border-slate-100 rounded-xl py-2 px-3 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all w-16"
                             value={top}
                             onChange={(e) => setTop(e.target.value)}
                         />
                     </div>
-                    <div className="flex flex-col gap-1.5">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">$skip (offset)</label>
+                </div>
+
+                <div className="h-6 w-[1px] bg-slate-100 mx-1 hidden lg:block"></div>
+
+                <div className="flex items-center gap-3">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">LOCAL</label>
+                    <div className="flex items-center bg-slate-50 border border-slate-100 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500/20 focus-within:border-emerald-500 transition-all">
+                        <div className="pl-3 text-slate-400">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        </div>
                         <input 
-                            type="number"
-                            className="bg-slate-50 border border-slate-200 rounded-lg py-2 px-3 text-sm outline-none focus:border-emerald-500 transition-colors"
-                            value={skip}
-                            onChange={(e) => setSkip(e.target.value)}
+                            type="text"
+                            className="bg-transparent border-none py-2 px-3 text-xs outline-none w-40"
+                            placeholder="Search current..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
                         />
                     </div>
                 </div>
@@ -497,49 +590,7 @@ export default function CodeRepositoryPage() {
                 </div>
             </div>
 
-            {/* Local Search & Table Filters bar */}
-            <div className="doc-hub-filters">
-                <div className="doc-hub-filter-label">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-                    </svg>
-                    <span>LOCAL RESULTS FILTER</span>
-                </div>
-                
-                <select 
-                    className="doc-hub-filter-select" 
-                    value={typeFilter} 
-                    onChange={(e) => setTypeFilter(e.target.value)}
-                >
-                    <option value="All Types">Object Type</option>
-                    {Array.from(new Set(fetchedRecords.map(r => r.type))).sort().map(t => (
-                        <option key={t} value={t}>{t}</option>
-                    ))}
-                </select>
 
-                <div className="relative">
-                    <input 
-                        type="text"
-                        placeholder="Package (Local Search)"
-                        className="doc-hub-filter-select pr-4"
-                        value={packageFilter}
-                        onChange={(e) => setPackageFilter(e.target.value)}
-                    />
-                </div>
-
-                <div className="relative flex-1 max-w-md ml-4">
-                    <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-slate-400">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                    </div>
-                    <input 
-                        type="text"
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 pl-10 pr-4 text-sm outline-none focus:border-emerald-500 transition-colors"
-                        placeholder="Search in current results..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                    />
-                </div>
-            </div>
 
             <p className="doc-hub-count mb-4">
                 <span className="doc-hub-count-num">{filteredRecords.length}</span> objects found
@@ -583,12 +634,9 @@ export default function CodeRepositoryPage() {
                                         />
                                     </td>
                                     <td>
-                                        <button 
-                                            onClick={() => setPreviewRecord(record)}
-                                            className="font-bold text-slate-800 hover:text-emerald-600 transition-colors tracking-tight"
-                                        >
+                                        <span className="font-bold text-slate-800 tracking-tight">
                                             {record.name}
-                                        </button>
+                                        </span>
                                     </td>
                                     <td>
                                         <div className="flex items-center gap-3">
@@ -655,34 +703,107 @@ export default function CodeRepositoryPage() {
                             </button>
                         </div>
 
-                        <div className="flex-1 overflow-auto bg-slate-50/50 p-8 flex flex-col gap-8 scrollbar-hide">
-                            {/* Requested URL & Raw Source (Visible for testing) */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-shrink-0">
-                                {requestedUrl && (
-                                    <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span> 
-                                            Target BTP Endpoint
-                                        </p>
-                                        <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                                            <p className="text-[11px] font-mono text-slate-600 break-all">{requestedUrl}</p>
+                        <div className="flex-1 overflow-auto bg-slate-50/50 p-8 flex flex-col gap-6 scrollbar-hide">
+                            {/* Push to Cloud ALM Panel (Only for Spec Assistant) */}
+                            {activeAgentId === 'spec-assistant' && !isAdvising && explainResponse && (
+                                <div className="max-w-4xl mx-auto w-full">
+                                    {almUploadStep === 'idle' ? (
+                                        <button
+                                            onClick={handleOpenAlmUpload}
+                                            className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-2xl border-2 border-emerald-500/20 bg-emerald-50 hov:bg-emerald-100 text-emerald-700 transition-all text-sm font-bold shadow-sm"
+                                        >
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                                <polyline points="17 8 12 3 7 8" />
+                                                <line x1="12" y1="3" x2="12" y2="15" />
+                                            </svg>
+                                            PUSH SPEC TO SAP CLOUD ALM
+                                        </button>
+                                    ) : (
+                                        <div className="bg-white border-2 border-emerald-100 rounded-2xl shadow-lg overflow-hidden animate-in slide-in-from-top-4 duration-300">
+                                            <div className="bg-emerald-50 px-6 py-3 border-b border-emerald-100 flex justify-between items-center">
+                                                <h4 className="font-bold text-emerald-800 text-xs uppercase tracking-widest flex items-center gap-2">
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                                                    Push to Cloud ALM
+                                                </h4>
+                                                <button onClick={resetAlmUpload} className="text-emerald-400 hover:text-emerald-600 font-bold p-1">✕</button>
+                                            </div>
+                                            
+                                            <div className="p-6">
+                                                {almUploadStep === 'uploading' ? (
+                                                    <div className="flex flex-col items-center justify-center py-6 gap-3">
+                                                        <div className="animate-spin h-8 w-8 border-4 border-emerald-500 rounded-full border-t-transparent"></div>
+                                                        <span className="text-sm font-medium text-slate-600">Pushing specification to CALM...</span>
+                                                    </div>
+                                                ) : almUploadStep === 'success' ? (
+                                                    <div className="flex flex-col items-center justify-center py-4 gap-3 text-center">
+                                                        <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 text-2xl shadow-inner">✓</div>
+                                                        <p className="text-emerald-800 font-bold">Success!</p>
+                                                        <p className="text-slate-500 text-sm">Specification has been successfully pushed to Cloud ALM.</p>
+                                                        <button onClick={resetAlmUpload} className="mt-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-600 text-xs font-bold transition-all">CLOSE PANEL</button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="space-y-4">
+                                                        {almError && (
+                                                            <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-red-600 text-xs font-medium">
+                                                                {almError}
+                                                            </div>
+                                                        )}
+                                                        
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                            <div>
+                                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Document Name</label>
+                                                                <input 
+                                                                    className="w-full bg-slate-50 border border-slate-100 rounded-xl py-2 px-3 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                                                                    value={almDocName}
+                                                                    onChange={e => setAlmDocName(e.target.value)}
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Target Project</label>
+                                                                <select 
+                                                                    className="w-full bg-slate-50 border border-slate-100 rounded-xl py-2 px-3 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all cursor-pointer"
+                                                                    value={almSelectedProject}
+                                                                    onChange={e => setAlmSelectedProject(e.target.value)}
+                                                                    disabled={almLoadingStep === 'projects'}
+                                                                >
+                                                                    <option value="">Select CALM Project...</option>
+                                                                    {almProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                                                </select>
+                                                            </div>
+                                                        </div>
+
+                                                        {almSources.length > 1 && (
+                                                            <div>
+                                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">CALM Instance</label>
+                                                                <select 
+                                                                    className="w-full bg-slate-50 border border-slate-100 rounded-xl py-2 px-3 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all cursor-pointer"
+                                                                    value={almSelectedSource}
+                                                                    onChange={e => {
+                                                                        setAlmSelectedSource(e.target.value)
+                                                                        if (e.target.value) loadAlmProjects(e.target.value)
+                                                                    }}
+                                                                >
+                                                                    <option value="">Select Instance...</option>
+                                                                    {almSources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                                                </select>
+                                                            </div>
+                                                        )}
+
+                                                        <button 
+                                                            onClick={handleAlmUpload}
+                                                            disabled={!almSelectedProject || !almDocName.trim() || !!almLoadingStep}
+                                                            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold tracking-widest transition-all shadow-lg shadow-emerald-200 disabled:opacity-50 mt-2"
+                                                        >
+                                                            PUSH TO CLOUD ALM
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
-                                    </div>
-                                )}
-                                {fetchedRawCode && (
-                                    <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                                            <span className="w-2 h-2 rounded-full bg-blue-500"></span> 
-                                            Raw Data Context
-                                        </p>
-                                        <div className="bg-slate-900 p-3 rounded-lg border border-slate-800">
-                                            <pre className="text-[10px] font-mono text-emerald-400 max-h-20 overflow-auto scrollbar-hide">
-                                                {fetchedRawCode}
-                                            </pre>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
+                                    )}
+                                </div>
+                            )}
 
                             {/* Main Explanation Block */}
                             <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-8 flex-1 min-h-[400px]">
@@ -717,38 +838,6 @@ export default function CodeRepositoryPage() {
                         
                         <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 text-center">
                             <p className="text-[11px] text-slate-400 font-medium">This analysis is AI-generated and should be verified for mission-critical decisions.</p>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Preview Modal */}
-            {previewRecord && (
-                <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4" onClick={() => setPreviewRecord(null)}>
-                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col border border-slate-200 overflow-hidden" onClick={e => e.stopPropagation()}>
-                        <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-white shadow-sm">
-                            <div className="flex items-center gap-3">
-                                <TypeIcon type={previewRecord.type} />
-                                <div>
-                                    <h3 className="font-bold text-lg text-slate-800 leading-none mb-1">{previewRecord.name}</h3>
-                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none">Metadata Insight</p>
-                                </div>
-                            </div>
-                            <button onClick={() => setPreviewRecord(null)} className="text-slate-400 hover:text-slate-700">
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                            </button>
-                        </div>
-                        <div className="p-0 overflow-auto flex-1 bg-slate-50">
-                            <div className="p-8">
-                                <div className="bg-slate-900 rounded-xl overflow-hidden shadow-inner">
-                                    <div className="bg-slate-800 px-4 py-2 border-b border-slate-700 flex items-center justify-between">
-                                        <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">raw_metada_payload.json</span>
-                                    </div>
-                                    <pre className="p-6 text-sm font-mono text-emerald-400 leading-relaxed overflow-x-auto">
-                                        {JSON.stringify(previewRecord.rawData, null, 2)}
-                                    </pre>
-                                </div>
-                            </div>
                         </div>
                     </div>
                 </div>

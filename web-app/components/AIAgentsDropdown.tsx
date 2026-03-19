@@ -21,8 +21,8 @@ const agents = [
     },
     {
         id: 'sync-documents',
-        title: 'Sync Documents',
-        description: 'Sync documents from all sources',
+        title: 'Fetch Code',
+        description: 'Fetch latest code from BTP sources',
         icon: (
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c2632a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="23 4 23 10 17 10" />
