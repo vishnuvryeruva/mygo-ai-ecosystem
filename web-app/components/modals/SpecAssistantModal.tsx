@@ -37,12 +37,18 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
   const [almError, setAlmError] = useState('')
   const [almSuccessDoc, setAlmSuccessDoc] = useState<any>(null)
 
-  // Check for context from Solution Advisor
+  // Check for context and prefilled spec from Solution Advisor (Create Functional Spec flow)
   useEffect(() => {
     const context = sessionStorage.getItem('solutionAdvisorContext')
+    const prefilledSpec = sessionStorage.getItem('specAssistantPrefilledSpec')
     if (context) {
       setRequirements(context)
       sessionStorage.removeItem('solutionAdvisorContext')
+    }
+    if (prefilledSpec) {
+      setSpecContent(prefilledSpec)
+      setRefinementMode(true)
+      sessionStorage.removeItem('specAssistantPrefilledSpec')
     }
   }, [])
 

@@ -177,11 +177,31 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
         }])
     }
 
-    const handleCreateFunctionalSpec = () => {
-        if (onCreateSpec) {
-            onCreateSpec(finalSolution || generatedSolution)
+    const handleCreateFunctionalSpec = async () => {
+        if (!onCreateSpec) {
+            onClose()
+            return
         }
-        onClose()
+        const solutionContext = finalSolution || generatedSolution
+        setLoading(true)
+        try {
+            const response = await axios.post('/api/generate-spec', {
+                type: 'functional',
+                requirements: solutionContext,
+                format: 'preview'
+            })
+            sessionStorage.setItem('solutionAdvisorContext', solutionContext)
+            sessionStorage.setItem('specAssistantPrefilledSpec', response.data.spec || '')
+            onCreateSpec(solutionContext)
+        } catch (error) {
+            console.error('Error generating spec:', error)
+            setMessages(prev => [...prev, {
+                role: 'assistant',
+                content: "Error generating specification. Please try again."
+            }])
+        } finally {
+            setLoading(false)
+        }
     }
 
     const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -305,9 +325,17 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                     <div className="px-6 py-4 border-t border-[var(--glass-border)] bg-green-500/10 flex gap-3">
                         <button
                             onClick={handleCreateFunctionalSpec}
+                            disabled={loading}
                             className="btn btn-success"
                         >
-                            📄 Create Functional Spec
+                            {loading ? (
+                                <span className="flex items-center gap-2">
+                                    <span className="spinner w-4 h-4" />
+                                    Generating spec...
+                                </span>
+                            ) : (
+                                '📄 Create Functional Spec'
+                            )}
                         </button>
                     </div>
                 )}
