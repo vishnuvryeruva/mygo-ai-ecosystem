@@ -463,48 +463,97 @@ class RAGService:
 
     def list_documents(self):
         """List all unique documents with their metadata."""
-        conn = get_conn()
+        conn = None
+        rows = []
         try:
+            conn = get_conn()
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                # Get the first chunk per document_id (which holds html and full metadata)
+                # One row per logical document (first chunk by id). Chunk count via subquery —
+                # DISTINCT ON + COUNT(*) OVER fails on some PostgreSQL builds.
                 cur.execute(
                     """
-                    SELECT DISTINCT ON (document_id)
-                        document_id, document_name, source, doc_type, project,
-                        updated_by, updated_on, web_url, uuid, display_id,
-                        length(content) as content_len,
-                        COUNT(*) OVER (PARTITION BY document_id) as chunk_count
-                    FROM documents
-                    ORDER BY document_id, id
+                    SELECT DISTINCT ON (d.document_id)
+                        d.document_id,
+                        d.document_name,
+                        d.source,
+                        d.doc_type,
+                        d.project,
+                        d.updated_by,
+                        d.updated_on,
+                        d.web_url,
+                        d.uuid,
+                        d.display_id,
+                        length(d.content) AS content_len,
+                        (SELECT COUNT(*)::int FROM documents d2
+                         WHERE d2.document_id IS NOT DISTINCT FROM d.document_id) AS chunk_count
+                    FROM documents d
+                    ORDER BY d.document_id, d.id
                     """
                 )
                 rows = cur.fetchall()
         except Exception as e:
-            print(f"Error listing documents: {e}")
+            print(f"Error listing documents (primary query): {e}")
+            import traceback
+            traceback.print_exc()
+            rows = []
+            if conn:
+                try:
+                    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                        cur.execute(
+                            """
+                            SELECT DISTINCT ON (d.document_id)
+                                d.document_id,
+                                d.document_name,
+                                d.source,
+                                d.doc_type,
+                                d.project,
+                                d.updated_by,
+                                d.updated_on,
+                                d.web_url,
+                                length(d.content) AS content_len,
+                                (SELECT COUNT(*)::int FROM documents d2
+                                 WHERE d2.document_id IS NOT DISTINCT FROM d.document_id) AS chunk_count
+                            FROM documents d
+                            ORDER BY d.document_id, d.id
+                            """
+                        )
+                        rows = cur.fetchall()
+                except Exception as e2:
+                    print(f"Error listing documents (fallback query): {e2}")
+                    traceback.print_exc()
+                    return []
+        finally:
+            if conn:
+                conn.close()
+
+        doc_list = []
+        try:
+            for row in rows:
+                content_len = row.get('content_len') or 0
+                chunk_count = int(row.get('chunk_count') or 1)
+                estimated_size = content_len * chunk_count
+                size_kb = estimated_size / 1024
+                uid = row.get('uuid')
+                if uid is not None and hasattr(uid, 'hex'):
+                    uid = str(uid)
+                doc_list.append({
+                    'name': row.get('document_name') or row.get('document_id') or 'Unknown',
+                    'type': row.get('doc_type') or 'Unknown',
+                    'source': row.get('source') or 'File Upload',
+                    'project': row.get('project') or 'N/A',
+                    'updatedBy': row.get('updated_by') or 'System',
+                    'updatedOn': str(row.get('updated_on') or 'N/A'),
+                    'webUrl': row.get('web_url'),
+                    'documentId': row.get('document_id'),
+                    'uuid': uid or '',
+                    'size': f"{size_kb:.1f} KB" if size_kb >= 1 else f"{estimated_size} bytes",
+                    'chunks': chunk_count,
+                })
+        except Exception as e:
+            print(f"Error building document list: {e}")
             import traceback
             traceback.print_exc()
             return []
-        finally:
-            conn.close()
-
-        doc_list = []
-        for row in rows:
-            estimated_size = (row['content_len'] or 0) * (row['chunk_count'] or 1)
-            size_kb = estimated_size / 1024
-            doc_list.append({
-                'name': row['document_name'] or row['document_id'],
-                'type': row['doc_type'] or 'Unknown',
-                'source': row['source'] or 'File Upload',
-                'project': row['project'] or 'N/A',
-                'updatedBy': row['updated_by'] or 'System',
-                'updatedOn': row['updated_on'] or 'N/A',
-                'webUrl': row['web_url'],
-                # Same value stored in chunks as document_id — required for view/delete/RAG keys
-                'documentId': row['document_id'],
-                'uuid': row['uuid'] or '',
-                'size': f"{size_kb:.1f} KB" if size_kb >= 1 else f"{estimated_size} bytes",
-                'chunks': row['chunk_count'] or 1,
-            })
 
         return doc_list
 
