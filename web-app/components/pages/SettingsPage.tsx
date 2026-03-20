@@ -160,7 +160,7 @@ export default function SettingsPage() {
                 setIsLoadingAuth(false)
                 return
             }
-            
+
             console.log('Fetching current user with token:', token.substring(0, 20) + '...')
             const res = await axios.get('/api/auth/me', {
                 headers: { Authorization: `Bearer ${token}` }
@@ -518,6 +518,8 @@ export default function SettingsPage() {
                                             >
                                                 <option value="CALM">SAP Cloud ALM</option>
                                                 <option value="BTP">SAP BTP</option>
+                                                <option value="SharePoint">SharePoint</option>
+                                                <option value="JIRA">JIRA</option>
                                             </select>
                                         </div>
                                         <div className="settings-form-group">
@@ -758,7 +760,7 @@ export default function SettingsPage() {
                                     const isCurrentUser = currentUser?.id === user.id
                                     const isAdminUser = user.role === 'Admin'
                                     const canDelete = !isCurrentUser && !isAdminUser
-                                    
+
                                     return (
                                         <div key={user.id} className="settings-user-card">
                                             <div className="settings-user-avatar">
@@ -803,10 +805,10 @@ export default function SettingsPage() {
 
     /* ── Render ─────────────────────────────────────────── */
     const isAdmin = currentUser?.role === 'Admin'
-    
+
     console.log('Current user:', currentUser)
     console.log('Is admin:', isAdmin)
-    
+
     // Filter tabs based on user role
     const visibleTabs = settingsTabs.filter(tab => {
         if (tab.id === 'roles' || tab.id === 'users') {
@@ -814,7 +816,7 @@ export default function SettingsPage() {
         }
         return true
     })
-    
+
     console.log('Visible tabs:', visibleTabs.map(t => t.id))
 
     if (isLoadingAuth) {

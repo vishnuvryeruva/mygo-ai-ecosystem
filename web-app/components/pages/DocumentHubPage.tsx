@@ -82,8 +82,14 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
             const res = await axios.get('/api/documents')
             // Map backend docs to frontend format
             const mappedDocs = res.data.documents.map((doc: any) => {
-                // Handle both old and new API response formats
-                const docId = doc.uuid || doc.id || doc.name || doc.filename
+                // documentId / document_id = DB document_id (chunk prefix); never use display name for delete/view
+                const docId =
+                    doc.documentId ||
+                    doc.document_id ||
+                    doc.uuid ||
+                    doc.id ||
+                    doc.name ||
+                    doc.filename
                 const docName = doc.title || doc.name || doc.metadata?.name || doc.filename
                 const docTypeCode = doc.documentTypeCode || doc.type || doc.metadata?.documentType
                 const docType = documentTypeNames[docTypeCode] || docTypeCode || 'Document'
@@ -97,7 +103,8 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                     updatedBy: doc.updatedBy || doc.metadata?.updatedBy || 'System',
                     updatedOn: doc.updatedOn || (doc.modifiedAt ? new Date(doc.modifiedAt).toLocaleDateString() : (doc.metadata?.updatedAt ? new Date(doc.metadata.updatedAt).toLocaleDateString() : 'N/A')),
                     webUrl: doc.webUrl || doc.metadata?.webUrl,
-                    documentId: doc.documentId || doc.metadata?.uuid
+                    // Same stable key as id (Postgres document_id) for view/delete
+                    documentId: docId,
                 }
             })
             setDocuments(mappedDocs)
@@ -130,8 +137,9 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
         setIsDeleting(true)
         setShowDeleteConfirm(false)
         try {
+            // Path delete: matches Flask /api/documents/<id> and Next [document_id] proxy (local Postgres only — not Cloud ALM)
             await Promise.all(
-                Array.from(selectedDocumentIds).map(id =>
+                Array.from(selectedDocumentIds).map((id) =>
                     axios.delete(`/api/documents/${encodeURIComponent(id)}`)
                 )
             )

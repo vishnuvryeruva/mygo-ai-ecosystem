@@ -499,21 +499,31 @@ class RAGService:
                 'updatedBy': row['updated_by'] or 'System',
                 'updatedOn': row['updated_on'] or 'N/A',
                 'webUrl': row['web_url'],
-                'documentId': row['uuid'] or row['document_id'],
+                # Same value stored in chunks as document_id — required for view/delete/RAG keys
+                'documentId': row['document_id'],
+                'uuid': row['uuid'] or '',
                 'size': f"{size_kb:.1f} KB" if size_kb >= 1 else f"{estimated_size} bytes",
                 'chunks': row['chunk_count'] or 1,
             })
 
         return doc_list
 
-    def delete_document(self, filename: str) -> bool:
-        """Delete all chunks associated with a filename."""
+    def delete_document(self, identifier: str) -> bool:
+        """Delete all chunks for a document. Matches document_id (CALM id / upload filename) or legacy chunk id prefix."""
+        if not identifier or not str(identifier).strip():
+            return False
+        ident = str(identifier).strip()
         conn = get_conn()
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "DELETE FROM documents WHERE id LIKE %s",
-                    (f"{filename}_%",)
+                    """
+                    DELETE FROM documents
+                    WHERE document_id = %s
+                       OR id LIKE %s
+                       OR uuid::text = %s
+                    """,
+                    (ident, f"{ident}_%", ident),
                 )
                 deleted = cur.rowcount > 0
             conn.commit()
