@@ -192,6 +192,7 @@ export default function AuthenticatedLayout({
                     onCreateSpec={(solutionContext) => {
                         setActiveModal('spec-assistant')
                         sessionStorage.setItem('solutionAdvisorContext', solutionContext)
+                        sessionStorage.setItem('specAssistantAutoGenerate', '1')
                     }}
                 />
             )}

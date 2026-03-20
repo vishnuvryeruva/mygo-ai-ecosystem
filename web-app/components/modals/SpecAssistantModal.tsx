@@ -44,6 +44,43 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
     if (context) {
       setRequirements(context)
       sessionStorage.removeItem('solutionAdvisorContext')
+      return
+    }
+
+    setLoading(true)
+    setSpecContent('')
+    setRefinementMode(false)
+    setRefinementHistory([])
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const response = await axios.post('/api/generate-spec', {
+          type: 'functional',
+          requirements: context,
+          format: 'preview'
+        })
+        if (!cancelled) {
+          setSpecContent(response.data?.spec ?? '')
+          setRefinementMode(true)
+          sessionStorage.removeItem('solutionAdvisorContext')
+          sessionStorage.removeItem('specAssistantAutoGenerate')
+        }
+      } catch (error) {
+        console.error('Error generating specification:', error)
+        if (!cancelled) {
+          alert('Error generating specification. You can edit requirements and click Generate Specification.')
+          sessionStorage.removeItem('solutionAdvisorContext')
+          sessionStorage.removeItem('specAssistantAutoGenerate')
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      setLoading(false)
     }
     if (prefilledSpec) {
       setSpecContent(prefilledSpec)

@@ -167,13 +167,14 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
         }
     }
 
+    /** Advance to the final stepper step so the user can review the solution before opening Spec Assistant. */
     const handleProceedToSpec = () => {
-        setCurrentStep('complete')
         const solutionContext = finalSolution || generatedSolution
         setFinalSolution(solutionContext)
+        setCurrentStep('complete')
         setMessages(prev => [...prev, {
             role: 'assistant',
-            content: "Your solution is ready! Click 'Create Functional Spec' to generate a detailed specification document based on this solution."
+            content: "Your solution is ready for review. Check the summary above, then click 'Create Functional Spec' to open the Spec Assistant—you can refine the spec or upload to Cloud ALM there."
         }])
     }
 
@@ -231,30 +232,46 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                     const steps = ['requirements', 'solution', 'search', 'improvise', 'complete'] as Step[]
                     const activeIndex = steps.indexOf(currentStep)
                     return (
-                        <div className="px-6 py-4 border-b border-[var(--glass-border)] flex-shrink-0">
-                            {/* Step circles row */}
-                            <div className="relative flex justify-between items-start">
-                                {/* Progress track background */}
-                                <div className="absolute top-[18px] left-[10%] right-[10%] h-0.5 -translate-y-1/2 bg-gray-200 dark:bg-white/10 rounded-full" />
-                                {/* Progress fill */}
+                        <div className="px-6 py-4 border-b border-[var(--glass-border)] flex-shrink-0 bg-white">
+                            {/* isolate + -z-10 track keeps the line strictly behind step nodes */}
+                            <div className="relative isolate flex justify-between items-center min-h-10">
                                 <div
-                                    className="absolute top-[18px] left-[10%] h-0.5 -translate-y-1/2 bg-gradient-to-r from-green-500 via-indigo-400 to-indigo-500 rounded-full transition-all duration-500"
+                                    className="pointer-events-none absolute left-[10%] right-[10%] top-1/2 -z-10 h-0.5 -translate-y-1/2 bg-gray-200 dark:bg-slate-600 rounded-full"
+                                    aria-hidden
+                                />
+                                <div
+                                    className="pointer-events-none absolute left-[10%] top-1/2 -z-10 h-0.5 -translate-y-1/2 bg-gradient-to-r from-green-500 via-indigo-400 to-indigo-500 rounded-full transition-all duration-500"
                                     style={{ width: `${(activeIndex / 4) * 80 + 10}%` }}
+                                    aria-hidden
                                 />
                                 {steps.map((step, index) => {
                                     const isActive = currentStep === step
                                     const isComplete = index < activeIndex
                                     return (
-                                        <div key={step} className="relative flex flex-1 flex-col items-center min-w-0 z-10">
-                                            <div className={`flex items-center justify-center w-9 h-9 rounded-full text-sm font-semibold transition-all flex-shrink-0 ${isActive
-                                                ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-500/25 ring-2 ring-indigo-400/40'
-                                                : isComplete
-                                                    ? 'bg-green-500/20 text-green-600 dark:text-green-400 border-2 border-green-500/40'
-                                                    : 'bg-white dark:bg-white/10 text-muted border-2 border-gray-200 dark:border-white/20'
-                                                }`}>
+                                        <div key={step} className="relative z-10 flex flex-1 justify-center min-w-0">
+                                            {/* Opaque backing so the track never shows through (translucent fills looked like strikethrough) */}
+                                            <div
+                                                className={`flex items-center justify-center w-9 h-9 rounded-full text-sm font-semibold transition-all flex-shrink-0 shadow-sm ${isActive
+                                                    ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-indigo-500/25 ring-2 ring-indigo-400/40'
+                                                    : isComplete
+                                                        ? 'bg-white text-green-600 ring-2 ring-green-500 dark:bg-slate-800 dark:text-green-400 dark:ring-green-500/80'
+                                                        : 'bg-white text-muted ring-2 ring-gray-200 dark:bg-slate-800 dark:text-slate-400 dark:ring-slate-600'
+                                                    }`}
+                                            >
                                                 {isComplete ? '✓' : index + 1}
                                             </div>
-                                            <span className={`mt-2 text-[10px] sm:text-[11px] leading-tight text-center line-clamp-2 px-0.5 min-h-[2rem] flex items-end justify-center ${isActive ? 'font-semibold text-indigo-600 dark:text-indigo-400' : 'text-muted'}`}>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                            <div className="relative z-10 mt-2 flex justify-between bg-white">
+                                {steps.map((step) => {
+                                    const isActive = currentStep === step
+                                    return (
+                                        <div key={`${step}-label`} className="flex flex-1 justify-center min-w-0 px-0.5">
+                                            <span
+                                                className={`text-[10px] sm:text-[11px] leading-tight text-center line-clamp-2 max-w-[5.5rem] sm:max-w-none ${isActive ? 'font-semibold text-indigo-600 dark:text-indigo-400' : 'text-muted'}`}
+                                            >
                                                 {stepLabels[step]}
                                             </span>
                                         </div>
