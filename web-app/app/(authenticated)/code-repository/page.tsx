@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import AIAgentsDropdown from '@/components/AIAgentsDropdown'
+import FetchCodeModal from '@/components/modals/FetchCodeModal'
 
 // SAP Object Type Icons mapping
 const TypeIcon = ({ type }: { type: string }) => {
@@ -80,6 +81,7 @@ export default function CodeRepositoryPage() {
     const [viewMode, setViewMode] = useState<'table' | 'json'>('table')
     const [requestedUrl, setRequestedUrl] = useState<string>('')
     const [activeAgentId, setActiveAgentId] = useState<string>('')
+    const [isFetchModalOpen, setIsFetchModalOpen] = useState(false)
 
     // Toast State
     const [toastMessage, setToastMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null)
@@ -125,19 +127,35 @@ export default function CodeRepositoryPage() {
         return root.endsWith('/') ? root : root + '/'
     }
 
-    const handleSync = async () => {
-        if (!selectedSourceId) return
+    const handleSync = async (config?: { sourceId: string, entitySet: string, filterQuery: string, top: string }) => {
+        const targetSourceId = config?.sourceId || selectedSourceId
+        const targetEntitySet = config?.entitySet || entitySet
+        const targetFilterQuery = config?.filterQuery || filterQuery
+        const targetTop = config?.top || top
+
+        if (!targetSourceId) return
+        
         setIsLoading(true)
         setRawJsonResponse(null)
+        setIsFetchModalOpen(false)
+
         try {
-            const res = await axios.get(`/api/btp/${selectedSourceId}/fetch-code`, {
+            const res = await axios.get(`/api/btp/${targetSourceId}/fetch-code`, {
                 params: {
-                    entity_set: entitySet,
-                    filter_query: filterQuery,
-                    top: top, // Limit for better performance
+                    entity_set: targetEntitySet,
+                    filter_query: targetFilterQuery,
+                    top: targetTop, // Limit for better performance
                     skip: skip
                 }
             })
+
+            // Update persistent state if coming from modal
+            if (config) {
+                setSelectedSourceId(config.sourceId)
+                setEntitySet(config.entitySet)
+                setFilterQuery(config.filterQuery)
+                setTop(config.top)
+            }
 
             // Extract array of records
             let records: any[] = []
@@ -365,8 +383,14 @@ export default function CodeRepositoryPage() {
     }
 
     const filteredRecords = fetchedRecords.filter(r => {
-        const matchesSearch = r.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                             r.description.toLowerCase().includes(searchQuery.toLowerCase())
+        const searchLower = searchQuery.toLowerCase()
+        const rawDataString = JSON.stringify(r.rawData).toLowerCase()
+        
+        const matchesSearch = !searchQuery || 
+                             r.name.toLowerCase().includes(searchLower) || 
+                             r.description.toLowerCase().includes(searchLower) ||
+                             rawDataString.includes(searchLower)
+                             
         const matchesType = typeFilter === 'All Types' || r.type === typeFilter
         const matchesPackage = !packageFilter || r.package.toLowerCase().includes(packageFilter.toLowerCase())
         return matchesSearch && matchesType && matchesPackage
@@ -478,7 +502,7 @@ export default function CodeRepositoryPage() {
                 <div className="flex items-center gap-3">
                     <button 
                         className="flex items-center gap-2 px-5 py-2.5 bg-[#059669] hover:bg-[#047857] text-white rounded-xl font-bold text-[13px] transition-all shadow-lg shadow-emerald-200/50 hover:shadow-emerald-300/60 active:scale-95 disabled:opacity-50" 
-                        onClick={handleSync} 
+                        onClick={() => setIsFetchModalOpen(true)} 
                         disabled={isLoading}
                     >
                         {isLoading ? (
@@ -503,72 +527,50 @@ export default function CodeRepositoryPage() {
                 </div>
             </div>
 
-            {/* Combined Filter Bar - PREMIUM MINIMAL TOOLBAR */}
-            <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm mb-8 flex flex-wrap items-center gap-5">
-                <div className="flex items-center gap-3">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">BTP SOURCE</label>
-                    <select 
-                        className="bg-slate-50 border border-slate-100 rounded-xl py-2 px-3 text-xs font-bold text-[#034354] outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all w-40 cursor-pointer"
-                        value={selectedSourceId}
-                        onChange={(e) => setSelectedSourceId(e.target.value)}
-                    >
-                        <option value="">Select Instance</option>
-                        {sources.map(s => (
-                            <option key={s.id} value={s.id}>{s.name}</option>
-                        ))}
-                    </select>
+            {/* Local Filters Toolbar - REFACTORED TO MATCH DOCUMENT HUB */}
+            <div className="doc-hub-filters mb-8">
+                <div className="doc-hub-filter-label">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                    </svg>
+                    <span>FILTERS</span>
                 </div>
+                
+                <select 
+                    className="doc-hub-filter-select" 
+                    value={typeFilter} 
+                    onChange={(e) => setTypeFilter(e.target.value)}
+                >
+                    <option value="All Types">All Types</option>
+                    {Array.from(new Set(fetchedRecords.map(r => r.type))).filter(Boolean).sort().map(t => (
+                        <option key={t} value={t}>{t}</option>
+                    ))}
+                </select>
 
-                <div className="flex items-center gap-3">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">ENTITY SET</label>
+                <select 
+                    className="doc-hub-filter-select" 
+                    value={packageFilter} 
+                    onChange={(e) => setPackageFilter(e.target.value)}
+                >
+                    <option value="">All Packages</option>
+                    {Array.from(new Set(fetchedRecords.map(r => r.package))).filter(p => p && p !== '-').sort().map(p => (
+                        <option key={p} value={p}>{p}</option>
+                    ))}
+                </select>
+
+                <div className="flex-1"></div>
+
+                <div className="doc-hub-search-container">
+                    <div className="doc-hub-search-icon">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    </div>
                     <input 
-                        className="bg-slate-50 border border-slate-100 rounded-xl py-2 px-3 text-xs font-bold text-[#034354] outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all w-32"
-                        placeholder="ObjlistSet"
-                        value={entitySet}
-                        onChange={(e) => setEntitySet(e.target.value)}
+                        type="text"
+                        className="doc-hub-search-input"
+                        placeholder="Search records or raw JSON..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
                     />
-                </div>
-
-                <div className="flex items-center gap-3 flex-1 min-w-[200px]">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">ODATA FILTER</label>
-                    <div className="relative w-full">
-                        <input 
-                            className="w-full bg-slate-50 border border-slate-100 rounded-xl py-2 px-3 text-xs font-medium text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                            placeholder="e.g. ObjectType eq 'CLAS'"
-                            value={filterQuery}
-                            onChange={(e) => setFilterQuery(e.target.value)}
-                        />
-                    </div>
-                </div>
-
-                <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">TOP</span>
-                        <input 
-                            type="number"
-                            className="bg-slate-50 border border-slate-100 rounded-xl py-2 px-3 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all w-16"
-                            value={top}
-                            onChange={(e) => setTop(e.target.value)}
-                        />
-                    </div>
-                </div>
-
-                <div className="h-6 w-[1px] bg-slate-100 mx-1 hidden lg:block"></div>
-
-                <div className="flex items-center gap-3">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">LOCAL</label>
-                    <div className="flex items-center bg-slate-50 border border-slate-100 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500/20 focus-within:border-emerald-500 transition-all">
-                        <div className="pl-3 text-slate-400">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                        </div>
-                        <input 
-                            type="text"
-                            className="bg-transparent border-none py-2 px-3 text-xs outline-none w-40"
-                            placeholder="Search current..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                        />
-                    </div>
                 </div>
             </div>
 
@@ -825,6 +827,21 @@ export default function CodeRepositoryPage() {
                 </div>
             )}
 
+            {/* Fetch Modal */}
+            <FetchCodeModal 
+                isOpen={isFetchModalOpen}
+                onClose={() => setIsFetchModalOpen(false)}
+                sources={sources}
+                onFetch={handleSync}
+                isLoading={isLoading}
+                initialConfig={{
+                    sourceId: selectedSourceId,
+                    entitySet: entitySet,
+                    filterQuery: filterQuery,
+                    top: top
+                }}
+            />
+
             {toastMessage && (
                 <div style={{ position: 'fixed', bottom: '30px', left: '50%', transform: 'translateX(-50%)', zIndex: 1000, padding: '0.75rem 1.5rem', borderRadius: '12px', color: 'white', fontWeight: 600, background: toastMessage.type === 'success' ? '#059669' : '#dc2626', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', animation: 'slideUp 0.3s ease-out' }}>
                     {toastMessage.text}
@@ -835,6 +852,41 @@ export default function CodeRepositoryPage() {
                 @keyframes slideUp { from { transform: translate(-50%, 100%); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
                 .scrollbar-hide::-webkit-scrollbar { display: none; }
                 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+                
+                .doc-hub-search-container {
+                    display: flex;
+                    align-items: center;
+                    background: #f8fafc;
+                    border: 1px solid #e2e8f0;
+                    border-radius: 10px;
+                    padding: 0 12px;
+                    width: 320px;
+                    transition: all 0.2s ease;
+                }
+                .doc-hub-search-container:focus-within {
+                    border-color: #059669;
+                    background: white;
+                    box-shadow: 0 0 0 4px rgba(5, 150, 105, 0.05);
+                }
+                .doc-hub-search-icon {
+                    color: #94a3b8;
+                    display: flex;
+                    align-items: center;
+                }
+                .doc-hub-search-input {
+                    border: none;
+                    background: transparent;
+                    padding: 9px 12px;
+                    font-size: 0.85rem;
+                    font-weight: 500;
+                    width: 100%;
+                    outline: none;
+                    color: #1e293b;
+                }
+                .doc-hub-search-input::placeholder {
+                    color: #94a3b8;
+                    font-weight: 400;
+                }
             ` }} />
         </div>
     )
