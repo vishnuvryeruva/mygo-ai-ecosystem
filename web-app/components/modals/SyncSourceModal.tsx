@@ -22,6 +22,11 @@ interface SyncSourceModalProps {
     preSelectedSourceId?: string | null
 }
 
+const isCloudAlmSource = (source: Source) => {
+    const sourceType = String(source?.type || '').trim().toUpperCase()
+    return sourceType === 'CALM' || sourceType === 'SAP CLOUD ALM'
+}
+
 // Map SAP document type codes to human-readable names
 const documentTypeNames: Record<string, string> = {
     NT: 'Note',
@@ -72,7 +77,11 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
     const fetchSources = async () => {
         try {
             const res = await axios.get('/api/sources')
-            setSources(res.data.sources || [])
+            const calmSources = (res.data.sources || []).filter(isCloudAlmSource)
+            setSources(calmSources)
+            if (calmSources.length === 0) {
+                setSelectedSource('')
+            }
         } catch (err) {
             console.error('Failed to fetch sources:', err)
         }
