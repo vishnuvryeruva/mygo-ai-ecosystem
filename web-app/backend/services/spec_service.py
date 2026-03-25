@@ -1,6 +1,7 @@
 from services.openai_service import OpenAIService
 from docx import Document
 import io
+from services.markdown_utils import markdown_to_plain_text
 
 class SpecService:
     def __init__(self):
@@ -70,6 +71,9 @@ Format the output in a clear, professional manner suitable for a Word document."
         
         if format_type == 'docx':
             return self._create_docx(spec_content, spec_type)
+        elif format_type in ('text', 'preview'):
+            # Preview/upload flows need clean text without markdown markers.
+            return markdown_to_plain_text(spec_content)
         else:
             return spec_content
     

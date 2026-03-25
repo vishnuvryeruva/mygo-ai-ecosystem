@@ -10,6 +10,7 @@ from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
+from html import escape
 
 
 def add_horizontal_rule(doc):
@@ -182,3 +183,123 @@ def convert_markdown_to_docx(doc, content, title=None):
             add_markdown_paragraph(doc, line)
     
     return doc
+
+
+def markdown_to_plain_text(content: str) -> str:
+    """
+    Convert markdown-ish content into clean plain text.
+    Keeps section structure while removing markdown control characters.
+    """
+    if not content:
+        return ""
+
+    lines = content.split('\n')
+    out_lines = []
+    in_code_block = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+
+        if in_code_block:
+            out_lines.append(line)
+            continue
+
+        # Remove horizontal rules
+        if re.match(r'^(---+|\*\*\*+|___+)$', stripped):
+            out_lines.append("")
+            continue
+
+        # Remove markdown headings
+        line = re.sub(r'^\s*#{1,6}\s*', '', line)
+
+        # Normalize unordered lists
+        line = re.sub(r'^\s*[\-\*\+]\s+', '• ', line)
+
+        # Remove inline markdown markers
+        line = re.sub(r'\*\*(.*?)\*\*', r'\1', line)
+        line = re.sub(r'__(.*?)__', r'\1', line)
+        line = re.sub(r'(?<!\*)\*(?!\*)(.*?)\*(?<!\*)', r'\1', line)
+        line = re.sub(r'(?<!_)_(?!_)(.*?)_(?<!_)', r'\1', line)
+        line = re.sub(r'`([^`]+)`', r'\1', line)
+
+        out_lines.append(line.rstrip())
+
+    # Collapse extra blank lines
+    normalized = re.sub(r'\n{3,}', '\n\n', '\n'.join(out_lines)).strip()
+    return normalized
+
+
+def markdown_to_html(content: str) -> str:
+    """
+    Convert markdown-ish content to simple semantic HTML for Cloud ALM.
+    Supports headings, bullet/numbered lists, and paragraphs.
+    """
+    if not content:
+        return "<p></p>"
+
+    lines = content.split('\n')
+    html_parts = []
+    in_ul = False
+    in_ol = False
+
+    def close_lists():
+        nonlocal in_ul, in_ol
+        if in_ul:
+            html_parts.append("</ul>")
+            in_ul = False
+        if in_ol:
+            html_parts.append("</ol>")
+            in_ol = False
+
+    for raw_line in lines:
+        line = raw_line.rstrip()
+        stripped = line.strip()
+
+        if not stripped:
+            close_lists()
+            continue
+
+        if re.match(r'^(---+|\*\*\*+|___+)$', stripped):
+            close_lists()
+            html_parts.append("<hr />")
+            continue
+
+        heading_match = re.match(r'^\s*(#{1,6})\s+(.+)$', line)
+        if heading_match:
+            close_lists()
+            level = len(heading_match.group(1))
+            text = escape(heading_match.group(2).strip())
+            html_parts.append(f"<h{level}>{text}</h{level}>")
+            continue
+
+        bullet_match = re.match(r'^\s*[\-\*\+]\s+(.+)$', line)
+        if bullet_match:
+            if in_ol:
+                html_parts.append("</ol>")
+                in_ol = False
+            if not in_ul:
+                html_parts.append("<ul>")
+                in_ul = True
+            html_parts.append(f"<li>{escape(bullet_match.group(1).strip())}</li>")
+            continue
+
+        numbered_match = re.match(r'^\s*\d+\.\s+(.+)$', line)
+        if numbered_match:
+            if in_ul:
+                html_parts.append("</ul>")
+                in_ul = False
+            if not in_ol:
+                html_parts.append("<ol>")
+                in_ol = True
+            html_parts.append(f"<li>{escape(numbered_match.group(1).strip())}</li>")
+            continue
+
+        close_lists()
+        html_parts.append(f"<p>{escape(stripped)}</p>")
+
+    close_lists()
+    return "\n".join(html_parts) if html_parts else "<p></p>"

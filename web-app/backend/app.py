@@ -683,6 +683,7 @@ def mcp_health():
 
 from services import source_config_service
 from services.calm_service import get_calm_service
+from services.markdown_utils import markdown_to_html
 
 @app.route('/api/sources', methods=['GET'])
 def list_sources():
@@ -1510,9 +1511,12 @@ def push_spec_to_calm(source_id):
         
         service = get_calm_service(source.get('config'))
         
-        # Convert content to bytes if string
+        # Cloud ALM expects HTML-like rich content. Convert markdown/plain text
+        # to basic semantic HTML so formatting survives upload and retrieval.
         if isinstance(content, str):
-            content = content.encode('utf-8')
+            content = markdown_to_html(content).encode('utf-8')
+        elif isinstance(content, bytes):
+            content = markdown_to_html(content.decode('utf-8', errors='ignore')).encode('utf-8')
         
         result = service.push_document(
             name=name,
