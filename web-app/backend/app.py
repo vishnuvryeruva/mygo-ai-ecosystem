@@ -684,6 +684,30 @@ def mcp_health():
 from services import source_config_service
 from services.calm_service import get_calm_service
 from services.markdown_utils import markdown_to_html
+from html import unescape
+import re
+
+
+def _normalize_document_html_for_view(raw_content: str) -> str:
+    """
+    Normalize raw document content into renderable HTML for the UI viewer.
+    Handles escaped HTML, markdown, and plain text.
+    """
+    if not raw_content:
+        return ""
+
+    # Some CALM responses return escaped HTML entities.
+    unescaped = unescape(str(raw_content)).strip()
+    if not unescaped:
+        return ""
+
+    # If content already looks like HTML, return as-is.
+    has_html_tags = bool(re.search(r'<\s*(p|h[1-6]|ul|ol|li|div|br|pre|table|span|strong|em)\b', unescaped, re.IGNORECASE))
+    if has_html_tags:
+        return unescaped
+
+    # Fallback: convert markdown/plain text to semantic HTML.
+    return markdown_to_html(unescaped)
 
 @app.route('/api/sources', methods=['GET'])
 def list_sources():
@@ -1207,7 +1231,11 @@ def view_calm_document(document_id):
         html_content = rag_service.get_document_html(document_id)
 
         if html_content:
-            return jsonify({"documentId": document_id, "content": html_content, "source": "local"})
+            return jsonify({
+                "documentId": document_id,
+                "content": _normalize_document_html_for_view(html_content),
+                "source": "local"
+            })
 
         # 2. Prevent invalid IDs from hitting CALM API (which expect a UUID)
         import re
@@ -1236,7 +1264,11 @@ def view_calm_document(document_id):
         if not html_content:
             return jsonify({"error": "Document has no displayable content"}), 404
 
-        return jsonify({"documentId": document_id, "content": html_content, "source": "live"})
+        return jsonify({
+            "documentId": document_id,
+            "content": _normalize_document_html_for_view(html_content),
+            "source": "live"
+        })
 
     except Exception as e:
         import traceback
