@@ -429,8 +429,8 @@ export default function CodeRepositoryPage() {
         try {
             const res = await axios.get(`/api/calm/${sourceId}/projects`)
             setAlmProjects(res.data.projects || [])
-        } catch {
-            setAlmError('Failed to load projects.')
+        } catch (err: any) {
+            setAlmError(err?.response?.data?.error || 'Failed to load projects.')
         } finally {
             setAlmLoadingStep('')
         }

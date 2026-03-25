@@ -54,6 +54,7 @@ export default function CALMBrowserPage({ sourceId, sourceName, onBack, onSaveCo
     const [loadingScopes, setLoadingScopes] = useState(false)
     const [loadingProcesses, setLoadingProcesses] = useState(false)
     const [loadingDocs, setLoadingDocs] = useState(false)
+    const [projectLoadError, setProjectLoadError] = useState<string | null>(null)
     const [syncing, setSyncing] = useState(false)
     const [syncProgress, setSyncProgress] = useState(0)
 
@@ -73,17 +74,14 @@ export default function CALMBrowserPage({ sourceId, sourceName, onBack, onSaveCo
 
     const fetchProjects = async () => {
         setLoadingProjects(true)
+        setProjectLoadError(null)
         try {
             const response = await axios.get(`/api/calm/${sourceId}/projects`)
             setProjects(response.data.projects || [])
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error fetching projects:', error)
-            // Demo data
-            setProjects([
-                { id: 'proj-1', name: 'S/4HANA Implementation Wave 2', description: 'Main implementation project' },
-                { id: 'proj-2', name: 'Finance Transformation', description: 'Core finance module' },
-                { id: 'proj-3', name: 'Supply Chain Optimization', description: 'SCM improvements' }
-            ])
+            setProjects([])
+            setProjectLoadError(error?.response?.data?.error || 'Failed to load Cloud ALM projects.')
         } finally {
             setLoadingProjects(false)
         }
@@ -254,6 +252,13 @@ export default function CALMBrowserPage({ sourceId, sourceName, onBack, onSaveCo
                     </div>
                 </div>
             </div>
+            {projectLoadError && (
+                <div className="glass-card p-4 mb-6 border border-red-500/40 bg-red-500/10">
+                    <p className="text-sm text-red-300">
+                        Failed to load projects from Cloud ALM: {projectLoadError}
+                    </p>
+                </div>
+            )}
 
             {/* Filters */}
             <div className="glass-card p-6 mb-6">

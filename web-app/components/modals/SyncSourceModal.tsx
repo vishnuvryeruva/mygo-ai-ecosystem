@@ -42,6 +42,8 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
     const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set())
     const [syncStatus, setSyncStatus] = useState<Record<string, boolean>>({})
     const [isSyncing, setIsSyncing] = useState(false)
+    const [isLoadingProjects, setIsLoadingProjects] = useState(false)
+    const [projectLoadError, setProjectLoadError] = useState<string | null>(null)
     const [syncResult, setSyncResult] = useState<{ message: string; count: number; updated: number; added: number } | null>(null)
 
     useEffect(() => {
@@ -78,11 +80,17 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
 
     const fetchProjects = async (sourceId: string) => {
         setProjects([]) // Clear previous
+        setProjectLoadError(null)
+        setIsLoadingProjects(true)
         try {
             const res = await axios.get(`/api/calm/${sourceId}/projects`)
             setProjects(res.data.projects || [])
-        } catch (err) {
+        } catch (err: any) {
             console.error('Failed to fetch projects:', err)
+            setProjects([])
+            setProjectLoadError(err?.response?.data?.error || 'Failed to load projects.')
+        } finally {
+            setIsLoadingProjects(false)
         }
     }
 
@@ -182,6 +190,9 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
         setSyncStep(1)
         setSelectedSource('')
         setSelectedProject('')
+        setProjects([])
+        setIsLoadingProjects(false)
+        setProjectLoadError(null)
         setSyncResult(null)
         setDocsToSync([])
         setSelectedDocIds(new Set())
@@ -249,8 +260,15 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                     {syncStep === 2 && (
                         <div className="settings-form-group">
                             <label>Select Project</label>
-                            {projects.length === 0 ? (
+                            {isLoadingProjects ? (
                                 <p>Loading projects...</p>
+                            ) : projectLoadError ? (
+                                <div>
+                                    <p className="text-sm text-red-600 mb-2">Failed to load projects.</p>
+                                    <p className="text-xs text-red-500">{projectLoadError}</p>
+                                </div>
+                            ) : projects.length === 0 ? (
+                                <p className="text-sm text-gray-500">No projects found for this source.</p>
                             ) : (
                                 <select
                                     value={selectedProject}

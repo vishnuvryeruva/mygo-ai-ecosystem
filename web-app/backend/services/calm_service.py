@@ -172,7 +172,7 @@ class CALMService:
         List all projects from Cloud ALM
         
         Returns:
-            Dict with 'projects' list and 'isDemo' boolean
+            Dict with 'projects' list
         """
         try:
             self._using_demo_data = False
@@ -189,12 +189,12 @@ class CALMService:
                 if 'id' in p:
                     p['webUrl'] = self._get_project_url(p['id'])
             
-            return {'projects': projects, 'isDemo': False}
+            return {'projects': projects}
         except Exception as e:
-            self._using_demo_data = True
+            self._using_demo_data = False
             self._last_error = str(e)
-            print(f"Error listing projects (using demo data): {e}")
-            return {'projects': self._get_demo_projects(), 'isDemo': True, 'error': str(e)}
+            print(f"Error listing projects: {e}")
+            raise ValueError(f"Failed to list Cloud ALM projects: {str(e)}")
     
     def get_project(self, project_id: str) -> Dict:
         """
