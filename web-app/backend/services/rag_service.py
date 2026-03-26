@@ -375,7 +375,7 @@ class RAGService:
 
         return results
 
-    def query(self, query_text, top_k=5, custom_prompt=None):
+    def query(self, query_text, top_k=5, custom_prompt=None, llm_provider='openai'):
         """Query the RAG system using cosine similarity search.
         
         Returns:
@@ -457,7 +457,8 @@ class RAGService:
             user_prompt,
             system_prompt=system_prompt,
             temperature=0.3,
-            max_tokens=1000
+            max_tokens=1000,
+            provider=llm_provider
         )
         return {"answer": answer, "references": references}
 

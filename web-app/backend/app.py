@@ -7,6 +7,7 @@ import jwt
 import bcrypt
 import datetime
 from functools import wraps
+from typing import Optional
 from dotenv import load_dotenv
 import psycopg2
 import psycopg2.extras
@@ -94,6 +95,41 @@ def token_required(f):
         return f(*args, **kwargs)
     return decorated
 
+
+def get_optional_current_user_id():
+    """Read user ID from bearer token if provided; otherwise return None."""
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return None
+    token = auth_header.split(' ', 1)[1]
+    try:
+        payload = decode_token(token)
+        return payload.get('sub')
+    except Exception:
+        return None
+
+
+def get_llm_provider_for_user(user_id: Optional[str]):
+    """Resolve user's preferred LLM provider. Falls back to openai."""
+    if not user_id:
+        return 'openai'
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT llm_provider FROM users WHERE id = %s", (user_id,))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    provider = None
+    if row:
+        try:
+            provider = row['llm_provider']
+        except Exception:
+            provider = None
+    resolved_provider = (provider or 'openai').lower()
+    print(f"LLM_PREF: user_id={user_id or 'anonymous'} provider={resolved_provider}")
+    return resolved_provider
+
 # Initialize services
 openai_service = OpenAIService()
 rag_service = RAGService()
@@ -137,8 +173,8 @@ def register():
     try:
         with conn.cursor() as cur:
             cur.execute(
-                'INSERT INTO users (id, name, email, password_hash, role, created_at) VALUES (%s, %s, %s, %s, %s, %s)',
-                (user_id, name, email, password_hash, role, created_at)
+                'INSERT INTO users (id, name, email, password_hash, role, llm_provider, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)',
+                (user_id, name, email, password_hash, role, 'openai', created_at)
             )
         conn.commit()
     except (psycopg2.errors.UniqueViolation, sqlite3.IntegrityError):
@@ -150,7 +186,7 @@ def register():
     token = create_token(user_id, email)
     return jsonify({
         'token': token,
-        'user': {'id': user_id, 'name': name, 'email': email, 'role': role}
+        'user': {'id': user_id, 'name': name, 'email': email, 'role': role, 'llm_provider': 'openai'}
     }), 201
 
 
@@ -166,7 +202,7 @@ def login():
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute('SELECT id, name, email, password_hash, role FROM users WHERE lower(email) = %s', (email,))
+            cur.execute('SELECT id, name, email, password_hash, role, llm_provider FROM users WHERE lower(email) = %s', (email,))
             user = cur.fetchone()
     finally:
         conn.close()
@@ -181,7 +217,8 @@ def login():
             'id': user['id'],
             'name': user['name'],
             'email': user['email'],
-            'role': user.get('role') or 'Viewer'
+            'role': user.get('role') or 'Viewer',
+            'llm_provider': user['llm_provider'] if 'llm_provider' in user and user['llm_provider'] else 'openai'
         }
     }), 200
 
@@ -193,18 +230,45 @@ def me():
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute('SELECT id, name, email, role, created_at FROM users WHERE id = %s', (payload['sub'],))
+            cur.execute('SELECT id, name, email, role, llm_provider, created_at FROM users WHERE id = %s', (payload['sub'],))
             row = cur.fetchone()
     finally:
         conn.close()
     if not row:
         return jsonify({'error': 'User not found'}), 404
-    return jsonify({'id': row['id'], 'name': row['name'], 'email': row['email'], 'role': row['role'] or 'Viewer', 'created_at': row['created_at']})
+    return jsonify({
+        'id': row['id'],
+        'name': row['name'],
+        'email': row['email'],
+        'role': row['role'] or 'Viewer',
+        'llm_provider': row['llm_provider'] if 'llm_provider' in row and row['llm_provider'] else 'openai',
+        'created_at': row['created_at']
+    })
+
+
+@app.route('/api/auth/preferences', methods=['PUT'])
+@token_required
+def update_user_preferences():
+    data = request.get_json() or {}
+    llm_provider = (data.get('llm_provider') or '').strip().lower()
+    allowed = {'openai', 'claude', 'gemini'}
+    if llm_provider not in allowed:
+        return jsonify({'error': 'llm_provider must be one of: openai, claude, gemini'}), 400
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET llm_provider = %s WHERE id = %s", (llm_provider, request.current_user['sub']))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({'message': 'Preferences updated successfully', 'llm_provider': llm_provider})
 
 # Ask Yoda - RAG-based Q&A
 @app.route('/api/ask-yoda', methods=['POST'])
 def ask_yoda():
     try:
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
         data = request.json
         query = data.get('query', '')
         
@@ -212,7 +276,7 @@ def ask_yoda():
             return jsonify({"error": "Query is required"}), 400
         
         # Use RAG to get relevant context and generate answer
-        result = rag_service.query(query)
+        result = rag_service.query(query, llm_provider=llm_provider)
         
         return jsonify({
             "answer": result["answer"],
@@ -272,6 +336,7 @@ def delete_document(filename):
 @app.route('/api/generate-spec', methods=['POST'])
 def generate_spec():
     try:
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
         data = request.json
         spec_type = data.get('type', 'functional')  # functional or technical
         requirements = data.get('requirements', '')
@@ -279,14 +344,14 @@ def generate_spec():
         
         # For preview, return raw text for inline display
         if format_type == 'preview':
-            spec_content = spec_service.generate_spec(spec_type, requirements, 'text')
+            spec_content = spec_service.generate_spec(spec_type, requirements, 'text', llm_provider=llm_provider)
             return jsonify({
                 "spec": spec_content,
                 "type": spec_type,
                 "format": "preview"
             })
         
-        spec_doc = spec_service.generate_spec(spec_type, requirements, format_type)
+        spec_doc = spec_service.generate_spec(spec_type, requirements, format_type, llm_provider=llm_provider)
         
         # For docx, return as downloadable file
         if format_type == 'docx':
@@ -311,12 +376,13 @@ def generate_spec():
 @app.route('/api/generate-prompt', methods=['POST'])
 def generate_prompt():
     try:
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
         data = request.json
         language = data.get('language', 'ABAP')
         task_description = data.get('task', '')
         context = data.get('context', '')
         
-        prompt = prompt_service.generate_prompt(language, task_description, context)
+        prompt = prompt_service.generate_prompt(language, task_description, context, llm_provider=llm_provider)
         
         return jsonify({
             "prompt": prompt,
@@ -331,6 +397,7 @@ def generate_prompt():
 @app.route('/api/generate-code', methods=['POST'])
 def generate_code_from_prompt():
     try:
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
         data = request.json
         language = data.get('language', 'ABAP')
         prompt = data.get('prompt', '')
@@ -339,7 +406,7 @@ def generate_code_from_prompt():
         if not prompt:
             return jsonify({"error": "Prompt is required"}), 400
         
-        result = prompt_service.generate_code(language, prompt, context)
+        result = prompt_service.generate_code(language, prompt, context, llm_provider=llm_provider)
         
         return jsonify({
             "code": result['code'],
@@ -355,12 +422,13 @@ def generate_code_from_prompt():
 @app.route('/api/explain-code', methods=['POST'])
 def explain_code():
     try:
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
         data = request.json
         code = data.get('code', '')
         code_type = data.get('code_type', 'ABAP')  # ABAP, Python, etc.
         program_name = data.get('program_name', '')
         
-        explanation = code_service.explain_code(code, code_type, program_name)
+        explanation = code_service.explain_code(code, code_type, program_name, llm_provider=llm_provider)
         
         return jsonify({
             "explanation": explanation,
@@ -375,6 +443,7 @@ def explain_code():
 @app.route('/api/generate-test-cases', methods=['POST'])
 def generate_test_cases():
     try:
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
         data = request.json
         code = data.get('code', '')
         test_type = data.get('test_type', 'manual')  # manual or unit
@@ -382,7 +451,7 @@ def generate_test_cases():
         
         # For preview, return raw text for inline display
         if format_type == 'preview':
-            test_content = test_service.generate_test_cases(code, test_type, 'text')
+            test_content = test_service.generate_test_cases(code, test_type, 'text', llm_provider=llm_provider)
             return jsonify({
                 "test_cases": test_content,
                 "test_type": test_type,
@@ -391,14 +460,14 @@ def generate_test_cases():
         
         # For CALM format, return structured JSON
         if format_type == 'calm':
-            test_cases = test_service.generate_test_cases(code, test_type, 'calm')
+            test_cases = test_service.generate_test_cases(code, test_type, 'calm', llm_provider=llm_provider)
             return jsonify({
                 "test_cases": test_cases,
                 "test_type": test_type,
                 "format": "calm"
             })
         
-        test_cases = test_service.generate_test_cases(code, test_type, format_type)
+        test_cases = test_service.generate_test_cases(code, test_type, format_type, llm_provider=llm_provider)
         
         # For excel/word, return as downloadable file
         if format_type == 'excel':
@@ -430,11 +499,12 @@ def generate_test_cases():
 @app.route('/api/analyze-code', methods=['POST'])
 def analyze_code():
     try:
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
         data = request.json
         code = data.get('code', '')
         code_type = data.get('code_type', 'ABAP')
         
-        analysis = advisor_service.analyze_code(code, code_type)
+        analysis = advisor_service.analyze_code(code, code_type, llm_provider=llm_provider)
         
         return jsonify({
             "suggestions": analysis['suggestions'],
@@ -459,7 +529,8 @@ def solution_advisor_requirements():
         data = request.json
         requirements = data.get('requirements', '')
         
-        result = solution_advisor.gather_requirements(requirements)
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
+        result = solution_advisor.gather_requirements(requirements, llm_provider=llm_provider)
         
         return jsonify(result)
     except Exception as e:
@@ -475,7 +546,8 @@ def solution_advisor_generate():
         data = request.json
         requirements = data.get('requirements', '')
         
-        result = solution_advisor.generate_solution(requirements)
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
+        result = solution_advisor.generate_solution(requirements, llm_provider=llm_provider)
         
         return jsonify(result)
     except Exception as e:
@@ -493,7 +565,8 @@ def solution_advisor_refine():
         current_solution = data.get('current_solution', '')
         feedback = data.get('feedback', '')
         
-        result = solution_advisor.refine_solution(requirements, current_solution, feedback)
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
+        result = solution_advisor.refine_solution(requirements, current_solution, feedback, llm_provider=llm_provider)
         
         return jsonify(result)
     except Exception as e:
@@ -509,7 +582,8 @@ def solution_advisor_search_similar():
         data = request.json
         solution_summary = data.get('solution_summary', '')
         
-        result = solution_advisor.search_similar_solutions(solution_summary, rag_service)
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
+        result = solution_advisor.search_similar_solutions(solution_summary, rag_service, llm_provider=llm_provider)
         
         return jsonify(result)
     except Exception as e:
@@ -528,8 +602,9 @@ def solution_advisor_improvise():
         similar_solutions = data.get('similar_solutions', [])
         user_input = data.get('user_input', '')
         
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
         result = solution_advisor.improvise_solution(
-            requirements, current_solution, similar_solutions, user_input
+            requirements, current_solution, similar_solutions, user_input, llm_provider=llm_provider
         )
         
         return jsonify(result)
@@ -1326,6 +1401,7 @@ def btp_fetch_code(source_id):
 @app.route('/api/btp/generate-code', methods=['POST'])
 def btp_generate_code():
     try:
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
         data = request.json
         prompt = data.get('prompt', '')
         code = data.get('code', '')
@@ -1338,7 +1414,7 @@ def btp_generate_code():
             {"role": "user", "content": user_msg}
         ]
         
-        response = openai_service.chat_completion(messages)
+        response = openai_service.chat_completion(messages, provider=llm_provider)
         
         if response.startswith("```"):
             lines = response.splitlines()

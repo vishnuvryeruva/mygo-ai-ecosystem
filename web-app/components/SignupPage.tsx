@@ -5,7 +5,7 @@ import Link from 'next/link'
 import axios from 'axios'
 
 interface SignupPageProps {
-    onSignup: (token: string, user: { id: string; name: string; email: string }) => void
+    onSignup: (token: string, user: { id: string; name: string; email: string; llm_provider?: string }) => void
 }
 
 export default function SignupPage({ onSignup }: SignupPageProps) {

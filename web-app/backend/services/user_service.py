@@ -17,6 +17,15 @@ def _row_to_dict(row):
     return dict(row) if row else None
 
 
+def _safe_get(row, key, default=None):
+    if row is None:
+        return default
+    try:
+        return row[key] if row[key] is not None else default
+    except Exception:
+        return default
+
+
 def list_users(created_by=None):
     """
     List users with their roles.
@@ -33,7 +42,7 @@ def list_users(created_by=None):
             if created_by:
                 cur.execute(
                     """
-                    SELECT id, name, email, role, created_by, created_at
+                    SELECT id, name, email, role, llm_provider, created_by, created_at
                     FROM users
                     WHERE created_by = %s OR id = %s
                     ORDER BY created_at DESC
@@ -43,7 +52,7 @@ def list_users(created_by=None):
             else:
                 cur.execute(
                     """
-                    SELECT id, name, email, role, created_by, created_at
+                    SELECT id, name, email, role, llm_provider, created_by, created_at
                     FROM users
                     ORDER BY created_at DESC
                     """
@@ -60,8 +69,9 @@ def list_users(created_by=None):
                 "name": row["name"],
                 "email": row["email"],
                 "role": row["role"] or "Viewer",
+                "llm_provider": _safe_get(row, "llm_provider", "openai"),
                 "status": "Active",
-                "created_by": row.get("created_by"),
+                "created_by": _safe_get(row, "created_by"),
                 "created_at": row["created_at"],
             }
         )
@@ -74,7 +84,7 @@ def get_user_by_id(user_id: str):
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "SELECT id, name, email, role, created_by, created_at FROM users WHERE id = %s",
+                "SELECT id, name, email, role, llm_provider, created_by, created_at FROM users WHERE id = %s",
                 (user_id,),
             )
             row = cur.fetchone()
@@ -87,7 +97,8 @@ def get_user_by_id(user_id: str):
             "name": row["name"],
             "email": row["email"],
             "role": row["role"] or "Viewer",
-            "created_by": row.get("created_by"),
+            "llm_provider": _safe_get(row, "llm_provider", "openai"),
+            "created_by": _safe_get(row, "created_by"),
             "created_at": row["created_at"],
         }
     return None
@@ -99,7 +110,7 @@ def get_user_by_email(email: str):
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "SELECT id, name, email, role, password_hash, created_by, created_at FROM users WHERE email = %s",
+                "SELECT id, name, email, role, llm_provider, password_hash, created_by, created_at FROM users WHERE email = %s",
                 (email,),
             )
             row = cur.fetchone()
@@ -112,14 +123,15 @@ def get_user_by_email(email: str):
             "name": row["name"],
             "email": row["email"],
             "role": row["role"] or "Viewer",
+            "llm_provider": _safe_get(row, "llm_provider", "openai"),
             "password_hash": row["password_hash"],
-            "created_by": row.get("created_by"),
+            "created_by": _safe_get(row, "created_by"),
             "created_at": row["created_at"],
         }
     return None
 
 
-def create_user(name: str, email: str, password: str, role: str = "Viewer", created_by: str = None):
+def create_user(name: str, email: str, password: str, role: str = "Viewer", created_by: str = None, llm_provider: str = "openai"):
     """Create a new user."""
     email = email.strip().lower()
 
@@ -136,10 +148,10 @@ def create_user(name: str, email: str, password: str, role: str = "Viewer", crea
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO users (id, name, email, password_hash, role, created_by, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO users (id, name, email, password_hash, role, llm_provider, created_by, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (user_id, name, email, password_hash, role, created_by, created_at),
+                (user_id, name, email, password_hash, role, llm_provider, created_by, created_at),
             )
         conn.commit()
     except psycopg2.errors.UniqueViolation:
@@ -153,12 +165,13 @@ def create_user(name: str, email: str, password: str, role: str = "Viewer", crea
         "name": name,
         "email": email,
         "role": role,
+        "llm_provider": llm_provider,
         "created_by": created_by,
         "created_at": created_at,
     }
 
 
-def update_user(user_id: str, name: str = None, role: str = None):
+def update_user(user_id: str, name: str = None, role: str = None, llm_provider: str = None):
     """Update a user's information."""
     updates = []
     params = []
@@ -170,6 +183,10 @@ def update_user(user_id: str, name: str = None, role: str = None):
     if role:
         updates.append("role = %s")
         params.append(role)
+
+    if llm_provider:
+        updates.append("llm_provider = %s")
+        params.append(llm_provider)
 
     if not updates:
         return get_user_by_id(user_id)

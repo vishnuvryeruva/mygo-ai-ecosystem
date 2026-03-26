@@ -3,20 +3,18 @@ Solution Advisor Agent
 Conversational advisor to gather requirements, explore existing solutions, and prepare for spec generation.
 """
 
-from openai import OpenAI
-import os
+import json
+from services.openai_service import OpenAIService
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1")
+llm_service = OpenAIService()
 
 
-def gather_requirements(user_input: str) -> dict:
+def gather_requirements(user_input: str, llm_provider: str = "openai") -> dict:
     """
     Step 1: Analyze user requirements and provide a preliminary solution approach.
     Only ask clarifying questions if critical information is missing.
     """
-    response = client.chat.completions.create(
-        model=MODEL,
+    response_text = llm_service.chat_completion(
         messages=[
             {
                 "role": "system",
@@ -49,20 +47,25 @@ Default to needs_clarification: false unless critical information is missing."""
                 "content": user_input
             }
         ],
-        response_format={"type": "json_object"}
+        temperature=0.2,
+        max_tokens=2000,
+        provider=llm_provider
     )
-    
-    import json
-    result = json.loads(response.choices[0].message.content)
-    return result
+    try:
+        return json.loads(response_text)
+    except json.JSONDecodeError:
+        return {
+            "needs_clarification": False,
+            "clarifications": response_text,
+            "summary": "Generated requirement guidance."
+        }
 
 
-def generate_solution(requirements: str) -> dict:
+def generate_solution(requirements: str, llm_provider: str = "openai") -> dict:
     """
     Step 2: Generate a comprehensive solution proposal based on requirements.
     """
-    response = client.chat.completions.create(
-        model=MODEL,
+    response_text = llm_service.chat_completion(
         messages=[
             {
                 "role": "system",
@@ -97,20 +100,22 @@ Format your response in clear markdown with headers."""
                 "role": "user",
                 "content": f"Requirements:\n{requirements}\n\nPlease generate a detailed SAP solution proposal."
             }
-        ]
+        ],
+        temperature=0.3,
+        max_tokens=4000,
+        provider=llm_provider
     )
     
     return {
-        "solution": response.choices[0].message.content
+        "solution": response_text
     }
 
 
-def refine_solution(requirements: str, current_solution: str, feedback: str) -> dict:
+def refine_solution(requirements: str, current_solution: str, feedback: str, llm_provider: str = "openai") -> dict:
     """
     Refine the solution based on user feedback.
     """
-    response = client.chat.completions.create(
-        model=MODEL,
+    response_text = llm_service.chat_completion(
         messages=[
             {
                 "role": "system",
@@ -130,21 +135,24 @@ User Feedback:
 
 Please update the solution based on the feedback."""
             }
-        ]
+        ],
+        temperature=0.3,
+        max_tokens=3500,
+        provider=llm_provider
     )
     
     return {
-        "solution": response.choices[0].message.content
+        "solution": response_text
     }
 
 
-def search_similar_solutions(solution_summary: str, rag_service) -> dict:
+def search_similar_solutions(solution_summary: str, rag_service, llm_provider: str = "openai") -> dict:
     """
     Step 3: Search for similar solutions in the knowledge base using RAG.
     """
     # Use the RAG service to find similar documents
     try:
-        result = rag_service.query(solution_summary, top_k=5)
+        result = rag_service.query(solution_summary, top_k=5, llm_provider=llm_provider)
         
         # Build similar solutions from references
         similar_solutions = []
@@ -168,14 +176,13 @@ def search_similar_solutions(solution_summary: str, rag_service) -> dict:
         }
 
 
-def improvise_solution(requirements: str, current_solution: str, similar_solutions: list, user_input: str) -> dict:
+def improvise_solution(requirements: str, current_solution: str, similar_solutions: list, user_input: str, llm_provider: str = "openai") -> dict:
     """
     Step 4: Improvise the solution by incorporating insights from similar solutions.
     """
     similar_context = "\n".join([f"- {s}" for s in similar_solutions]) if similar_solutions else "No similar solutions found."
     
-    response = client.chat.completions.create(
-        model=MODEL,
+    response_text = llm_service.chat_completion(
         messages=[
             {
                 "role": "system",
@@ -199,21 +206,23 @@ User Input:
 
 Please provide an improved and finalized solution."""
             }
-        ]
+        ],
+        temperature=0.3,
+        max_tokens=3500,
+        provider=llm_provider
     )
     
     return {
-        "final_solution": response.choices[0].message.content,
+        "final_solution": response_text,
         "message": "I've incorporated the insights and finalized the solution. It's now ready for functional specification generation."
     }
 
 
-def prepare_for_spec(final_solution: str) -> dict:
+def prepare_for_spec(final_solution: str, llm_provider: str = "openai") -> dict:
     """
     Step 5: Prepare the solution for handoff to Spec Assistant.
     """
-    response = client.chat.completions.create(
-        model=MODEL,
+    response_text = llm_service.chat_completion(
         messages=[
             {
                 "role": "system",
@@ -229,9 +238,12 @@ Extract and organize:
                 "role": "user",
                 "content": f"Solution:\n{final_solution}"
             }
-        ]
+        ],
+        temperature=0.2,
+        max_tokens=2500,
+        provider=llm_provider
     )
     
     return {
-        "spec_requirements": response.choices[0].message.content
+        "spec_requirements": response_text
     }

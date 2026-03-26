@@ -203,13 +203,16 @@ async function handleAgentMessage(agentId: string, query: string): Promise<{
     isRichText?: boolean
     references?: Reference[]
 }> {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('mygo-token') : null
+    const axiosConfig = token ? { headers: { Authorization: `Bearer ${token}` } } : {}
+
     switch (agentId) {
         case 'ask-yoda': {
-            const res = await axios.post('/api/ask-yoda', { query })
+            const res = await axios.post('/api/ask-yoda', { query }, axiosConfig)
             return { content: res.data.answer, isRichText: true, references: res.data.references }
         }
         case 'solution-advisor': {
-            const res = await axios.post('/api/solution-advisor/requirements', { user_input: query })
+            const res = await axios.post('/api/solution-advisor/requirements', { user_input: query }, axiosConfig)
             return {
                 content: res.data.analysis || res.data.error || 'Here is my analysis of your requirements.',
                 isRichText: true,
@@ -223,7 +226,7 @@ async function handleAgentMessage(agentId: string, query: string): Promise<{
                 title: 'Quick Spec',
                 description: query,
                 specType: 'functional',
-            })
+            }, axiosConfig)
             return {
                 content: res.data.spec || res.data.error || 'I\'ve generated a spec based on your description.',
                 isRichText: true,
@@ -237,7 +240,7 @@ async function handleAgentMessage(agentId: string, query: string): Promise<{
                 language: 'ABAP',
                 task: query,
                 context: ''
-            })
+            }, axiosConfig)
             return {
                 content: res.data.prompt || res.data.error || 'Here is your generated prompt.',
                 isRichText: true,
@@ -251,7 +254,7 @@ async function handleAgentMessage(agentId: string, query: string): Promise<{
                 code: query,
                 language: 'ABAP',
                 format: 'manual',
-            })
+            }, axiosConfig)
             return {
                 content: res.data.test_cases || res.data.error || 'Here are the generated test cases.',
                 isRichText: true,
@@ -264,14 +267,14 @@ async function handleAgentMessage(agentId: string, query: string): Promise<{
             const res = await axios.post('/api/explain-code', {
                 code: query,
                 language: 'ABAP',
-            })
+            }, axiosConfig)
             return {
                 content: res.data.explanation || res.data.error || 'Here is the code explanation.',
                 isRichText: true,
             }
         }
         case 'code-advisor': {
-            const res = await axios.post('/api/code-advisor', { code: query })
+            const res = await axios.post('/api/code-advisor', { code: query }, axiosConfig)
             return {
                 content: res.data.analysis || res.data.error || 'Here is my code review.',
                 isRichText: true,
@@ -279,7 +282,7 @@ async function handleAgentMessage(agentId: string, query: string): Promise<{
         }
         case 'sync-documents': {
             // For sync, use Ask Yoda for conversational queries about syncing
-            const res = await axios.post('/api/ask-yoda', { query: `Regarding document sync: ${query}` })
+            const res = await axios.post('/api/ask-yoda', { query: `Regarding document sync: ${query}` }, axiosConfig)
             return {
                 content: res.data.answer,
                 isRichText: true,
@@ -289,7 +292,7 @@ async function handleAgentMessage(agentId: string, query: string): Promise<{
             }
         }
         default: {
-            const res = await axios.post('/api/ask-yoda', { query })
+            const res = await axios.post('/api/ask-yoda', { query }, axiosConfig)
             return { content: res.data.answer, isRichText: true }
         }
     }

@@ -4,7 +4,7 @@ class CodeService:
     def __init__(self):
         self.openai_service = OpenAIService()
     
-    def explain_code(self, code, code_type='ABAP', program_name=''):
+    def explain_code(self, code, code_type='ABAP', program_name='', llm_provider='openai'):
         """Explain what ABAP code does"""
         
         system_prompt = """You are an expert SAP ABAP developer and educator.
@@ -36,7 +36,8 @@ Keep the explanation clear and concise, suitable for developers at various skill
             user_prompt,
             system_prompt=system_prompt,
             temperature=0.3,
-            max_tokens=1500
+            max_tokens=1500,
+            provider=llm_provider
         )
         
         return explanation

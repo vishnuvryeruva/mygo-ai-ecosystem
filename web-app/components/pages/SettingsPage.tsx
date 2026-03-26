@@ -5,6 +5,7 @@ import axios from 'axios'
 
 /* ─── Tab definitions ──────────────────────────────────── */
 const settingsTabs = [
+    { id: 'ai-preferences', label: 'AI Preferences', icon: '🤖' },
     { id: 'prompts', label: 'Manage Prompts', icon: '💬' },
     { id: 'sources', label: 'Manage Sources', icon: '⚙️' },
     { id: 'roles', label: 'Manage Roles', icon: '🔑' },
@@ -101,8 +102,10 @@ export default function SettingsPage() {
     const [activeTab, setActiveTab] = useState('prompts')
 
     /* Auth state */
-    const [currentUser, setCurrentUser] = useState<{ id: string; name: string; email: string; role: string } | null>(null)
+    const [currentUser, setCurrentUser] = useState<{ id: string; name: string; email: string; role: string; llm_provider?: string } | null>(null)
     const [isLoadingAuth, setIsLoadingAuth] = useState(true)
+    const [selectedLlmProvider, setSelectedLlmProvider] = useState<'openai' | 'claude' | 'gemini'>('openai')
+    const [isSavingLlmProvider, setIsSavingLlmProvider] = useState(false)
 
     /* Prompts state */
     const [activeScenario, setActiveScenario] = useState('ask-yoda')
@@ -167,6 +170,7 @@ export default function SettingsPage() {
             })
             console.log('Current user fetched:', res.data)
             setCurrentUser(res.data)
+            setSelectedLlmProvider((res.data?.llm_provider || 'openai') as 'openai' | 'claude' | 'gemini')
         } catch (err) {
             console.error('Failed to fetch current user:', err)
             localStorage.removeItem('mygo-token')
@@ -384,9 +388,65 @@ export default function SettingsPage() {
         }
     }
 
+    const handleSaveLlmProvider = async () => {
+        setIsSavingLlmProvider(true)
+        try {
+            const token = localStorage.getItem('mygo-token')
+            await axios.put('/api/auth/preferences', {
+                llm_provider: selectedLlmProvider
+            }, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            })
+            const stored = localStorage.getItem('mygo-user')
+            if (stored) {
+                const parsed = JSON.parse(stored)
+                parsed.llm_provider = selectedLlmProvider
+                localStorage.setItem('mygo-user', JSON.stringify(parsed))
+            }
+            setCurrentUser(prev => prev ? { ...prev, llm_provider: selectedLlmProvider } : prev)
+            alert('AI model preference saved successfully.')
+        } catch (err: any) {
+            console.error('Failed to save LLM provider:', err)
+            alert(err.response?.data?.error || 'Failed to save AI model preference')
+        } finally {
+            setIsSavingLlmProvider(false)
+        }
+    }
+
     /* ── Tab content renderer ──────────────────────────── */
     const renderContent = () => {
         switch (activeTab) {
+            case 'ai-preferences':
+                return (
+                    <div className="settings-section-content">
+                        <div className="settings-section-header">
+                            <div>
+                                <h2 className="settings-section-title">AI Preferences</h2>
+                                <p className="settings-section-desc">Choose the default LLM provider for your AI requests</p>
+                            </div>
+                        </div>
+                        <div className="settings-form-group" style={{ maxWidth: 360 }}>
+                            <label>Preferred LLM Provider</label>
+                            <select
+                                value={selectedLlmProvider}
+                                onChange={(e) => setSelectedLlmProvider(e.target.value as 'openai' | 'claude' | 'gemini')}
+                            >
+                                <option value="openai">OpenAI</option>
+                                <option value="claude">Claude</option>
+                                <option value="gemini">Gemini</option>
+                            </select>
+                        </div>
+                        <button
+                            className="btn btn-primary"
+                            onClick={handleSaveLlmProvider}
+                            disabled={isSavingLlmProvider}
+                            style={{ marginTop: 12 }}
+                        >
+                            {isSavingLlmProvider ? 'Saving...' : 'Save Preference'}
+                        </button>
+                    </div>
+                )
+
             /* ── MANAGE PROMPTS ─────────────────────── */
             case 'prompts':
                 return (

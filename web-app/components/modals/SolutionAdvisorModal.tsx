@@ -46,6 +46,11 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
         complete: 'Ready for Spec'
     }
 
+    const getAuthConfig = () => {
+        const token = localStorage.getItem('mygo-token')
+        return token ? { headers: { Authorization: `Bearer ${token}` } } : {}
+    }
+
     const handleSendMessage = async () => {
         if (!inputValue.trim() || loading) return
 
@@ -59,7 +64,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                 setRequirements(userMessage)
                 const response = await axios.post('/api/solution-advisor/requirements', {
                     requirements: userMessage
-                })
+                }, getAuthConfig())
 
                 setMessages(prev => [...prev, {
                     role: 'assistant',
@@ -76,7 +81,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                     requirements,
                     current_solution: generatedSolution,
                     feedback: userMessage
-                })
+                }, getAuthConfig())
                 setGeneratedSolution(response.data.solution)
                 setMessages(prev => [...prev, {
                     role: 'assistant',
@@ -88,7 +93,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                     current_solution: generatedSolution,
                     similar_solutions: similarSolutions.map(s => s.summary),
                     user_input: userMessage
-                })
+                }, getAuthConfig())
                 setFinalSolution(response.data.final_solution)
                 setMessages(prev => [...prev, {
                     role: 'assistant',
@@ -112,7 +117,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
         try {
             const response = await axios.post('/api/solution-advisor/generate', {
                 requirements: reqs
-            })
+            }, getAuthConfig())
             setGeneratedSolution(response.data.solution)
             setMessages(prev => [...prev, {
                 role: 'assistant',
@@ -136,7 +141,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
         try {
             const response = await axios.post('/api/solution-advisor/search-similar', {
                 solution_summary: generatedSolution
-            })
+            }, getAuthConfig())
             setSimilarSolutions(response.data.similar_solutions || [])
 
             if (response.data.similar_solutions?.length > 0) {
@@ -190,7 +195,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                 type: 'functional',
                 requirements: solutionContext,
                 format: 'preview'
-            })
+            }, getAuthConfig())
             sessionStorage.setItem('solutionAdvisorContext', solutionContext)
             sessionStorage.setItem('specAssistantPrefilledSpec', response.data.spec || '')
             onCreateSpec(solutionContext)

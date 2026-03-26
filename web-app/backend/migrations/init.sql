@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
     email       TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     role        TEXT DEFAULT 'Admin',
+    llm_provider TEXT NOT NULL DEFAULT 'openai',
     created_by  TEXT,
     created_at  TEXT NOT NULL
 );
