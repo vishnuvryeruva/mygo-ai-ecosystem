@@ -85,7 +85,9 @@ def get_conn(register_vec=True):
                 print(f"WARNING: Could not register pgvector: {e}")
         return conn
     except Exception as e:
-        print(f"DEBUG: PostgreSQL connection failed ({e}). Falling back to SQLite...")
+        print(f"WARNING: PostgreSQL connection failed ({e}).")
+        print(f"WARNING: DATABASE_URL={DATABASE_URL!r}")
+        print("WARNING: Falling back to SQLite — data will NOT persist across restarts. Set DATABASE_URL env var to fix this.")
         sqlite_path = os.path.join(os.path.dirname(__file__), "users.db")
         conn = sqlite3.connect(sqlite_path)
         # SQLite Row factory to mimic RealDictCursor behavior

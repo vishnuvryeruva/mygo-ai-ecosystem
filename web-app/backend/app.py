@@ -157,7 +157,44 @@ def log_request_info():
 
 @app.route('/api/health', methods=['GET'])
 def health():
-    return jsonify({"status": "ok"})
+    """Diagnostic endpoint — shows DB type, doc count, and env var presence."""
+    from db import DATABASE_URL, SQLiteConnectionProxy
+    import sqlite3 as _sqlite3
+
+    # Test DB connection and identify type
+    db_type = 'unknown'
+    db_url_hint = ''
+    doc_count = 0
+    db_error = None
+    try:
+        conn = get_conn()
+        is_sqlite = isinstance(conn, SQLiteConnectionProxy) or isinstance(conn, _sqlite3.Connection)
+        db_type = 'sqlite (FALLBACK — PostgreSQL unreachable)' if is_sqlite else 'postgresql'
+        if not is_sqlite:
+            # Show sanitised URL (hide password)
+            import re as _re
+            db_url_hint = _re.sub(r':([^@]+)@', ':***@', DATABASE_URL)
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM documents")
+            row = cur.fetchone()
+            doc_count = row[0] if row else 0
+        conn.close()
+    except Exception as e:
+        db_error = str(e)
+
+    return jsonify({
+        "status": "ok",
+        "db_type": db_type,
+        "db_url": db_url_hint,
+        "document_count": doc_count,
+        "db_error": db_error,
+        "env": {
+            "DATABASE_URL_set": bool(os.getenv("DATABASE_URL")),
+            "OPENAI_API_KEY_set": bool(os.getenv("OPENAI_API_KEY")),
+            "NEXT_PUBLIC_BACKEND_URL": os.getenv("NEXT_PUBLIC_BACKEND_URL", "not set"),
+            "FLASK_PORT": os.getenv("FLASK_PORT", "5000 (default)"),
+        }
+    })
 
 # ── Auth endpoints ──────────────────────────────────────────────────────────
 
