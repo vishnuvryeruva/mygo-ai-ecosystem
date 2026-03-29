@@ -172,6 +172,15 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
         }
     }
 
+    /** Advance from solution step to improvise (step 4) without running the search API. */
+    const handleNextFromSolution = () => {
+        setCurrentStep('improvise')
+        setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: "Feel free to refine the solution further, or click Next to mark it ready for spec."
+        }])
+    }
+
     /** Advance to the final stepper step so the user can review the solution before opening Spec Assistant. */
     const handleProceedToSpec = () => {
         const solutionContext = finalSolution || generatedSolution
@@ -179,7 +188,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
         setCurrentStep('complete')
         setMessages(prev => [...prev, {
             role: 'assistant',
-            content: "Your solution is ready for review. Check the summary above, then click 'Create Functional Spec' to open the Spec Assistant—you can refine the spec or upload to Cloud ALM there."
+            content: "Your solution is ready for review. Check the summary above, then click 'Proceed to Spec' to open the Spec Assistant—you can refine the spec or upload to Cloud ALM there."
         }])
     }
 
@@ -334,11 +343,23 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                             🔍 Search Similar Solutions
                         </button>
                         <button
+                            onClick={handleNextFromSolution}
+                            disabled={loading}
+                            className="btn btn-primary"
+                        >
+                            Next →
+                        </button>
+                    </div>
+                )}
+
+                {currentStep === 'improvise' && (
+                    <div className="px-6 py-4 border-t border-[var(--glass-border)] bg-gray-50/50 dark:bg-black/20 flex gap-3">
+                        <button
                             onClick={handleProceedToSpec}
                             disabled={loading}
                             className="btn btn-primary"
                         >
-                            ➡️ Proceed to Spec
+                            Next →
                         </button>
                     </div>
                 )}
@@ -356,7 +377,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                                     Generating spec...
                                 </span>
                             ) : (
-                                '📄 Create Functional Spec'
+                                '➡️ Proceed to Spec'
                             )}
                         </button>
                     </div>

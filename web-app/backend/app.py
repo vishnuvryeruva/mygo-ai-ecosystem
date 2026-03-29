@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import os
 import io
+import json
 import uuid
 import jwt
 import bcrypt
@@ -109,26 +110,34 @@ def get_optional_current_user_id():
         return None
 
 
-def get_llm_provider_for_user(user_id: Optional[str]):
-    """Resolve user's preferred LLM provider. Falls back to openai."""
+def get_llm_provider_for_user(user_id: Optional[str], agent_id: Optional[str] = None):
+    """Resolve user's preferred LLM provider, optionally for a specific agent."""
     if not user_id:
         return 'openai'
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT llm_provider FROM users WHERE id = %s", (user_id,))
+            cur.execute("SELECT llm_provider, agent_providers FROM users WHERE id = %s", (user_id,))
             row = cur.fetchone()
     finally:
         conn.close()
-    provider = None
-    if row:
+    if not row:
+        return 'openai'
+    try:
+        default_provider = (row.get('llm_provider') or 'openai').lower()
+    except Exception:
+        default_provider = 'openai'
+    if agent_id:
         try:
-            provider = row['llm_provider']
+            agent_providers = json.loads(row.get('agent_providers') or '{}')
+            agent_specific = agent_providers.get(agent_id, '').lower()
+            if agent_specific in ('openai', 'claude', 'gemini'):
+                print(f"LLM_PREF: user_id={user_id} agent={agent_id} provider={agent_specific} (agent-specific)")
+                return agent_specific
         except Exception:
-            provider = None
-    resolved_provider = (provider or 'openai').lower()
-    print(f"LLM_PREF: user_id={user_id or 'anonymous'} provider={resolved_provider}")
-    return resolved_provider
+            pass
+    print(f"LLM_PREF: user_id={user_id or 'anonymous'} provider={default_provider}")
+    return default_provider
 
 # Initialize services
 openai_service = OpenAIService()
@@ -230,18 +239,33 @@ def me():
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute('SELECT id, name, email, role, llm_provider, created_at FROM users WHERE id = %s', (payload['sub'],))
+            cur.execute('SELECT id, name, email, role, llm_provider, api_keys, agent_providers, created_at FROM users WHERE id = %s', (payload['sub'],))
             row = cur.fetchone()
     finally:
         conn.close()
     if not row:
         return jsonify({'error': 'User not found'}), 404
+
+    # Parse JSON columns; mask stored API key values (show last 4 chars only)
+    try:
+        raw_keys = json.loads(row.get('api_keys') or '{}')
+    except Exception:
+        raw_keys = {}
+    masked_keys = {k: ('•••••••••••' + v[-4:] if v and len(v) > 4 else '') for k, v in raw_keys.items()}
+
+    try:
+        agent_providers = json.loads(row.get('agent_providers') or '{}')
+    except Exception:
+        agent_providers = {}
+
     return jsonify({
         'id': row['id'],
         'name': row['name'],
         'email': row['email'],
         'role': row['role'] or 'Viewer',
-        'llm_provider': row['llm_provider'] if 'llm_provider' in row and row['llm_provider'] else 'openai',
+        'llm_provider': row['llm_provider'] if row.get('llm_provider') else 'openai',
+        'api_keys': masked_keys,
+        'agent_providers': agent_providers,
         'created_at': row['created_at']
     })
 
@@ -250,18 +274,50 @@ def me():
 @token_required
 def update_user_preferences():
     data = request.get_json() or {}
+    allowed_providers = {'openai', 'claude', 'gemini'}
+
     llm_provider = (data.get('llm_provider') or '').strip().lower()
-    allowed = {'openai', 'claude', 'gemini'}
-    if llm_provider not in allowed:
+    if llm_provider not in allowed_providers:
         return jsonify({'error': 'llm_provider must be one of: openai, claude, gemini'}), 400
+
+    # Validate and sanitise agent_providers map
+    raw_agent_providers = data.get('agent_providers') or {}
+    agent_providers = {
+        k: v for k, v in raw_agent_providers.items()
+        if isinstance(k, str) and isinstance(v, str) and v in allowed_providers
+    }
+
+    # Merge incoming api_keys with the existing stored ones so that a masked
+    # placeholder value (sent back by /me) does NOT overwrite the real key.
+    user_id = request.current_user['sub']
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT api_keys FROM users WHERE id = %s", (user_id,))
+            row = cur.fetchone()
+        stored_keys = json.loads((row or {}).get('api_keys') or '{}')
+    except Exception:
+        stored_keys = {}
+    finally:
+        conn.close()
+
+    incoming_keys = data.get('api_keys') or {}
+    for provider in ('openai', 'claude', 'gemini'):
+        val = incoming_keys.get(provider, '')
+        if val and not val.startswith('•'):  # real key, not masked placeholder
+            stored_keys[provider] = val.strip()
 
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("UPDATE users SET llm_provider = %s WHERE id = %s", (llm_provider, request.current_user['sub']))
+            cur.execute(
+                "UPDATE users SET llm_provider = %s, api_keys = %s, agent_providers = %s WHERE id = %s",
+                (llm_provider, json.dumps(stored_keys), json.dumps(agent_providers), user_id)
+            )
         conn.commit()
     finally:
         conn.close()
+
     return jsonify({'message': 'Preferences updated successfully', 'llm_provider': llm_provider})
 
 # Ask Yoda - RAG-based Q&A

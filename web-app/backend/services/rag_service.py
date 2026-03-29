@@ -96,7 +96,18 @@ class RAGService:
                     content = EXCLUDED.content,
                     embedding = EXCLUDED.embedding,
                     html_content = EXCLUDED.html_content,
-                    updated_on = EXCLUDED.updated_on
+                    updated_on = EXCLUDED.updated_on,
+                    document_name = EXCLUDED.document_name,
+                    source = EXCLUDED.source,
+                    doc_type = EXCLUDED.doc_type,
+                    project = EXCLUDED.project,
+                    updated_by = EXCLUDED.updated_by,
+                    web_url = EXCLUDED.web_url,
+                    is_placeholder = EXCLUDED.is_placeholder,
+                    uuid = EXCLUDED.uuid,
+                    display_id = EXCLUDED.display_id,
+                    project_id = EXCLUDED.project_id,
+                    scope_id = EXCLUDED.scope_id
                 """,
                 (
                     chunk_id,

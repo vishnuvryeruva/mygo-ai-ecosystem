@@ -131,16 +131,20 @@ def init_db():
             register_vector(conn)
 
         # Backfill schema changes for existing databases.
-        try:
-            cur = conn.cursor()
-            if is_sqlite:
-                cur.execute("ALTER TABLE users ADD COLUMN llm_provider TEXT NOT NULL DEFAULT 'openai'")
-            else:
-                cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS llm_provider TEXT NOT NULL DEFAULT 'openai'")
-            conn.commit()
-        except Exception:
-            # Column already exists or table not yet created in fallback cases.
-            pass
+        for ddl in [
+            ("ALTER TABLE users ADD COLUMN llm_provider TEXT NOT NULL DEFAULT 'openai'",
+             "ALTER TABLE users ADD COLUMN IF NOT EXISTS llm_provider TEXT NOT NULL DEFAULT 'openai'"),
+            ("ALTER TABLE users ADD COLUMN api_keys TEXT NOT NULL DEFAULT '{}'",
+             "ALTER TABLE users ADD COLUMN IF NOT EXISTS api_keys TEXT NOT NULL DEFAULT '{}'"),
+            ("ALTER TABLE users ADD COLUMN agent_providers TEXT NOT NULL DEFAULT '{}'",
+             "ALTER TABLE users ADD COLUMN IF NOT EXISTS agent_providers TEXT NOT NULL DEFAULT '{}'"),
+        ]:
+            try:
+                cur = conn.cursor()
+                cur.execute(ddl[0] if is_sqlite else ddl[1])
+                conn.commit()
+            except Exception:
+                pass
             
         print(f"DEBUG: Database initialized successfully ({'SQLite' if is_sqlite else 'PostgreSQL'}).")
     except Exception as e:
