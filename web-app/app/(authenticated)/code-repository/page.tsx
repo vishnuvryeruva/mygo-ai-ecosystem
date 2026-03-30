@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
-import AIAgentsDropdown from '@/components/AIAgentsDropdown'
+import GlobalAIAgentsDropdown from '@/components/GlobalAIAgentsDropdown'
 import FetchCodeModal from '@/components/modals/FetchCodeModal'
 
 // SAP Object Type Icons mapping
@@ -375,14 +375,6 @@ export default function CodeRepositoryPage() {
         }
     }
 
-    const onAgentSelect = (agentId: string) => {
-        if (agentId === 'sync-documents') {
-            handleSync()
-            return
-        }
-        handleAgentAction(agentId)
-    }
-
     const filteredRecords = fetchedRecords.filter(r => {
         const searchLower = searchQuery.toLowerCase()
         const rawDataString = JSON.stringify(r.rawData).toLowerCase()
@@ -513,7 +505,7 @@ export default function CodeRepositoryPage() {
                         <span className="text-[11px] font-black uppercase tracking-tighter">{viewMode === 'table' ? '{...}' : 'T'}</span>
                     </button>
                     <div className="h-8 w-[1px] bg-slate-200 mx-1"></div>
-                    <AIAgentsDropdown onAgentSelect={onAgentSelect} />
+                    <GlobalAIAgentsDropdown />
                 </div>
             </div>
 

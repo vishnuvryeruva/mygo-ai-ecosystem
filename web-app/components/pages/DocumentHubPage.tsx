@@ -2,12 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import axios from 'axios'
-import AIAgentsDropdown from '@/components/AIAgentsDropdown'
+import GlobalAIAgentsDropdown from '@/components/GlobalAIAgentsDropdown'
 import SyncSourceModal from '@/components/modals/SyncSourceModal'
-
-interface DocumentHubPageProps {
-    onAgentSelect: (agentId: string) => void
-}
 
 interface Source {
     id: string
@@ -51,7 +47,7 @@ const documentTypeNames: Record<string, string> = {
     DP: 'Decision Paper',
 }
 
-export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps) {
+export default function DocumentHubPage() {
     const [documents, setDocuments] = useState<Document[]>([])
     const [isLoading, setIsLoading] = useState(true)
 
@@ -334,7 +330,7 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                         </svg>
                         Sync Source
                     </button>
-                    <AIAgentsDropdown onAgentSelect={onAgentSelect} />
+                    <GlobalAIAgentsDropdown />
                 </div>
             </div>
 
