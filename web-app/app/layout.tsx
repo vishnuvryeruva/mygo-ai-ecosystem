@@ -16,6 +16,10 @@ export const metadata: Metadata = {
     description: 'AI-powered knowledge assistant for SAP ecosystems',
     type: 'website',
   },
+  icons: {
+    icon: '/favicon.ico',
+    shortcut: '/favicon.ico',
+  },
 }
 
 export const viewport: Viewport = {

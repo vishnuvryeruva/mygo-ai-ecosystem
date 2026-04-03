@@ -83,7 +83,7 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
       setLoading(false)
     }
     if (prefilledSpec) {
-      setSpecContent(prefilledSpec)
+      setSpecContent(prefilledSpec || '')
       setRefinementMode(true)
       sessionStorage.removeItem('specAssistantPrefilledSpec')
     }
