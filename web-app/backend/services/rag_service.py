@@ -399,7 +399,7 @@ class RAGService:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute(
                     """
-                    SELECT content, source, doc_type, project, document_name, web_url
+                    SELECT content, source, doc_type, project, document_name, web_url, document_id
                     FROM documents
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s
@@ -410,20 +410,32 @@ class RAGService:
         finally:
             conn.close()
 
-        # Build deduplicated references from matched chunks
+        # Build deduplicated references from matched chunks (prefer stable document_id)
+        seen_doc_ids = set()
         seen_names = set()
         references = []
         for row in rows:
+            raw_id = row.get('document_id')
+            doc_id = str(raw_id).strip() if raw_id is not None else ''
             doc_name = row.get('document_name') or ''
-            if doc_name and doc_name not in seen_names:
+            if doc_id:
+                if doc_id in seen_doc_ids:
+                    continue
+                seen_doc_ids.add(doc_id)
+            elif doc_name:
+                if doc_name in seen_names:
+                    continue
                 seen_names.add(doc_name)
-                references.append({
-                    'document_name': doc_name,
-                    'source': row.get('source', 'Unknown'),
-                    'project': row.get('project', 'N/A'),
-                    'doc_type': row.get('doc_type', 'Document'),
-                    'web_url': row.get('web_url', ''),
-                })
+            else:
+                continue
+            references.append({
+                'document_name': doc_name or doc_id or 'Document',
+                'document_id': doc_id,
+                'source': row.get('source', 'Unknown'),
+                'project': row.get('project', 'N/A'),
+                'doc_type': row.get('doc_type', 'Document'),
+                'web_url': row.get('web_url') or '',
+            })
 
         context = "\n\n".join(row['content'] for row in rows)
 
