@@ -97,6 +97,36 @@ def token_required(f):
     return decorated
 
 
+def jwt_or_api_key_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get('Authorization', '')
+
+        # Accept API key in either X-API-Key or Authorization: ApiKey <key>
+        request_api_key = request.headers.get('X-API-Key', '')
+        if not request_api_key and auth_header.startswith('ApiKey '):
+            request_api_key = auth_header.split(' ', 1)[1]
+
+        expected_api_key = os.getenv('SECURE_API_KEY', '')
+        if expected_api_key and request_api_key and request_api_key == expected_api_key:
+            return f(*args, **kwargs)
+
+        token = None
+        if auth_header.startswith('Bearer '):
+            token = auth_header.split(' ', 1)[1]
+        if not token:
+            return jsonify({'error': 'Token or API key missing'}), 401
+        try:
+            payload = decode_token(token)
+            request.current_user = payload
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token expired'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'error': 'Invalid token'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
 def get_optional_current_user_id():
     """Read user ID from bearer token if provided; otherwise return None."""
     auth_header = request.headers.get('Authorization', '')
@@ -467,6 +497,7 @@ def generate_spec():
 
 # Prompt Generator
 @app.route('/api/generate-prompt', methods=['POST'])
+@jwt_or_api_key_required
 def generate_prompt():
     try:
         llm_provider = get_llm_provider_for_user(get_optional_current_user_id())

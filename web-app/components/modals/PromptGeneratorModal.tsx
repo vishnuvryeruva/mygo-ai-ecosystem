@@ -33,6 +33,11 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
   const [codeExplanation, setCodeExplanation] = useState('')
   const [codeCopied, setCodeCopied] = useState(false)
 
+  const getAuthConfig = () => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('mygo-token') : null
+    return token ? { headers: { Authorization: `Bearer ${token}` } } : {}
+  }
+
   // ── Step 1: Generate prompt ────────────────
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -48,7 +53,7 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
         language,
         task: taskDescription,
         context
-      })
+      }, getAuthConfig())
       const generatedPrompt = response.data.prompt
       setPrompt(generatedPrompt)
       // Add initial prompt to chat history
@@ -77,7 +82,7 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
         language,
         task: `${taskDescription}\n\n[Previous Prompt]:\n${prompt}\n\n[Refinement Request]:\n${userRequest}`,
         context
-      })
+      }, getAuthConfig())
 
       const newPrompt = response.data.prompt
       setPrompt(newPrompt)
