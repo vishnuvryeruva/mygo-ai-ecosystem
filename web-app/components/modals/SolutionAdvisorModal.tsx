@@ -25,6 +25,7 @@ interface SimilarSolution {
 
 export default function SolutionAdvisorModal({ onClose, onCreateSpec }: SolutionAdvisorModalProps) {
     const [currentStep, setCurrentStep] = useState<Step>('requirements')
+    const [stepHistory, setStepHistory] = useState<Step[]>([])
     const [requirements, setRequirements] = useState('')
     const [messages, setMessages] = useState<Message[]>([
         {
@@ -51,6 +52,20 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
         return token ? { headers: { Authorization: `Bearer ${token}` } } : {}
     }
 
+    const goToStep = (step: Step) => {
+        setStepHistory(prev => [...prev, currentStep])
+        setCurrentStep(step)
+    }
+
+    const handleBack = () => {
+        setStepHistory(prev => {
+            const history = [...prev]
+            const previous = history.pop()
+            if (previous) setCurrentStep(previous)
+            return history
+        })
+    }
+
     const handleSendMessage = async () => {
         if (!inputValue.trim() || loading) return
 
@@ -71,9 +86,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                     content: response.data.clarifications || "Thank you for the requirements. Let me generate a solution proposal for you."
                 }])
 
-                if (response.data.needs_clarification) {
-                    // Stay in requirements step
-                } else {
+                if (!response.data.needs_clarification) {
                     await generateSolution(userMessage)
                 }
             } else if (currentStep === 'solution') {
@@ -99,7 +112,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                     role: 'assistant',
                     content: response.data.message || "I've incorporated the insights. Your solution is ready! You can now create a functional specification."
                 }])
-                setCurrentStep('complete')
+                goToStep('complete')
             }
         } catch (error) {
             console.error('Error in solution advisor:', error)
@@ -123,7 +136,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                 role: 'assistant',
                 content: `I've generated a solution proposal:\n\n${response.data.solution}\n\nWould you like to:\n1. **Refine** this solution further\n2. **Search** for similar existing solutions\n3. **Proceed** to create a functional spec`
             }])
-            setCurrentStep('solution')
+            goToStep('solution')
         } catch (error) {
             console.error('Error generating solution:', error)
             setMessages(prev => [...prev, {
@@ -137,7 +150,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
 
     const handleSearchSimilar = async () => {
         setLoading(true)
-        setCurrentStep('search')
+        goToStep('search')
         try {
             const response = await axios.post('/api/solution-advisor/search-similar', {
                 solution_summary: generatedSolution
@@ -159,14 +172,14 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                     content: "No similar solutions found in the knowledge base. Your solution appears to be unique! Would you like to proceed to create a functional specification?"
                 }])
             }
-            setCurrentStep('improvise')
+            goToStep('improvise')
         } catch (error) {
             console.error('Error searching similar solutions:', error)
             setMessages(prev => [...prev, {
                 role: 'assistant',
                 content: "Error searching for similar solutions. You can proceed to create the functional spec."
             }])
-            setCurrentStep('improvise')
+            goToStep('improvise')
         } finally {
             setLoading(false)
         }
@@ -174,7 +187,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
 
     /** Advance from solution step to improvise (step 4) without running the search API. */
     const handleNextFromSolution = () => {
-        setCurrentStep('improvise')
+        goToStep('improvise')
         setMessages(prev => [...prev, {
             role: 'assistant',
             content: "Feel free to refine the solution further, or click Next to mark it ready for spec."
@@ -185,7 +198,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
     const handleProceedToSpec = () => {
         const solutionContext = finalSolution || generatedSolution
         setFinalSolution(solutionContext)
-        setCurrentStep('complete')
+        goToStep('complete')
         setMessages(prev => [...prev, {
             role: 'assistant',
             content: "Your solution is ready for review. Check the summary above, then click 'Proceed to Spec' to open the Spec Assistant—you can refine the spec or upload to Cloud ALM there."
@@ -304,7 +317,13 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                                 ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white'
                                 : 'glass-subtle text-heading'
                                 }`}>
-                                <div className="whitespace-pre-wrap text-sm">{message.content}</div>
+                                {message.role === 'assistant' ? (
+                                    <div className="text-sm">
+                                        <RichTextResponse content={message.content} />
+                                    </div>
+                                ) : (
+                                    <div className="whitespace-pre-wrap text-sm">{message.content}</div>
+                                )}
                             </div>
                         </div>
                     ))}
@@ -336,6 +355,13 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                 {currentStep === 'solution' && (
                     <div className="px-6 py-4 border-t border-[var(--glass-border)] bg-gray-50/50 dark:bg-black/20 flex gap-3">
                         <button
+                            onClick={handleBack}
+                            disabled={loading}
+                            className="btn btn-secondary"
+                        >
+                            ← Back
+                        </button>
+                        <button
                             onClick={handleSearchSimilar}
                             disabled={loading}
                             className="btn btn-secondary"
@@ -355,6 +381,13 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                 {currentStep === 'improvise' && (
                     <div className="px-6 py-4 border-t border-[var(--glass-border)] bg-gray-50/50 dark:bg-black/20 flex gap-3">
                         <button
+                            onClick={handleBack}
+                            disabled={loading}
+                            className="btn btn-secondary"
+                        >
+                            ← Back
+                        </button>
+                        <button
                             onClick={handleProceedToSpec}
                             disabled={loading}
                             className="btn btn-primary"
@@ -366,6 +399,13 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
 
                 {currentStep === 'complete' && (
                     <div className="px-6 py-4 border-t border-[var(--glass-border)] bg-green-500/10 flex gap-3">
+                        <button
+                            onClick={handleBack}
+                            disabled={loading}
+                            className="btn btn-secondary"
+                        >
+                            ← Back
+                        </button>
                         <button
                             onClick={handleCreateFunctionalSpec}
                             disabled={loading}
