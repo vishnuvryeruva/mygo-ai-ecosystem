@@ -25,6 +25,7 @@ interface Document {
     project: string
     updatedBy: string
     updatedOn: string
+    updatedAt: number
     webUrl?: string
     documentId?: string
     documentTypeCode?: string
@@ -90,6 +91,9 @@ export default function DocumentHubPage() {
                 const docTypeCode = doc.documentTypeCode || doc.type || doc.metadata?.documentType
                 const docType = documentTypeNames[docTypeCode] || docTypeCode || 'Document'
 
+                const rawDate = doc.modifiedAt || doc.metadata?.updatedAt || doc.updatedOn || null
+                const updatedAt = rawDate ? new Date(rawDate).getTime() : 0
+                console.log('updatedAt============', doc)
                 return {
                     id: docId,
                     name: docName,
@@ -98,6 +102,7 @@ export default function DocumentHubPage() {
                     project: doc.project || doc.metadata?.project || 'N/A',
                     updatedBy: doc.updatedBy || doc.metadata?.updatedBy || 'System',
                     updatedOn: doc.updatedOn || (doc.modifiedAt ? new Date(doc.modifiedAt).toLocaleDateString() : (doc.metadata?.updatedAt ? new Date(doc.metadata.updatedAt).toLocaleDateString() : 'N/A')),
+                    updatedAt,
                     webUrl: doc.webUrl || doc.metadata?.webUrl,
                     // Same stable key as id (Postgres document_id) for view/delete
                     documentId: docId,
@@ -292,14 +297,14 @@ export default function DocumentHubPage() {
     }
 
     // Filter Logic
-    const filteredDocs = documents.filter(doc => {
-        if (sourceFilter !== 'All Sources' && doc.source !== sourceFilter) return false
-        if (typeFilter !== 'All Types' && doc.type !== typeFilter) return false
-        if (projectFilter !== 'All Projects' && doc.project !== projectFilter) return false
-        console.log('doc===', doc.project, projectFilter)
-
-        return true
-    })
+    const filteredDocs = documents
+        .filter(doc => {
+            if (sourceFilter !== 'All Sources' && doc.source !== sourceFilter) return false
+            if (typeFilter !== 'All Types' && doc.type !== typeFilter) return false
+            if (projectFilter !== 'All Projects' && doc.project !== projectFilter) return false
+            return true
+        })
+        .sort((a, b) => b.updatedAt - a.updatedAt)
 
     return (
         <div className="doc-hub-page">
