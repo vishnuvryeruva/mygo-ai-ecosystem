@@ -94,7 +94,8 @@ export default function DocumentHubPage() {
                 const docType = documentTypeNames[docTypeCode] || docTypeCode || 'Document'
 
                 const rawDate = doc.modifiedAt || doc.updatedOn || doc.metadata?.updatedAt || doc.metadata?.modifiedAt || null
-                const updatedAt = rawDate ? new Date(rawDate).getTime() : 0
+                const parsedTs = rawDate ? new Date(rawDate).getTime() : NaN
+                const updatedAt = isNaN(parsedTs) ? 0 : parsedTs
 
                 const formatDate = (dateStr: string | null | undefined): string => {
                     if (!dateStr) return 'N/A'

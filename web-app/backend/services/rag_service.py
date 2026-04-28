@@ -590,7 +590,7 @@ class RAGService:
                     'source': row.get('source') or 'File Upload',
                     'project': row.get('project') or 'N/A',
                     'updatedBy': row.get('updated_by') or 'System',
-                    'updatedOn': str(row.get('updated_on') or 'N/A'),
+                    'updatedOn': str(row.get('updated_on')) if row.get('updated_on') else None,
                     'webUrl': row.get('web_url'),
                     'documentId': row.get('document_id'),
                     'uuid': uid or '',

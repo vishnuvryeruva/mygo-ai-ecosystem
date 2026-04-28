@@ -345,8 +345,8 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                     <div className="px-6 py-3 border-t border-[var(--glass-border)] bg-indigo-500/10">
                         <details className="cursor-pointer">
                             <summary className="text-sm font-medium text-indigo-400">📋 Current Solution (click to expand)</summary>
-                            <div className="mt-2 text-sm text-muted whitespace-pre-wrap max-h-40 overflow-y-auto p-3 glass-subtle rounded-lg">
-                                {finalSolution || generatedSolution}
+                            <div className="mt-2 text-sm text-muted max-h-40 overflow-y-auto p-3 glass-subtle rounded-lg">
+                                <RichTextResponse content={finalSolution || generatedSolution} />
                             </div>
                         </details>
                     </div>
