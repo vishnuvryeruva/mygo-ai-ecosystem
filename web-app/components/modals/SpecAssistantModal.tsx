@@ -41,11 +41,15 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
   useEffect(() => {
     const context = sessionStorage.getItem('solutionAdvisorContext')
     const prefilledSpec = sessionStorage.getItem('specAssistantPrefilledSpec')
-    if (context) {
-      setRequirements(context)
-      sessionStorage.removeItem('solutionAdvisorContext')
+
+    if (prefilledSpec) {
+      setSpecContent(prefilledSpec)
+      setRefinementMode(true)
+      sessionStorage.removeItem('specAssistantPrefilledSpec')
       return
     }
+
+    if (!context) return
 
     setLoading(true)
     setSpecContent('')
@@ -81,11 +85,6 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
     return () => {
       cancelled = true
       setLoading(false)
-    }
-    if (prefilledSpec) {
-      setSpecContent(prefilledSpec || '')
-      setRefinementMode(true)
-      sessionStorage.removeItem('specAssistantPrefilledSpec')
     }
   }, [])
 
