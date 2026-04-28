@@ -4,6 +4,7 @@ import { useState } from 'react'
 import axios from 'axios'
 import LoadingSpinner from '../LoadingSpinner'
 import RichTextResponse from '../RichTextResponse'
+import AppModal from './AppModal'
 
 interface SolutionAdvisorModalProps {
     onClose: () => void
@@ -240,8 +241,8 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
     }
 
     return (
-        <div className="modal-overlay" onClick={onClose}>
-            <div className="modal max-w-5xl" onClick={e => e.stopPropagation()}>
+        <AppModal onClose={onClose}>
+            <div>
                 {/* Header */}
                 <div className="modal-header">
                     <div>
@@ -451,6 +452,6 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                     </div>
                 )}
             </div>
-        </div>
+        </AppModal>
     )
 }

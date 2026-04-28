@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import axios from 'axios'
 import RichTextResponse from '../RichTextResponse'
+import AppModal from './AppModal'
 
 interface TestCaseGeneratorModalProps {
   onClose: () => void
@@ -229,8 +230,8 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal max-w-5xl" onClick={e => e.stopPropagation()}>
+    <AppModal onClose={onClose}>
+      <div>
         <div className="modal-header">
           <h2 className="modal-title flex items-center gap-2">
             <span className="text-2xl">🧪</span>
@@ -510,6 +511,6 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
           )}
         </div>
       </div>
-    </div>
+    </AppModal>
   )
 }

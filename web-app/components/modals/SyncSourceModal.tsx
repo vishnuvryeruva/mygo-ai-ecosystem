@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import axios from 'axios'
+import AppModal from './AppModal'
 
 interface Source {
     id: string
@@ -232,21 +233,21 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
     if (!isOpen) return null
 
     return (
-        <div className="settings-modal-overlay" onClick={onClose}>
-            <div className="settings-modal sync-modal" onClick={e => e.stopPropagation()}>
-                <div className="settings-modal-header">
+        <AppModal onClose={onClose}>
+            <div>
+                <div className="modal-header">
                     <div>
-                        <h3 className="settings-modal-title">Sync From Source</h3>
-                        <p className="settings-modal-desc">Step {syncStep} of 3: {
+                        <h3 className="modal-title">Sync From Source</h3>
+                        <p className="text-sm text-muted mt-1">Step {syncStep} of 3: {
                             syncStep === 1 ? 'Select Source' :
                                 syncStep === 2 ? 'Select Project' :
                                     syncStep === 3 ? 'Confirm Sync' : 'Complete'
                         }</p>
                     </div>
-                    <button className="settings-modal-close" onClick={onClose}>×</button>
+                    <button className="modal-close" onClick={onClose}>✕</button>
                 </div>
 
-                <div className="settings-modal-body">
+                <div className="modal-body">
                     {syncStep === 1 && (
                         <div className="settings-form-group">
                             <label>Select Source</label>
@@ -397,7 +398,7 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                     )}
                 </div>
 
-                <div className="settings-modal-footer">
+                <div className="modal-footer">
                     {syncStep < 4 && (
                         <button className="btn btn-secondary" onClick={() => {
                             if (syncStep > 1) setSyncStep(syncStep - 1)
@@ -433,6 +434,6 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                     )}
                 </div>
             </div>
-        </div>
+        </AppModal>
     )
 }

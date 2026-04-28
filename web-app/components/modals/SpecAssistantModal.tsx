@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import axios from 'axios'
 import LoadingSpinner from '../LoadingSpinner'
 import RichTextResponse from '../RichTextResponse'
+import AppModal from './AppModal'
 
 interface SpecAssistantModalProps {
   onClose: () => void
@@ -379,8 +380,8 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal max-w-5xl" onClick={e => e.stopPropagation()}>
+    <AppModal onClose={onClose}>
+      <div>
         <div className="modal-header">
           <div>
             <h2 className="modal-title flex items-center gap-2">
@@ -691,6 +692,6 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
           </div>
         )}
       </div>
-    </div>
+    </AppModal>
   )
 }

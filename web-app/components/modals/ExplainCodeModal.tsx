@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import axios from 'axios'
+import AppModal from './AppModal'
 
 interface ExplainCodeModalProps {
   onClose: () => void
@@ -35,8 +36,8 @@ export default function ExplainCodeModal({ onClose }: ExplainCodeModalProps) {
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal max-w-4xl" onClick={e => e.stopPropagation()}>
+    <AppModal onClose={onClose}>
+      <div>
         <div className="modal-header">
           <h2 className="modal-title flex items-center gap-2">
             <span className="text-2xl">💻</span>
@@ -105,6 +106,6 @@ export default function ExplainCodeModal({ onClose }: ExplainCodeModalProps) {
           )}
         </div>
       </div>
-    </div>
+    </AppModal>
   )
 }

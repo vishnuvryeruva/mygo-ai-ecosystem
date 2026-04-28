@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import axios from 'axios'
 import RichTextResponse from '../RichTextResponse'
+import AppModal from './AppModal'
 
 interface PromptGeneratorModalProps {
   onClose: () => void
@@ -180,8 +181,8 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
   const currentStepIndex = stepOrder.indexOf(currentStep)
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{ maxWidth: '56rem' }} onClick={e => e.stopPropagation()}>
+    <AppModal onClose={onClose}>
+      <div>
         {/* Header */}
         <div className="modal-header">
           <div>
@@ -623,6 +624,6 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
           </div>
         )}
       </div>
-    </div>
+    </AppModal>
   )
 }
