@@ -47,16 +47,19 @@ class OpenAIService:
     def _log_provider_failure(self, provider: str, model: str, error: Exception):
         print(f"LLM_ROUTER_ERROR: provider={provider} model={model} error={str(error)}")
 
-    def _get_openai_response(self, messages, temperature=0.3, max_tokens=2000):
+    def _get_openai_response(self, messages, temperature=0.3, max_tokens=2000, json_mode=False):
         if not self.openai_client:
             raise Exception("OpenAI is selected but OPENAI_API_KEY is not configured.")
         self._log_model_selection("openai", self.openai_model)
-        response = self.openai_client.chat.completions.create(
+        kwargs = dict(
             model=self.openai_model,
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        response = self.openai_client.chat.completions.create(**kwargs)
         return response.choices[0].message.content
 
     def _resolve_gemini_model(self):
@@ -101,7 +104,7 @@ class OpenAIService:
         self._resolved_gemini_model = candidates[0] if candidates else preferred
         return self._resolved_gemini_model
 
-    def chat_completion(self, messages, temperature=0.3, max_tokens=2000, provider="openai"):
+    def chat_completion(self, messages, temperature=0.3, max_tokens=2000, provider="openai", json_mode=False):
         """Generic chat completion method across supported providers."""
         resolved_provider = self._normalize_provider(provider)
 
@@ -131,7 +134,7 @@ class OpenAIService:
             except Exception as e:
                 self._log_provider_failure("claude", self.claude_model, e)
                 print("LLM_ROUTER_FALLBACK: from=claude to=openai")
-                return self._get_openai_response(messages, temperature=temperature, max_tokens=max_tokens)
+                return self._get_openai_response(messages, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode)
 
         if resolved_provider == "gemini":
             model_name = self._resolve_gemini_model()
@@ -159,10 +162,10 @@ class OpenAIService:
             except Exception as e:
                 self._log_provider_failure("gemini", model_name, e)
                 print("LLM_ROUTER_FALLBACK: from=gemini to=openai")
-                return self._get_openai_response(messages, temperature=temperature, max_tokens=max_tokens)
+                return self._get_openai_response(messages, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode)
 
         # Default OpenAI path
-        return self._get_openai_response(messages, temperature=temperature, max_tokens=max_tokens)
+        return self._get_openai_response(messages, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode)
 
     def generate_text(self, prompt, system_prompt=None, temperature=0.3, max_tokens=2000, provider="openai"):
         """Generate text from a prompt."""
