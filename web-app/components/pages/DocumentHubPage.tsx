@@ -56,6 +56,8 @@ export default function DocumentHubPage() {
     const [sourceFilter, setSourceFilter] = useState('All Sources')
     const [typeFilter, setTypeFilter] = useState('All Types')
     const [projectFilter, setProjectFilter] = useState('All Projects')
+    const [dateFrom, setDateFrom] = useState('')
+    const [dateTo, setDateTo] = useState('')
 
     const [showSyncModal, setShowSyncModal] = useState(false)
 
@@ -91,17 +93,33 @@ export default function DocumentHubPage() {
                 const docTypeCode = doc.documentTypeCode || doc.type || doc.metadata?.documentType
                 const docType = documentTypeNames[docTypeCode] || docTypeCode || 'Document'
 
-                const rawDate = doc.modifiedAt || doc.metadata?.updatedAt || doc.updatedOn || null
+                const rawDate = doc.modifiedAt || doc.updatedOn || doc.metadata?.updatedAt || doc.metadata?.modifiedAt || null
                 const updatedAt = rawDate ? new Date(rawDate).getTime() : 0
-                console.log('updatedAt============', doc)
+
+                const formatDate = (dateStr: string | null | undefined): string => {
+                    if (!dateStr) return 'N/A'
+                    const d = new Date(dateStr)
+                    if (isNaN(d.getTime())) return dateStr
+                    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+                }
+
+                const resolvedUpdatedBy =
+                    doc.updatedBy ||
+                    doc.changedBy ||
+                    doc.lastChangedBy ||
+                    doc.modifiedBy ||
+                    doc.metadata?.updatedBy ||
+                    doc.metadata?.changedBy ||
+                    null
+
                 return {
                     id: docId,
                     name: docName,
                     type: docType,
                     source: doc.source || doc.metadata?.source || 'File Upload',
                     project: doc.project || doc.metadata?.project || 'N/A',
-                    updatedBy: doc.updatedBy || doc.metadata?.updatedBy || 'System',
-                    updatedOn: doc.updatedOn || (doc.modifiedAt ? new Date(doc.modifiedAt).toLocaleDateString() : (doc.metadata?.updatedAt ? new Date(doc.metadata.updatedAt).toLocaleDateString() : 'N/A')),
+                    updatedBy: resolvedUpdatedBy || 'System',
+                    updatedOn: formatDate(rawDate),
                     updatedAt,
                     webUrl: doc.webUrl || doc.metadata?.webUrl,
                     // Same stable key as id (Postgres document_id) for view/delete
@@ -297,11 +315,20 @@ export default function DocumentHubPage() {
     }
 
     // Filter Logic
+    const dateFromTs = dateFrom ? new Date(dateFrom).setHours(0, 0, 0, 0) : null
+    const dateToTs = dateTo ? new Date(dateTo).setHours(23, 59, 59, 999) : null
+
     const filteredDocs = documents
         .filter(doc => {
             if (sourceFilter !== 'All Sources' && doc.source !== sourceFilter) return false
             if (typeFilter !== 'All Types' && doc.type !== typeFilter) return false
             if (projectFilter !== 'All Projects' && doc.project !== projectFilter) return false
+            if (dateFromTs || dateToTs) {
+                // Docs with no date should never match a date range filter
+                if (!doc.updatedAt) return false
+                if (dateFromTs && doc.updatedAt < dateFromTs) return false
+                if (dateToTs && doc.updatedAt > dateToTs) return false
+            }
             return true
         })
         .sort((a, b) => b.updatedAt - a.updatedAt)
@@ -366,13 +393,37 @@ export default function DocumentHubPage() {
                     ))}
                 </select>
                 <div className="doc-hub-date-filter">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                         <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
                         <line x1="16" y1="2" x2="16" y2="6" />
                         <line x1="8" y1="2" x2="8" y2="6" />
                         <line x1="3" y1="10" x2="21" y2="10" />
                     </svg>
-                    <span>Date Range</span>
+                    <input
+                        type="date"
+                        value={dateFrom}
+                        onChange={e => setDateFrom(e.target.value)}
+                        title="Updated on — from"
+                        style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: 13, color: dateFrom ? '#1e293b' : '#94a3b8', cursor: 'pointer' }}
+                    />
+                    <span style={{ color: '#94a3b8', fontSize: 13 }}>–</span>
+                    <input
+                        type="date"
+                        value={dateTo}
+                        min={dateFrom || undefined}
+                        onChange={e => setDateTo(e.target.value)}
+                        title="Updated on — to"
+                        style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: 13, color: dateTo ? '#1e293b' : '#94a3b8', cursor: 'pointer' }}
+                    />
+                    {(dateFrom || dateTo) && (
+                        <button
+                            onClick={() => { setDateFrom(''); setDateTo('') }}
+                            title="Clear date filter"
+                            style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8', padding: '0 2px', fontSize: 14, lineHeight: 1 }}
+                        >
+                            ✕
+                        </button>
+                    )}
                 </div>
             </div>
 

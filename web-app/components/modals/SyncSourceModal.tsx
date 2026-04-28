@@ -150,8 +150,15 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                     return
                 }
 
+                let syncedBy: string | undefined
+                try {
+                    const raw = localStorage.getItem('mygo-user')
+                    if (raw) syncedBy = JSON.parse(raw)?.name || undefined
+                } catch { /* ignore */ }
+
                 const res = await axios.post('/api/sync', {
                     sourceId: selectedSource,
+                    ...(syncedBy ? { syncedBy } : {}),
                     documents: selectedDocs.map(doc => ({
                         ...doc,
                         id: doc.uuid || doc.id,

@@ -1590,6 +1590,7 @@ def sync_documents():
         # Support both 'documents' (full objects) and 'documentIds' (legacy)
         documents = data.get('documents', [])
         document_ids = data.get('documentIds', [])
+        synced_by = data.get('syncedBy')  # optional: name/email of the user who triggered the sync
         
         if not source_id:
             return jsonify({"error": "sourceId is required"}), 400
@@ -1610,6 +1611,9 @@ def sync_documents():
                 try:
                     # Normalize document structure to handle both old and new API formats
                     normalized_doc = _normalize_document_structure(doc)
+                    # Stamp who triggered the sync if the doc has no modifier info
+                    if synced_by and not normalized_doc['metadata'].get('updatedBy'):
+                        normalized_doc['metadata']['updatedBy'] = synced_by
                     doc_id = normalized_doc.get('id')
 
                     # Try to fetch real document content from CALM
@@ -1698,6 +1702,27 @@ def _normalize_document_structure(doc: dict) -> dict:
         'metadata': doc.get('metadata', {})
     }
     
+    # Resolve updatedOn: prefer explicit field, fall back to CALM OData modifiedAt/changedAt
+    updated_on = (
+        doc.get('updatedOn')
+        or doc.get('modifiedAt')
+        or doc.get('changedAt')
+        or doc.get('lastModified')
+        or doc.get('metadata', {}).get('updatedOn')
+        or doc.get('metadata', {}).get('modifiedAt')
+    )
+
+    # Resolve updatedBy: prefer explicit field, fall back to CALM OData changedBy/modifiedBy
+    updated_by = (
+        doc.get('updatedBy')
+        or doc.get('changedBy')
+        or doc.get('lastChangedBy')
+        or doc.get('modifiedBy')
+        or doc.get('lastChangedByUser')
+        or doc.get('metadata', {}).get('updatedBy')
+        or doc.get('metadata', {}).get('changedBy')
+    )
+
     # Merge all original fields into metadata for preservation
     normalized['metadata'].update({
         'uuid': doc.get('uuid'),
@@ -1711,6 +1736,8 @@ def _normalize_document_structure(doc: dict) -> dict:
         'sourceCode': doc.get('sourceCode'),
         'createdAt': doc.get('createdAt'),
         'modifiedAt': doc.get('modifiedAt'),
+        'updatedOn': updated_on,
+        'updatedBy': updated_by,
         'content': doc.get('content'),
         'tags': doc.get('tags', []),
         'source': doc.get('metadata', {}).get('source') if 'metadata' in doc else doc.get('source'),
