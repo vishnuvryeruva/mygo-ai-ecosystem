@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import axios from 'axios'
 import RichTextResponse from '@/components/RichTextResponse'
 import SourceReferences, { Reference } from '@/components/SourceReferences'
+import AppModal from '@/components/modals/AppModal'
 
 // ═══════════════════════════════════════════════════════════
 //  SVG Icon Components (replacing emoji)
@@ -620,10 +621,10 @@ export default function ChatbotWidget({
                 </div>
             )}
 
-            {/* ── Expanded Chat Panel ── */}
+            {/* ── Expanded Chat Panel (Modal) ── */}
             {expandedAgent && (
-                <div className="chatbot-container" style={{ bottom: minimizedChats.length > 0 ? '84px' : '24px' }}>
-                    <div className="chatbot-panel">
+                <AppModal onClose={onClose} className="chatbot-modal-panel">
+                    <div className="chatbot-panel chatbot-panel-modal">
                         {/* Header */}
                         <div className="chatbot-header" style={{ background: agent.gradient }}>
                             <div className="chatbot-header-info">
@@ -751,7 +752,7 @@ export default function ChatbotWidget({
                             </form>
                         </div>
                     </div>
-                </div>
+                </AppModal>
             )}
         </>
     )
