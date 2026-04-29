@@ -1630,6 +1630,60 @@ body {
   border-bottom-right-radius: 20px;
 }
 
+/* ─── AppModal — generic dialog shell ────────────────────────────────────────
+   All AI-tool dialogs use .app-modal-overlay + .app-modal-panel so that
+   dimensions and look-and-feel are controlled from a single place.
+   Width / maxHeight are set inline from the AppModal component constants.
+──────────────────────────────────────────────────────────────────────────── */
+.app-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 24px;
+}
+
+.app-modal-panel {
+  background: white;
+  border-radius: 20px;
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border-color);
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  animation: modalSlideUp 0.25s ease;
+  overflow: hidden;
+}
+
+/* The direct child <div> each modal renders must fill and flex so the chain
+   panel → wrapper → modal-body stays intact and scrolling works. */
+.app-modal-panel > div {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Re-use existing header / body / footer / close helpers inside AppModal */
+.app-modal-panel .modal-header {
+  flex-shrink: 0;
+}
+
+.app-modal-panel .modal-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.app-modal-panel .modal-footer {
+  flex-shrink: 0;
+}
+
 /* Form elements inside modals */
 .input-group {
   margin-bottom: 16px;
@@ -1718,6 +1772,18 @@ body {
   flex-direction: column;
 }
 
+.chatbot-modal-panel {
+  max-width: 900px;
+  height: min(85vh, 760px);
+}
+
+.chatbot-panel-modal {
+  height: 100%;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
 .chatbot-header {
   padding: 16px 20px;
   display: flex;
@@ -1772,6 +1838,12 @@ body {
   height: 360px;
   overflow-y: auto;
   padding: 16px;
+}
+
+.chatbot-panel-modal .chatbot-messages {
+  height: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .chatbot-welcome {

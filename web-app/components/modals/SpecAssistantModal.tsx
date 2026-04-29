@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import axios from 'axios'
 import LoadingSpinner from '../LoadingSpinner'
 import RichTextResponse from '../RichTextResponse'
+import AppModal from './AppModal'
 
 interface SpecAssistantModalProps {
   onClose: () => void
@@ -41,11 +42,15 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
   useEffect(() => {
     const context = sessionStorage.getItem('solutionAdvisorContext')
     const prefilledSpec = sessionStorage.getItem('specAssistantPrefilledSpec')
-    if (context) {
-      setRequirements(context)
-      sessionStorage.removeItem('solutionAdvisorContext')
+
+    if (prefilledSpec) {
+      setSpecContent(prefilledSpec)
+      setRefinementMode(true)
+      sessionStorage.removeItem('specAssistantPrefilledSpec')
       return
     }
+
+    if (!context) return
 
     setLoading(true)
     setSpecContent('')
@@ -81,11 +86,6 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
     return () => {
       cancelled = true
       setLoading(false)
-    }
-    if (prefilledSpec) {
-      setSpecContent(prefilledSpec || '')
-      setRefinementMode(true)
-      sessionStorage.removeItem('specAssistantPrefilledSpec')
     }
   }, [])
 
@@ -145,7 +145,134 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
     }
   }
 
+  const handleDownloadPdf = () => {
+    if (!specContent) return
+
+    setDownloadLoading(true)
+
+    const title = `${specType.charAt(0).toUpperCase() + specType.slice(1)} Specification`
+
+    // Convert markdown-like content to basic HTML for print
+    const htmlContent = specContent
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .split('\n\n')
+      .map(para => {
+        const lines = para.split('\n')
+        if (lines.every(l => l.trim().startsWith('- ') || l.trim().startsWith('• ') || l.trim() === '')) {
+          const items = lines.filter(l => l.trim()).map(l => `<li>${l.replace(/^[\s]*[-•]\s*/, '').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</li>`).join('')
+          return `<ul>${items}</ul>`
+        }
+        if (lines.every(l => /^\d+\./.test(l.trim()) || l.trim() === '')) {
+          const items = lines.filter(l => l.trim()).map(l => `<li>${l.replace(/^\d+\.\s*/, '').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</li>`).join('')
+          return `<ol>${items}</ol>`
+        }
+        if (para.trim().startsWith('```')) {
+          const code = para.replace(/```\w*\n?/, '').replace(/```$/, '')
+          return `<pre><code>${code}</code></pre>`
+        }
+        const text = lines
+          .map(l => l.replace(/^(#{1,4})\s+(.*)/, (_, hashes, content) => {
+            const level = Math.min(hashes.length, 4)
+            return `<h${level}>${content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</h${level}>`
+          }))
+          .map(l => l.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'))
+          .join('<br/>')
+        return `<p>${text}</p>`
+      })
+      .join('\n')
+
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) {
+      alert('Please allow pop-ups to download the PDF.')
+      setDownloadLoading(false)
+      return
+    }
+
+    printWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${title}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 12pt;
+      line-height: 1.7;
+      color: #1a1a2e;
+      padding: 40px 50px;
+      max-width: 860px;
+      margin: 0 auto;
+    }
+    .doc-header {
+      border-bottom: 2px solid #4f46e5;
+      padding-bottom: 16px;
+      margin-bottom: 28px;
+    }
+    .doc-title {
+      font-size: 22pt;
+      font-weight: 700;
+      color: #4f46e5;
+    }
+    .doc-meta {
+      font-size: 9pt;
+      color: #6b7280;
+      margin-top: 6px;
+    }
+    h1 { font-size: 16pt; color: #1e1b4b; margin: 22px 0 8px; border-bottom: 1px solid #e0e0f0; padding-bottom: 4px; }
+    h2 { font-size: 14pt; color: #312e81; margin: 18px 0 6px; }
+    h3 { font-size: 12pt; color: #4338ca; margin: 14px 0 4px; }
+    h4 { font-size: 11pt; color: #4f46e5; margin: 10px 0 4px; }
+    p  { margin: 6px 0; }
+    ul, ol { margin: 6px 0 6px 24px; }
+    li { margin-bottom: 3px; }
+    pre {
+      background: #f3f4f6;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      padding: 12px;
+      font-family: 'Courier New', monospace;
+      font-size: 9.5pt;
+      white-space: pre-wrap;
+      word-break: break-all;
+      margin: 10px 0;
+    }
+    strong { font-weight: 600; }
+    @media print {
+      body { padding: 20px 30px; }
+      .doc-header { break-after: avoid; }
+      h1, h2, h3 { break-after: avoid; }
+      pre { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="doc-header">
+    <div class="doc-title">${title}</div>
+    <div class="doc-meta">Generated on ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+  </div>
+  ${htmlContent}
+</body>
+</html>`)
+
+    printWindow.document.close()
+    printWindow.focus()
+
+    // Give browser time to render before triggering print
+    setTimeout(() => {
+      printWindow.print()
+      setDownloadLoading(false)
+    }, 500)
+  }
+
   const handleDownload = async (format: 'docx' | 'pdf' | 'excel') => {
+    if (format === 'pdf') {
+      handleDownloadPdf()
+      return
+    }
+
     if (!specContent) return
 
     setDownloadLoading(true)
@@ -158,30 +285,13 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
         responseType: 'blob'
       })
 
-      if (response.data.type === 'application/json') {
-        const text = await response.data.text()
-        console.error('Received JSON error instead of Blob:', text)
-        try {
-          const json = JSON.parse(text)
-          alert('Error downloading: ' + (json.error || 'Unknown error'))
-        } catch (e) {
-          alert('Error downloading: ' + text)
-        }
-        return
-      }
-
-      const mimeType = format === 'docx'
-        ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-        : 'application/pdf'
-
-      const extension = format === 'docx' ? 'docx' : 'pdf'
-
+      const mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
       const blob = new Blob([response.data], { type: mimeType })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.style.display = 'none'
       a.href = url
-      a.download = `${specType}_specification.${extension}`
+      a.download = `${specType}_specification.docx`
       document.body.appendChild(a)
       a.click()
 
@@ -270,8 +380,8 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal max-w-5xl" onClick={e => e.stopPropagation()}>
+    <AppModal onClose={onClose}>
+      <div>
         <div className="modal-header">
           <div>
             <h2 className="modal-title flex items-center gap-2">
@@ -348,14 +458,35 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
               )}
 
               {/* Generated Specification */}
-              {downloadLoading && (
-                <div className="mb-4 flex items-center justify-center text-gray-400">
-                  <div className="spinner w-4 h-4 mr-2" />
-                  Preparing download...
-                </div>
-              )}
-
               <div className="glass-subtle p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-medium text-sm text-main">
+                    {specType.charAt(0).toUpperCase() + specType.slice(1)} Specification
+                  </h3>
+                  <button
+                    onClick={() => handleDownload('pdf')}
+                    disabled={downloadLoading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 transition-colors text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {downloadLoading ? (
+                      <>
+                        <span className="spinner w-3 h-3" />
+                        Generating PDF...
+                      </>
+                    ) : (
+                      <>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                          <polyline points="14 2 14 8 20 8" />
+                          <line x1="16" y1="13" x2="8" y2="13" />
+                          <line x1="16" y1="17" x2="8" y2="17" />
+                          <polyline points="10 9 9 9 8 9" />
+                        </svg>
+                        Download PDF
+                      </>
+                    )}
+                  </button>
+                </div>
                 <RichTextResponse
                   content={specContent}
                   title={`${specType.charAt(0).toUpperCase() + specType.slice(1)} Specification`}
@@ -561,6 +692,6 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
           </div>
         )}
       </div>
-    </div>
+    </AppModal>
   )
 }

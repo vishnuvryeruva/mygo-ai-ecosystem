@@ -109,20 +109,17 @@ export default function AuthenticatedLayout({
     }, [])
 
     const handleQuickAction = (actionId: string) => {
-        console.log('handleQuickAction', actionId)
-        
-        // Handle special actions that open modals directly
-        if (actionId === 'document-upload') {
-            setActiveModal('document-upload')
+        // Ask Yoda opens the chatbot widget
+        if (actionId === 'ask-yoda') {
+            handleAgentSelect(actionId)
             return
         }
+        // All other actions open their modal directly
         if (actionId === 'sync-sources') {
             setSyncSourceModalOpen(true)
             return
         }
-        
-        // For other actions, open the chatbot
-        handleAgentSelect(actionId)
+        setActiveModal(actionId)
     }
 
     const closeModal = () => {

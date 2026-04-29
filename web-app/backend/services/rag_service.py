@@ -164,8 +164,20 @@ class RAGService:
         doc_type = meta.get('type') or meta.get('documentType') or 'Document'
         source = meta.get('source', 'CALM')
         project = meta.get('project', 'N/A')
-        updated_by = meta.get('updatedBy', 'System')
-        updated_on = str(meta.get('updatedOn', meta.get('lastModified', 'N/A')))
+        updated_by = (
+            meta.get('updatedBy')
+            or meta.get('changedBy')
+            or meta.get('lastChangedBy')
+            or meta.get('modifiedBy')
+            or 'System'
+        )
+        updated_on = str(
+            meta.get('updatedOn')
+            or meta.get('modifiedAt')
+            or meta.get('changedAt')
+            or meta.get('lastModified')
+            or 'N/A'
+        )
         web_url = meta.get('webUrl', '')
         uuid_val = meta.get('uuid', '')
         display_id = meta.get('displayId', '')
@@ -229,8 +241,20 @@ class RAGService:
             doc_type = meta.get('type') or meta.get('documentType') or 'Document'
             source = meta.get('source', 'CALM')
             project = meta.get('project', 'N/A')
-            updated_by = meta.get('updatedBy', 'System')
-            updated_on = meta.get('updatedOn', meta.get('lastModified', 'N/A'))
+            updated_by = (
+                meta.get('updatedBy')
+                or meta.get('changedBy')
+                or meta.get('lastChangedBy')
+                or meta.get('modifiedBy')
+                or 'System'
+            )
+            updated_on = (
+                meta.get('updatedOn')
+                or meta.get('modifiedAt')
+                or meta.get('changedAt')
+                or meta.get('lastModified')
+                or 'N/A'
+            )
             web_url = meta.get('webUrl', '')
             uuid_val = meta.get('uuid', '')
             display_id = meta.get('displayId', '')
@@ -566,7 +590,7 @@ class RAGService:
                     'source': row.get('source') or 'File Upload',
                     'project': row.get('project') or 'N/A',
                     'updatedBy': row.get('updated_by') or 'System',
-                    'updatedOn': str(row.get('updated_on') or 'N/A'),
+                    'updatedOn': str(row.get('updated_on')) if row.get('updated_on') else None,
                     'webUrl': row.get('web_url'),
                     'documentId': row.get('document_id'),
                     'uuid': uid or '',
