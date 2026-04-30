@@ -2,12 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import axios from 'axios'
-import AIAgentsDropdown from '@/components/AIAgentsDropdown'
+import GlobalAIAgentsDropdown from '@/components/GlobalAIAgentsDropdown'
 import SyncSourceModal from '@/components/modals/SyncSourceModal'
-
-interface DocumentHubPageProps {
-    onAgentSelect: (agentId: string) => void
-}
 
 interface Source {
     id: string
@@ -29,6 +25,7 @@ interface Document {
     project: string
     updatedBy: string
     updatedOn: string
+    updatedAt: number
     webUrl?: string
     documentId?: string
     documentTypeCode?: string
@@ -51,7 +48,7 @@ const documentTypeNames: Record<string, string> = {
     DP: 'Decision Paper',
 }
 
-export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps) {
+export default function DocumentHubPage() {
     const [documents, setDocuments] = useState<Document[]>([])
     const [isLoading, setIsLoading] = useState(true)
 
@@ -59,6 +56,8 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
     const [sourceFilter, setSourceFilter] = useState('All Sources')
     const [typeFilter, setTypeFilter] = useState('All Types')
     const [projectFilter, setProjectFilter] = useState('All Projects')
+    const [dateFrom, setDateFrom] = useState('')
+    const [dateTo, setDateTo] = useState('')
 
     const [showSyncModal, setShowSyncModal] = useState(false)
 
@@ -82,11 +81,37 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
             const res = await axios.get('/api/documents')
             // Map backend docs to frontend format
             const mappedDocs = res.data.documents.map((doc: any) => {
-                // Handle both old and new API response formats
-                const docId = doc.uuid || doc.id || doc.name || doc.filename
+                // documentId / document_id = DB document_id (chunk prefix); never use display name for delete/view
+                const docId =
+                    doc.documentId ||
+                    doc.document_id ||
+                    doc.uuid ||
+                    doc.id ||
+                    doc.name ||
+                    doc.filename
                 const docName = doc.title || doc.name || doc.metadata?.name || doc.filename
                 const docTypeCode = doc.documentTypeCode || doc.type || doc.metadata?.documentType
                 const docType = documentTypeNames[docTypeCode] || docTypeCode || 'Document'
+
+                const rawDate = doc.modifiedAt || doc.updatedOn || doc.metadata?.updatedAt || doc.metadata?.modifiedAt || null
+                const parsedTs = rawDate ? new Date(rawDate).getTime() : NaN
+                const updatedAt = isNaN(parsedTs) ? 0 : parsedTs
+
+                const formatDate = (dateStr: string | null | undefined): string => {
+                    if (!dateStr) return 'N/A'
+                    const d = new Date(dateStr)
+                    if (isNaN(d.getTime())) return dateStr
+                    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+                }
+
+                const resolvedUpdatedBy =
+                    doc.updatedBy ||
+                    doc.changedBy ||
+                    doc.lastChangedBy ||
+                    doc.modifiedBy ||
+                    doc.metadata?.updatedBy ||
+                    doc.metadata?.changedBy ||
+                    null
 
                 return {
                     id: docId,
@@ -94,10 +119,12 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                     type: docType,
                     source: doc.source || doc.metadata?.source || 'File Upload',
                     project: doc.project || doc.metadata?.project || 'N/A',
-                    updatedBy: doc.updatedBy || doc.metadata?.updatedBy || 'System',
-                    updatedOn: doc.updatedOn || (doc.modifiedAt ? new Date(doc.modifiedAt).toLocaleDateString() : (doc.metadata?.updatedAt ? new Date(doc.metadata.updatedAt).toLocaleDateString() : 'N/A')),
+                    updatedBy: resolvedUpdatedBy || 'System',
+                    updatedOn: formatDate(rawDate),
+                    updatedAt,
                     webUrl: doc.webUrl || doc.metadata?.webUrl,
-                    documentId: doc.documentId || doc.metadata?.uuid
+                    // Same stable key as id (Postgres document_id) for view/delete
+                    documentId: docId,
                 }
             })
             setDocuments(mappedDocs)
@@ -130,8 +157,9 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
         setIsDeleting(true)
         setShowDeleteConfirm(false)
         try {
+            // Path delete: matches Flask /api/documents/<id> and Next [document_id] proxy (local Postgres only — not Cloud ALM)
             await Promise.all(
-                Array.from(selectedDocumentIds).map(id =>
+                Array.from(selectedDocumentIds).map((id) =>
                     axios.delete(`/api/documents/${encodeURIComponent(id)}`)
                 )
             )
@@ -288,14 +316,23 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
     }
 
     // Filter Logic
-    const filteredDocs = documents.filter(doc => {
-        if (sourceFilter !== 'All Sources' && doc.source !== sourceFilter) return false
-        if (typeFilter !== 'All Types' && doc.type !== typeFilter) return false
-        if (projectFilter !== 'All Projects' && doc.project !== projectFilter) return false
-        console.log('doc===', doc.project, projectFilter)
+    const dateFromTs = dateFrom ? new Date(dateFrom).setHours(0, 0, 0, 0) : null
+    const dateToTs = dateTo ? new Date(dateTo).setHours(23, 59, 59, 999) : null
 
-        return true
-    })
+    const filteredDocs = documents
+        .filter(doc => {
+            if (sourceFilter !== 'All Sources' && doc.source !== sourceFilter) return false
+            if (typeFilter !== 'All Types' && doc.type !== typeFilter) return false
+            if (projectFilter !== 'All Projects' && doc.project !== projectFilter) return false
+            if (dateFromTs || dateToTs) {
+                // Docs with no date should never match a date range filter
+                if (!doc.updatedAt) return false
+                if (dateFromTs && doc.updatedAt < dateFromTs) return false
+                if (dateToTs && doc.updatedAt > dateToTs) return false
+            }
+            return true
+        })
+        .sort((a, b) => b.updatedAt - a.updatedAt)
 
     return (
         <div className="doc-hub-page">
@@ -326,7 +363,7 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                         </svg>
                         Sync Source
                     </button>
-                    <AIAgentsDropdown onAgentSelect={onAgentSelect} />
+                    <GlobalAIAgentsDropdown />
                 </div>
             </div>
 
@@ -357,13 +394,37 @@ export default function DocumentHubPage({ onAgentSelect }: DocumentHubPageProps)
                     ))}
                 </select>
                 <div className="doc-hub-date-filter">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                         <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
                         <line x1="16" y1="2" x2="16" y2="6" />
                         <line x1="8" y1="2" x2="8" y2="6" />
                         <line x1="3" y1="10" x2="21" y2="10" />
                     </svg>
-                    <span>Date Range</span>
+                    <input
+                        type="date"
+                        value={dateFrom}
+                        onChange={e => setDateFrom(e.target.value)}
+                        title="Updated on — from"
+                        style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: 13, color: dateFrom ? '#1e293b' : '#94a3b8', cursor: 'pointer' }}
+                    />
+                    <span style={{ color: '#94a3b8', fontSize: 13 }}>–</span>
+                    <input
+                        type="date"
+                        value={dateTo}
+                        min={dateFrom || undefined}
+                        onChange={e => setDateTo(e.target.value)}
+                        title="Updated on — to"
+                        style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: 13, color: dateTo ? '#1e293b' : '#94a3b8', cursor: 'pointer' }}
+                    />
+                    {(dateFrom || dateTo) && (
+                        <button
+                            onClick={() => { setDateFrom(''); setDateTo('') }}
+                            title="Clear date filter"
+                            style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8', padding: '0 2px', fontSize: 14, lineHeight: 1 }}
+                        >
+                            ✕
+                        </button>
+                    )}
                 </div>
             </div>
 

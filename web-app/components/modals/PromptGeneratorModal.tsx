@@ -3,24 +3,30 @@
 import { useState, useRef, useEffect } from 'react'
 import axios from 'axios'
 import RichTextResponse from '../RichTextResponse'
+import AppModal from './AppModal'
 
 interface PromptGeneratorModalProps {
   onClose: () => void
+  initialPrompt?: string
+  initialLanguage?: string
+  initialTask?: string
 }
 
 type Step = 'describe' | 'refine' | 'code'
 
-export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalProps) {
-  const [language, setLanguage] = useState('ABAP')
-  const [taskDescription, setTaskDescription] = useState('')
-  const [context, setContext] = useState('')
-  const [prompt, setPrompt] = useState('')
+export default function PromptGeneratorModal({ onClose, initialPrompt, initialLanguage, initialTask }: PromptGeneratorModalProps) {
+  const [language, setLanguage] = useState(initialLanguage || 'ABAP')
+  const [taskDescription, setTaskDescription] = useState(initialTask || '')
+  // const [context, setContext] = useState('')
+  const [prompt, setPrompt] = useState(initialPrompt || '')
   const [loading, setLoading] = useState(false)
-  const [currentStep, setCurrentStep] = useState<Step>('describe')
+  const [currentStep, setCurrentStep] = useState<Step>(initialPrompt ? 'refine' : 'describe')
 
   // Conversational refinement state
   const [refinementInput, setRefinementInput] = useState('')
-  const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'assistant', content: string }[]>([])
+  const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'assistant', content: string }[]>(
+    initialPrompt ? [{ role: 'assistant', content: initialPrompt }] : []
+  )
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   // Auto-scroll to bottom when chat history updates
@@ -32,6 +38,11 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
   const [generatedCode, setGeneratedCode] = useState('')
   const [codeExplanation, setCodeExplanation] = useState('')
   const [codeCopied, setCodeCopied] = useState(false)
+
+  const getAuthConfig = () => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('mygo-token') : null
+    return token ? { headers: { Authorization: `Bearer ${token}` } } : {}
+  }
 
   // ── Step 1: Generate prompt ────────────────
   const handleGenerate = async (e: React.FormEvent) => {
@@ -47,8 +58,8 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
       const response = await axios.post('/api/generate-prompt', {
         language,
         task: taskDescription,
-        context
-      })
+        // context
+      }, getAuthConfig())
       const generatedPrompt = response.data.prompt
       setPrompt(generatedPrompt)
       // Add initial prompt to chat history
@@ -76,8 +87,8 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
       const response = await axios.post('/api/generate-prompt', {
         language,
         task: `${taskDescription}\n\n[Previous Prompt]:\n${prompt}\n\n[Refinement Request]:\n${userRequest}`,
-        context
-      })
+        // context
+      }, getAuthConfig())
 
       const newPrompt = response.data.prompt
       setPrompt(newPrompt)
@@ -107,7 +118,7 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
       const response = await axios.post('/api/generate-code', {
         language,
         prompt,
-        context
+        // context
       })
       setGeneratedCode(response.data.code || '')
       setCodeExplanation(response.data.explanation || '')
@@ -175,8 +186,8 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
   const currentStepIndex = stepOrder.indexOf(currentStep)
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{ maxWidth: '56rem' }} onClick={e => e.stopPropagation()}>
+    <AppModal onClose={onClose}>
+      <div>
         {/* Header */}
         <div className="modal-header">
           <div>
@@ -273,18 +284,6 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
                   placeholder="Describe the code generation task..."
                   className="input"
                   rows={4}
-                  style={{ resize: 'vertical' }}
-                />
-              </div>
-
-              <div className="input-group">
-                <label className="input-label">Additional Context (Optional)</label>
-                <textarea
-                  value={context}
-                  onChange={(e) => setContext(e.target.value)}
-                  placeholder="Add any additional context or requirements..."
-                  className="input"
-                  rows={3}
                   style={{ resize: 'vertical' }}
                 />
               </div>
@@ -618,6 +617,6 @@ export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalPr
           </div>
         )}
       </div>
-    </div>
+    </AppModal>
   )
 }

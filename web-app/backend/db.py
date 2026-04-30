@@ -85,7 +85,9 @@ def get_conn(register_vec=True):
                 print(f"WARNING: Could not register pgvector: {e}")
         return conn
     except Exception as e:
-        print(f"DEBUG: PostgreSQL connection failed ({e}). Falling back to SQLite...")
+        print(f"WARNING: PostgreSQL connection failed ({e}).")
+        print(f"WARNING: DATABASE_URL={DATABASE_URL!r}")
+        print("WARNING: Falling back to SQLite — data will NOT persist across restarts. Set DATABASE_URL env var to fix this.")
         sqlite_path = os.path.join(os.path.dirname(__file__), "users.db")
         conn = sqlite3.connect(sqlite_path)
         # SQLite Row factory to mimic RealDictCursor behavior
@@ -129,6 +131,22 @@ def init_db():
         
         if not is_sqlite:
             register_vector(conn)
+
+        # Backfill schema changes for existing databases.
+        for ddl in [
+            ("ALTER TABLE users ADD COLUMN llm_provider TEXT NOT NULL DEFAULT 'openai'",
+             "ALTER TABLE users ADD COLUMN IF NOT EXISTS llm_provider TEXT NOT NULL DEFAULT 'openai'"),
+            ("ALTER TABLE users ADD COLUMN api_keys TEXT NOT NULL DEFAULT '{}'",
+             "ALTER TABLE users ADD COLUMN IF NOT EXISTS api_keys TEXT NOT NULL DEFAULT '{}'"),
+            ("ALTER TABLE users ADD COLUMN agent_providers TEXT NOT NULL DEFAULT '{}'",
+             "ALTER TABLE users ADD COLUMN IF NOT EXISTS agent_providers TEXT NOT NULL DEFAULT '{}'"),
+        ]:
+            try:
+                cur = conn.cursor()
+                cur.execute(ddl[0] if is_sqlite else ddl[1])
+                conn.commit()
+            except Exception:
+                pass
             
         print(f"DEBUG: Database initialized successfully ({'SQLite' if is_sqlite else 'PostgreSQL'}).")
     except Exception as e:

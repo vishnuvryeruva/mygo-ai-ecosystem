@@ -5,6 +5,7 @@ import axios from 'axios'
 
 /* ─── Tab definitions ──────────────────────────────────── */
 const settingsTabs = [
+    { id: 'ai-preferences', label: 'AI Preferences', icon: '🤖' },
     { id: 'prompts', label: 'Manage Prompts', icon: '💬' },
     { id: 'sources', label: 'Manage Sources', icon: '⚙️' },
     { id: 'roles', label: 'Manage Roles', icon: '🔑' },
@@ -101,8 +102,17 @@ export default function SettingsPage() {
     const [activeTab, setActiveTab] = useState('prompts')
 
     /* Auth state */
-    const [currentUser, setCurrentUser] = useState<{ id: string; name: string; email: string; role: string } | null>(null)
+    const [currentUser, setCurrentUser] = useState<{ id: string; name: string; email: string; role: string; llm_provider?: string } | null>(null)
     const [isLoadingAuth, setIsLoadingAuth] = useState(true)
+    const [selectedLlmProvider, setSelectedLlmProvider] = useState<'openai' | 'claude' | 'gemini'>('openai')
+    const [isSavingLlmProvider, setIsSavingLlmProvider] = useState(false)
+
+    /* API key state — values are masked on load, real on edit */
+    const [apiKeys, setApiKeys] = useState<Record<string, string>>({ openai: '', claude: '', gemini: '' })
+    const [showKey, setShowKey] = useState<Record<string, boolean>>({ openai: false, claude: false, gemini: false })
+    /* Per-agent provider preferences */
+    const [agentProviders, setAgentProviders] = useState<Record<string, string>>({})
+    const [saveMessage, setSaveMessage] = useState('')
 
     /* Prompts state */
     const [activeScenario, setActiveScenario] = useState('ask-yoda')
@@ -160,13 +170,16 @@ export default function SettingsPage() {
                 setIsLoadingAuth(false)
                 return
             }
-            
+
             console.log('Fetching current user with token:', token.substring(0, 20) + '...')
             const res = await axios.get('/api/auth/me', {
                 headers: { Authorization: `Bearer ${token}` }
             })
             console.log('Current user fetched:', res.data)
             setCurrentUser(res.data)
+            setSelectedLlmProvider((res.data?.llm_provider || 'openai') as 'openai' | 'claude' | 'gemini')
+            setApiKeys({ openai: res.data?.api_keys?.openai || '', claude: res.data?.api_keys?.claude || '', gemini: res.data?.api_keys?.gemini || '' })
+            setAgentProviders(res.data?.agent_providers || {})
         } catch (err) {
             console.error('Failed to fetch current user:', err)
             localStorage.removeItem('mygo-token')
@@ -384,9 +397,181 @@ export default function SettingsPage() {
         }
     }
 
+    const handleSaveLlmProvider = async () => {
+        setIsSavingLlmProvider(true)
+        setSaveMessage('')
+        try {
+            const token = localStorage.getItem('mygo-token')
+            await axios.put('/api/auth/preferences', {
+                llm_provider: selectedLlmProvider,
+                api_keys: apiKeys,
+                agent_providers: agentProviders,
+            }, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            })
+            const stored = localStorage.getItem('mygo-user')
+            if (stored) {
+                const parsed = JSON.parse(stored)
+                parsed.llm_provider = selectedLlmProvider
+                localStorage.setItem('mygo-user', JSON.stringify(parsed))
+            }
+            setCurrentUser(prev => prev ? { ...prev, llm_provider: selectedLlmProvider } : prev)
+            // Re-fetch to get masked keys back from server
+            await fetchCurrentUser()
+            setSaveMessage('Preferences saved successfully.')
+            setTimeout(() => setSaveMessage(''), 3000)
+        } catch (err: any) {
+            console.error('Failed to save LLM provider:', err)
+            setSaveMessage(err.response?.data?.error || 'Failed to save preferences.')
+        } finally {
+            setIsSavingLlmProvider(false)
+        }
+    }
+
     /* ── Tab content renderer ──────────────────────────── */
     const renderContent = () => {
         switch (activeTab) {
+            case 'ai-preferences': {
+                const providers = [
+                    { id: 'openai', label: 'OpenAI', logo: '🟢', hint: 'GPT-4.1 · Embeddings · Recommended' },
+                    { id: 'claude', label: 'Claude (Anthropic)', logo: '🟠', hint: 'claude-sonnet-4-6 · Long context' },
+                    { id: 'gemini', label: 'Gemini (Google)', logo: '🔵', hint: 'gemini-2.5-flash · Multimodal' },
+                ] as const
+                const agents = [
+                    { id: 'ask-yoda', label: 'Ask Yoda' },
+                    { id: 'spec-agent', label: 'Spec Agent' },
+                    { id: 'test-cases', label: 'Test Case Generator' },
+                    { id: 'code-analysis', label: 'Code Analysis' },
+                    { id: 'solution-advisor', label: 'Solution Advisor' },
+                    { id: 'passage-generator', label: 'Passage Generator' },
+                ]
+                return (
+                    <div className="settings-section-content" style={{ maxWidth: 760 }}>
+                        <div className="settings-section-header">
+                            <div>
+                                <h2 className="settings-section-title">AI Preferences</h2>
+                                <p className="settings-section-desc">Configure API keys and choose which LLM powers each agent</p>
+                            </div>
+                        </div>
+
+                        {/* ── Provider Cards ── */}
+                        <h3 className="settings-panel-title" style={{ marginBottom: 10 }}>LLM Providers & API Keys</h3>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 28 }}>
+                            {providers.map(p => {
+                                const isDefault = selectedLlmProvider === p.id
+                                const keyVal = apiKeys[p.id] || ''
+                                const configured = !!keyVal
+                                return (
+                                    <div
+                                        key={p.id}
+                                        style={{
+                                            border: isDefault ? '2px solid var(--primary)' : '1px solid var(--glass-border)',
+                                            borderRadius: 10,
+                                            padding: '14px 16px',
+                                            background: isDefault ? 'rgba(255,104,44,0.05)' : 'var(--glass-bg)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: 16,
+                                        }}
+                                    >
+                                        {/* Select as default */}
+                                        <input
+                                            type="radio"
+                                            name="defaultProvider"
+                                            checked={isDefault}
+                                            onChange={() => setSelectedLlmProvider(p.id)}
+                                            style={{ accentColor: 'var(--primary)', width: 17, height: 17, flexShrink: 0 }}
+                                        />
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                                                <span style={{ fontSize: 16 }}>{p.logo}</span>
+                                                <span style={{ fontWeight: 600, fontSize: 14 }}>{p.label}</span>
+                                                {isDefault && (
+                                                    <span style={{ fontSize: 11, background: 'var(--primary)', color: '#fff', borderRadius: 4, padding: '1px 7px', fontWeight: 600 }}>Default</span>
+                                                )}
+                                                <span style={{ fontSize: 11, marginLeft: 'auto', color: configured ? '#16a34a' : '#9ca3af' }}>
+                                                    {configured ? '● Configured' : '○ No key set'}
+                                                </span>
+                                            </div>
+                                            <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0, marginBottom: 8 }}>{p.hint}</p>
+                                            {/* API key input */}
+                                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                                <input
+                                                    type={showKey[p.id] ? 'text' : 'password'}
+                                                    placeholder={`Enter ${p.label} API key`}
+                                                    value={keyVal}
+                                                    onChange={e => setApiKeys(prev => ({ ...prev, [p.id]: e.target.value }))}
+                                                    style={{ flex: 1, fontSize: 13, padding: '6px 10px', borderRadius: 6, border: '1px solid var(--glass-border)', background: 'var(--input-bg, #fff)', fontFamily: 'monospace' }}
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowKey(prev => ({ ...prev, [p.id]: !prev[p.id] }))}
+                                                    style={{ fontSize: 14, padding: '6px 10px', borderRadius: 6, border: '1px solid var(--glass-border)', background: 'transparent', cursor: 'pointer' }}
+                                                    title={showKey[p.id] ? 'Hide key' : 'Show key'}
+                                                >
+                                                    {showKey[p.id] ? '🙈' : '👁️'}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+
+                        {/* ── Per-agent provider selection ── */}
+                        <h3 className="settings-panel-title" style={{ marginBottom: 10 }}>Agent-Level Provider</h3>
+                        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+                            Override the default provider for individual agents. Leave as &quot;Default&quot; to use the selection above.
+                        </p>
+                        <div style={{ border: '1px solid var(--glass-border)', borderRadius: 10, overflow: 'hidden', marginBottom: 24 }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                                <thead>
+                                    <tr style={{ background: 'var(--glass-bg)', borderBottom: '1px solid var(--glass-border)' }}>
+                                        <th style={{ textAlign: 'left', padding: '10px 16px', fontWeight: 600, color: 'var(--text-muted)' }}>Agent</th>
+                                        <th style={{ textAlign: 'left', padding: '10px 16px', fontWeight: 600, color: 'var(--text-muted)' }}>LLM Provider</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {agents.map((agent, i) => (
+                                        <tr key={agent.id} style={{ borderTop: i > 0 ? '1px solid var(--glass-border)' : undefined }}>
+                                            <td style={{ padding: '10px 16px', fontWeight: 500 }}>{agent.label}</td>
+                                            <td style={{ padding: '8px 16px' }}>
+                                                <select
+                                                    value={agentProviders[agent.id] || ''}
+                                                    onChange={e => setAgentProviders(prev => ({ ...prev, [agent.id]: e.target.value }))}
+                                                    style={{ fontSize: 13, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--glass-border)', background: 'var(--input-bg, #fff)', minWidth: 160 }}
+                                                >
+                                                    <option value="">Default ({selectedLlmProvider})</option>
+                                                    <option value="openai">OpenAI</option>
+                                                    <option value="claude">Claude</option>
+                                                    <option value="gemini">Gemini</option>
+                                                </select>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {/* ── Save ── */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                            <button
+                                className="btn btn-primary"
+                                onClick={handleSaveLlmProvider}
+                                disabled={isSavingLlmProvider}
+                            >
+                                {isSavingLlmProvider ? 'Saving...' : 'Save Preferences'}
+                            </button>
+                            {saveMessage && (
+                                <span style={{ fontSize: 13, color: saveMessage.startsWith('Preferences') ? '#16a34a' : '#dc2626' }}>
+                                    {saveMessage}
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                )
+            }
+
             /* ── MANAGE PROMPTS ─────────────────────── */
             case 'prompts':
                 return (
@@ -518,6 +703,8 @@ export default function SettingsPage() {
                                             >
                                                 <option value="CALM">SAP Cloud ALM</option>
                                                 <option value="BTP">SAP BTP</option>
+                                                <option value="SharePoint">SharePoint</option>
+                                                <option value="JIRA">JIRA</option>
                                             </select>
                                         </div>
                                         <div className="settings-form-group">
@@ -758,7 +945,7 @@ export default function SettingsPage() {
                                     const isCurrentUser = currentUser?.id === user.id
                                     const isAdminUser = user.role === 'Admin'
                                     const canDelete = !isCurrentUser && !isAdminUser
-                                    
+
                                     return (
                                         <div key={user.id} className="settings-user-card">
                                             <div className="settings-user-avatar">
@@ -803,10 +990,10 @@ export default function SettingsPage() {
 
     /* ── Render ─────────────────────────────────────────── */
     const isAdmin = currentUser?.role === 'Admin'
-    
+
     console.log('Current user:', currentUser)
     console.log('Is admin:', isAdmin)
-    
+
     // Filter tabs based on user role
     const visibleTabs = settingsTabs.filter(tab => {
         if (tab.id === 'roles' || tab.id === 'users') {
@@ -814,7 +1001,7 @@ export default function SettingsPage() {
         }
         return true
     })
-    
+
     console.log('Visible tabs:', visibleTabs.map(t => t.id))
 
     if (isLoadingAuth) {

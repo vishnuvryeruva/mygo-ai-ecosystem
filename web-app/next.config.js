@@ -1,6 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  experimental: {
+    // Default 30s timeout too short for solution-advisor/generate (LLM calls can take 60+ seconds)
+    proxyTimeout: 120000, // 2 minutes
+  },
   async rewrites() {
     // Use environment variable or default to localhost for development
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000'

@@ -20,7 +20,7 @@ const agents = [
         ),
     },
     {
-        id: 'sync-documents',
+        id: 'sync-sources',
         title: 'Fetch Code',
         description: 'Fetch latest code from BTP sources',
         icon: (
@@ -77,7 +77,7 @@ const agents = [
         ),
     },
     {
-        id: 'code-explainer',
+        id: 'explain-code',
         title: 'Code Explainer',
         description: 'Analyze and explain SAP ABAP code objects',
         icon: (

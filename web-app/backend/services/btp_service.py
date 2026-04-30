@@ -7,6 +7,13 @@ import requests
 import json
 from typing import Dict, Any, Optional
 
+
+class BtpODataError(Exception):
+    def __init__(self, status_code: int, message: str, raw_body: Any = None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.raw_body = raw_body
+
 class BTPService:
     def __init__(self, config: Dict[str, Any], use_env_fallback: bool = True):
         self.api_endpoint = config.get('apiEndpoint', '').strip()
@@ -114,13 +121,12 @@ class BTPService:
             
             # Handle $filter
             if filter_query:
+                # Allow raw OData expressions to pass through without URL-encoding.
+                # The incoming Flask request has already decoded query params, and
+                # the `requests` library will handle any required encoding.
                 clean_filter = filter_query.replace('$filter=', '').strip()
                 if clean_filter:
-                    import urllib.parse
-                    # Encode while keeping some OData-friendly characters literal if possible,
-                    # but quote is generally safest for all special chars.
-                    encoded_filter = urllib.parse.quote(clean_filter)
-                    query_params.append(f"$filter={encoded_filter}")
+                    query_params.append(f"$filter={clean_filter}")
             
             # Handle $skip
             if skip and str(skip) != '0':
@@ -156,10 +162,18 @@ class BTPService:
             
             if response.status_code != 200:
                 print(f"[BTP-FETCH] Error ({response.status_code}): {response.text[:500]}")
-                raise Exception(f"BTP OData Error: {response.status_code}")
+                # Try to preserve structured error details from BTP if present
+                try:
+                    error_body = response.json()
+                except Exception:
+                    error_body = response.text
+                raise BtpODataError(response.status_code, f"BTP OData Error: {response.status_code}", error_body)
             
             return response.json()
                 
+        except BtpODataError:
+            # Let callers distinguish OData errors (with real status codes)
+            raise
         except Exception as e:
             print(f"[BTP-FETCH] Failed: {str(e)}")
             raise Exception(f"Failed to fetch BTP data: {str(e)}")

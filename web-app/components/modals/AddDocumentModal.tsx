@@ -48,9 +48,7 @@ export default function AddDocumentModal({ onClose, onSyncComplete }: AddDocumen
     const [selectedStagingDocs, setSelectedStagingDocs] = useState<string[]>([])
     const [isFetchingStaging, setIsFetchingStaging] = useState(false)
 
-    // Demo data indicator
-    const [isUsingDemoData, setIsUsingDemoData] = useState(false)
-    const [demoError, setDemoError] = useState<string | null>(null)
+    const [projectLoadError, setProjectLoadError] = useState<string | null>(null)
     const [isLoadingProjects, setIsLoadingProjects] = useState(false)
 
     useEffect(() => {
@@ -76,8 +74,7 @@ export default function AddDocumentModal({ onClose, onSyncComplete }: AddDocumen
         setSelectedProject('')
         setScopes([])
         setSelectedScope('')
-        setIsUsingDemoData(false)
-        setDemoError(null)
+        setProjectLoadError(null)
         setProjects([])
 
         // Fetch real projects from CALM API
@@ -87,15 +84,10 @@ export default function AddDocumentModal({ onClose, onSyncComplete }: AddDocumen
             try {
                 const response = await axios.get(`/api/calm/${sourceId}/projects`)
                 setProjects(response.data.projects || [])
-
-                // Check if using demo data
-                if (response.data.isDemo) {
-                    setIsUsingDemoData(true)
-                    setDemoError(response.data.error || 'Could not connect to Cloud ALM API')
-                }
-            } catch (error) {
+            } catch (error: any) {
                 console.error('Error fetching projects:', error)
                 setProjects([])
+                setProjectLoadError(error?.response?.data?.error || 'Failed to load Cloud ALM projects.')
             } finally {
                 setIsLoadingProjects(false)
             }
@@ -242,20 +234,20 @@ export default function AddDocumentModal({ onClose, onSyncComplete }: AddDocumen
                 </div>
 
                 <div className="modal-body max-h-[70vh] overflow-y-auto">
-                    {/* Demo Data Warning */}
-                    {isUsingDemoData && (
+                    {/* Cloud ALM project loading error */}
+                    {projectLoadError && (
                         <div className="mb-4 p-3 rounded-lg" style={{
-                            backgroundColor: 'rgba(255, 166, 0, 0.15)',
-                            border: '1px solid rgba(255, 166, 0, 0.5)',
-                            color: '#ffa600'
+                            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                            border: '1px solid rgba(239, 68, 68, 0.5)',
+                            color: '#f87171'
                         }}>
                             <div className="flex items-start gap-2">
                                 <span className="text-lg">⚠️</span>
                                 <div>
-                                    <strong>Using Demo Data</strong>
+                                    <strong>Cloud ALM Error</strong>
                                     <p className="text-sm mt-1 opacity-80">
-                                        Could not connect to Cloud ALM API. Showing sample data for demonstration.
-                                        {demoError && <span className="block mt-1 text-xs opacity-60">Error: {demoError}</span>}
+                                        Could not load projects from Cloud ALM.
+                                        <span className="block mt-1 text-xs opacity-70">Error: {projectLoadError}</span>
                                     </p>
                                 </div>
                             </div>

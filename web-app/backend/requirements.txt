@@ -4,6 +4,8 @@ flask-cors
 
 # ── AI / OpenAI ──────────────────────────────────────────────────────────────
 openai
+anthropic
+google-generativeai
 
 # ── Database: PostgreSQL + pgvector (replaces sqlite3 + chromadb) ────────────
 psycopg2-binary

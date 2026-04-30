@@ -64,10 +64,7 @@ cd web-app
 npm install
 ```
 
-3. Copy the Mygo logotype to the public directory:
-```bash
-cp "../Mygo logotype.png" public/
-```
+3. Brand logo: `public/my-yodaai-logo.png` is used app-wide (replace that file to update branding).
 
 4. Run the development server:
 ```bash

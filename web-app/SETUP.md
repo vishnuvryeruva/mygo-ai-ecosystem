@@ -94,7 +94,7 @@ Frontend will be available at `http://localhost:3000`
 
 2. **API connection errors**: Make sure the backend is running on port 5000
 
-3. **Image not loading**: Ensure `Mygo logotype.png` is in the `public/` directory
+3. **Image not loading**: Ensure `my-yodaai-logo.png` is in the `public/` directory
 
 ## Development Notes
 

@@ -9,7 +9,7 @@ class TestService:
     def __init__(self):
         self.openai_service = OpenAIService()
     
-    def generate_test_cases(self, code, test_type='manual', format_type='excel', custom_prompt=None):
+    def generate_test_cases(self, code, test_type='manual', format_type='excel', custom_prompt=None, llm_provider='openai'):
         """Generate manual test cases or ABAP Unit test skeletons"""
         
         # Use custom prompt if provided, otherwise load from config
@@ -108,7 +108,8 @@ Generate at least 5-10 comprehensive test cases."""
             user_prompt,
             system_prompt=system_prompt,
             temperature=0.4,
-            max_tokens=3000
+            max_tokens=3000,
+            provider=llm_provider
         )
         
         if format_type == 'excel':

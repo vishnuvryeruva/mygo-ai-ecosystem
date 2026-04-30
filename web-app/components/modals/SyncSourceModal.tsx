@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import axios from 'axios'
+import AppModal from './AppModal'
 
 interface Source {
     id: string
@@ -20,6 +21,11 @@ interface SyncSourceModalProps {
     onClose: () => void
     onSyncComplete?: () => void
     preSelectedSourceId?: string | null
+}
+
+const isCloudAlmSource = (source: Source) => {
+    const sourceType = String(source?.type || '').trim().toUpperCase()
+    return sourceType === 'CALM' || sourceType === 'SAP CLOUD ALM'
 }
 
 // Map SAP document type codes to human-readable names
@@ -42,6 +48,8 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
     const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set())
     const [syncStatus, setSyncStatus] = useState<Record<string, boolean>>({})
     const [isSyncing, setIsSyncing] = useState(false)
+    const [isLoadingProjects, setIsLoadingProjects] = useState(false)
+    const [projectLoadError, setProjectLoadError] = useState<string | null>(null)
     const [syncResult, setSyncResult] = useState<{ message: string; count: number; updated: number; added: number } | null>(null)
 
     useEffect(() => {
@@ -70,7 +78,11 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
     const fetchSources = async () => {
         try {
             const res = await axios.get('/api/sources')
-            setSources(res.data.sources || [])
+            const calmSources = (res.data.sources || []).filter(isCloudAlmSource)
+            setSources(calmSources)
+            if (calmSources.length === 0) {
+                setSelectedSource('')
+            }
         } catch (err) {
             console.error('Failed to fetch sources:', err)
         }
@@ -78,11 +90,17 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
 
     const fetchProjects = async (sourceId: string) => {
         setProjects([]) // Clear previous
+        setProjectLoadError(null)
+        setIsLoadingProjects(true)
         try {
             const res = await axios.get(`/api/calm/${sourceId}/projects`)
             setProjects(res.data.projects || [])
-        } catch (err) {
+        } catch (err: any) {
             console.error('Failed to fetch projects:', err)
+            setProjects([])
+            setProjectLoadError(err?.response?.data?.error || 'Failed to load projects.')
+        } finally {
+            setIsLoadingProjects(false)
         }
     }
 
@@ -132,8 +150,15 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                     return
                 }
 
+                let syncedBy: string | undefined
+                try {
+                    const raw = localStorage.getItem('mygo-user')
+                    if (raw) syncedBy = JSON.parse(raw)?.name || undefined
+                } catch { /* ignore */ }
+
                 const res = await axios.post('/api/sync', {
                     sourceId: selectedSource,
+                    ...(syncedBy ? { syncedBy } : {}),
                     documents: selectedDocs.map(doc => ({
                         ...doc,
                         id: doc.uuid || doc.id,
@@ -182,6 +207,9 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
         setSyncStep(1)
         setSelectedSource('')
         setSelectedProject('')
+        setProjects([])
+        setIsLoadingProjects(false)
+        setProjectLoadError(null)
         setSyncResult(null)
         setDocsToSync([])
         setSelectedDocIds(new Set())
@@ -200,33 +228,43 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
 
     const toggleSelectAll = () => {
         if (selectedDocIds.size === docsToSync.length) {
-            // Deselect all
             setSelectedDocIds(new Set())
         } else {
-            // Select all
             const allIds = docsToSync.map(doc => doc.uuid || doc.id)
             setSelectedDocIds(new Set(allIds))
         }
     }
 
+    const selectNew = () => {
+        const newIds = docsToSync
+            .filter(doc => !syncStatus[doc.uuid || doc.id])
+            .map(doc => doc.uuid || doc.id)
+        setSelectedDocIds(new Set(newIds))
+    }
+
+    const isAllNew = docsToSync.length > 0 &&
+        docsToSync.filter(doc => !syncStatus[doc.uuid || doc.id]).every(doc => selectedDocIds.has(doc.uuid || doc.id)) &&
+        docsToSync.filter(doc => syncStatus[doc.uuid || doc.id]).every(doc => !selectedDocIds.has(doc.uuid || doc.id)) &&
+        docsToSync.some(doc => !syncStatus[doc.uuid || doc.id])
+
     if (!isOpen) return null
 
     return (
-        <div className="settings-modal-overlay" onClick={onClose}>
-            <div className="settings-modal sync-modal" onClick={e => e.stopPropagation()}>
-                <div className="settings-modal-header">
+        <AppModal onClose={onClose}>
+            <div>
+                <div className="modal-header">
                     <div>
-                        <h3 className="settings-modal-title">Sync From Source</h3>
-                        <p className="settings-modal-desc">Step {syncStep} of 3: {
+                        <h3 className="modal-title">Sync From Source</h3>
+                        <p className="text-sm text-muted mt-1">Step {syncStep} of 3: {
                             syncStep === 1 ? 'Select Source' :
                                 syncStep === 2 ? 'Select Project' :
                                     syncStep === 3 ? 'Confirm Sync' : 'Complete'
                         }</p>
                     </div>
-                    <button className="settings-modal-close" onClick={onClose}>×</button>
+                    <button className="modal-close" onClick={onClose}>✕</button>
                 </div>
 
-                <div className="settings-modal-body">
+                <div className="modal-body">
                     {syncStep === 1 && (
                         <div className="settings-form-group">
                             <label>Select Source</label>
@@ -249,8 +287,15 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                     {syncStep === 2 && (
                         <div className="settings-form-group">
                             <label>Select Project</label>
-                            {projects.length === 0 ? (
+                            {isLoadingProjects ? (
                                 <p>Loading projects...</p>
+                            ) : projectLoadError ? (
+                                <div>
+                                    <p className="text-sm text-red-600 mb-2">Failed to load projects.</p>
+                                    <p className="text-xs text-red-500">{projectLoadError}</p>
+                                </div>
+                            ) : projects.length === 0 ? (
+                                <p className="text-sm text-gray-500">No projects found for this source.</p>
                             ) : (
                                 <select
                                     value={selectedProject}
@@ -277,15 +322,27 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                                 <>
                                     <div className="mb-4 flex justify-between items-center">
                                         <p>Found <strong>{docsToSync.length}</strong> documents in this project.</p>
-                                        <label className="flex items-center gap-2 text-sm cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                checked={selectedDocIds.size === docsToSync.length && docsToSync.length > 0}
-                                                onChange={toggleSelectAll}
-                                                className="cursor-pointer"
-                                            />
-                                            <span>Select All</span>
-                                        </label>
+                                        <div className="flex items-center gap-3">
+                                            <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedDocIds.size === docsToSync.length && docsToSync.length > 0}
+                                                    onChange={toggleSelectAll}
+                                                    className="cursor-pointer"
+                                                />
+                                                <span>{selectedDocIds.size === docsToSync.length && docsToSync.length > 0 ? "Deselect All" : "Select All"}</span>
+                                            </label>
+                                            <button
+                                                onClick={selectNew}
+                                                className={`text-sm px-2 py-0.5 rounded border transition-colors ${
+                                                    isAllNew
+                                                        ? 'bg-blue-100 text-blue-700 border-blue-300'
+                                                        : 'text-blue-600 border-blue-200 hover:bg-blue-50'
+                                                }`}
+                                            >
+                                                Select New
+                                            </button>
+                                        </div>
                                     </div>
                                     <div className="max-h-60 overflow-y-auto border rounded p-2 bg-gray-50">
                                         {docsToSync.map(doc => {
@@ -370,7 +427,7 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                     )}
                 </div>
 
-                <div className="settings-modal-footer">
+                <div className="modal-footer">
                     {syncStep < 4 && (
                         <button className="btn btn-secondary" onClick={() => {
                             if (syncStep > 1) setSyncStep(syncStep - 1)
@@ -406,6 +463,6 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                     )}
                 </div>
             </div>
-        </div>
+        </AppModal>
     )
 }

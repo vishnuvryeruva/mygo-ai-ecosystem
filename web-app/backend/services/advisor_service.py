@@ -5,7 +5,7 @@ class AdvisorService:
     def __init__(self):
         self.openai_service = OpenAIService()
     
-    def analyze_code(self, code, code_type='ABAP'):
+    def analyze_code(self, code, code_type='ABAP', llm_provider='openai'):
         """Analyze ABAP code for anti-patterns and provide improvement recommendations"""
         
         system_prompt = """You are an expert ABAP code reviewer specializing in identifying anti-patterns and code quality issues.
@@ -64,7 +64,8 @@ Return ONLY valid JSON, no additional text."""
             user_prompt,
             system_prompt=system_prompt,
             temperature=0.2,
-            max_tokens=3000
+            max_tokens=3000,
+            provider=llm_provider
         )
         
         # Parse JSON response

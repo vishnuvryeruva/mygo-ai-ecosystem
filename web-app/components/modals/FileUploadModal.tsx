@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import axios from 'axios'
+import AppModal from './AppModal'
 
 interface FileUploadModalProps {
     onClose: () => void
@@ -187,8 +188,8 @@ export default function FileUploadModal({ onClose, onUploadComplete }: FileUploa
     }
 
     return (
-        <div className="modal-overlay" onClick={onClose}>
-            <div className="modal max-w-3xl" onClick={e => e.stopPropagation()}>
+        <AppModal onClose={onClose}>
+            <div>
                 <div className="modal-header">
                     <h2 className="modal-title flex items-center gap-2">
                         <span className="text-2xl">📤</span>
@@ -370,7 +371,7 @@ export default function FileUploadModal({ onClose, onUploadComplete }: FileUploa
 
             {/* Success Dialog */}
             {showSuccessDialog && (
-                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[70]" onClick={() => { setShowSuccessDialog(false); if (onUploadComplete) onUploadComplete(); onClose() }}>
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[110]" onClick={() => { setShowSuccessDialog(false); if (onUploadComplete) onUploadComplete(); onClose() }}>
                     <div className="modal max-w-md" onClick={e => e.stopPropagation()}>
                         <div className="modal-header">
                             <h3 className="modal-title flex items-center gap-2">
@@ -396,6 +397,6 @@ export default function FileUploadModal({ onClose, onUploadComplete }: FileUploa
                     </div>
                 </div>
             )}
-        </div>
+        </AppModal>
     )
 }

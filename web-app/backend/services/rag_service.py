@@ -113,11 +113,20 @@ class RAGService:
                     content = EXCLUDED.content,
                     embedding = EXCLUDED.embedding,
                     html_content = EXCLUDED.html_content,
-                    updated_on = EXCLUDED.updated_on
+                    updated_on = EXCLUDED.updated_on,
+                    document_name = EXCLUDED.document_name,
+                    source = EXCLUDED.source,
+                    doc_type = EXCLUDED.doc_type,
+                    project = EXCLUDED.project,
+                    updated_by = EXCLUDED.updated_by,
+                    web_url = EXCLUDED.web_url,
+                    is_placeholder = EXCLUDED.is_placeholder,
+                    uuid = EXCLUDED.uuid,
+                    display_id = EXCLUDED.display_id,
+                    project_id = EXCLUDED.project_id,
+                    scope_id = EXCLUDED.scope_id
                 """
                 # SQLite proxy handles %s to ? but we can use ? directly if we know it's sqlite
-                # Actually SQLiteConnectionProxy.execute translates %s to ?
-                # So we can keep %s if we use the proxy, but here we might be using direct sqlite3
                 params = (
                     chunk_id, doc_id, metadata.get('document_name', ''), content, embedding_val,
                     metadata.get('source', 'File Upload'), metadata.get('type', 'Unknown'),
@@ -146,16 +155,37 @@ class RAGService:
                         content = EXCLUDED.content,
                         embedding = EXCLUDED.embedding,
                         html_content = EXCLUDED.html_content,
-                        updated_on = EXCLUDED.updated_on
+                        updated_on = EXCLUDED.updated_on,
+                        document_name = EXCLUDED.document_name,
+                        source = EXCLUDED.source,
+                        doc_type = EXCLUDED.doc_type,
+                        project = EXCLUDED.project,
+                        updated_by = EXCLUDED.updated_by,
+                        web_url = EXCLUDED.web_url,
+                        is_placeholder = EXCLUDED.is_placeholder,
+                        uuid = EXCLUDED.uuid,
+                        display_id = EXCLUDED.display_id,
+                        project_id = EXCLUDED.project_id,
+                        scope_id = EXCLUDED.scope_id
                     """,
                     (
-                        chunk_id, doc_id, metadata.get('document_name', ''), content, embedding,
-                        metadata.get('source', 'File Upload'), metadata.get('type', 'Unknown'),
-                        metadata.get('project', 'N/A'), metadata.get('updatedBy', 'System'),
-                        metadata.get('updatedOn', 'N/A'), metadata.get('webUrl', ''),
-                        metadata.get('is_placeholder', False), metadata.get('html_content', ''),
-                        metadata.get('uuid', ''), metadata.get('displayId', ''),
-                        metadata.get('projectId', ''), metadata.get('scopeId', ''),
+                        chunk_id,
+                        doc_id,
+                        metadata.get('document_name', ''),
+                        content,
+                        embedding,
+                        metadata.get('source', 'File Upload'),
+                        metadata.get('type', 'Unknown'),
+                        metadata.get('project', 'N/A'),
+                        metadata.get('updatedBy', 'System'),
+                        metadata.get('updatedOn', 'N/A'),
+                        metadata.get('webUrl', ''),
+                        metadata.get('is_placeholder', False),
+                        metadata.get('html_content', ''),
+                        metadata.get('uuid', ''),
+                        metadata.get('displayId', ''),
+                        metadata.get('projectId', ''),
+                        metadata.get('scopeId', ''),
                     )
                 )
 
@@ -193,8 +223,20 @@ class RAGService:
         doc_type = meta.get('type') or meta.get('documentType') or 'Document'
         source = meta.get('source', 'CALM')
         project = meta.get('project', 'N/A')
-        updated_by = meta.get('updatedBy', 'System')
-        updated_on = str(meta.get('updatedOn', meta.get('lastModified', 'N/A')))
+        updated_by = (
+            meta.get('updatedBy')
+            or meta.get('changedBy')
+            or meta.get('lastChangedBy')
+            or meta.get('modifiedBy')
+            or 'System'
+        )
+        updated_on = str(
+            meta.get('updatedOn')
+            or meta.get('modifiedAt')
+            or meta.get('changedAt')
+            or meta.get('lastModified')
+            or 'N/A'
+        )
         web_url = meta.get('webUrl', '')
         uuid_val = meta.get('uuid', '')
         display_id = meta.get('displayId', '')
@@ -258,8 +300,20 @@ class RAGService:
             doc_type = meta.get('type') or meta.get('documentType') or 'Document'
             source = meta.get('source', 'CALM')
             project = meta.get('project', 'N/A')
-            updated_by = meta.get('updatedBy', 'System')
-            updated_on = meta.get('updatedOn', meta.get('lastModified', 'N/A'))
+            updated_by = (
+                meta.get('updatedBy')
+                or meta.get('changedBy')
+                or meta.get('lastChangedBy')
+                or meta.get('modifiedBy')
+                or 'System'
+            )
+            updated_on = (
+                meta.get('updatedOn')
+                or meta.get('modifiedAt')
+                or meta.get('changedAt')
+                or meta.get('lastModified')
+                or 'N/A'
+            )
             web_url = meta.get('webUrl', '')
             uuid_val = meta.get('uuid', '')
             display_id = meta.get('displayId', '')
@@ -415,7 +469,7 @@ class RAGService:
 
         return results
 
-    def query(self, query_text, top_k=5, custom_prompt=None):
+    def query(self, query_text, top_k=5, custom_prompt=None, llm_provider='openai'):
         """Query the RAG system using cosine similarity search.
         
         Returns:
@@ -441,7 +495,7 @@ class RAGService:
                     return dot_product / (magnitude1 * magnitude2)
 
                 with conn.cursor() as cur:
-                    cur.execute("SELECT content, source, doc_type, project, document_name, web_url, embedding FROM documents")
+                    cur.execute("SELECT content, source, doc_type, project, document_name, web_url, document_id, embedding FROM documents")
                     all_rows = cur.fetchall()
                 
                 scored_rows = []
@@ -471,7 +525,7 @@ class RAGService:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                     cur.execute(
                         """
-                        SELECT content, source, doc_type, project, document_name, web_url
+                        SELECT content, source, doc_type, project, document_name, web_url, document_id
                         FROM documents
                         ORDER BY embedding <=> %s::vector
                         LIMIT %s
@@ -482,20 +536,32 @@ class RAGService:
         finally:
             conn.close()
 
-        # Build deduplicated references from matched chunks
+        # Build deduplicated references from matched chunks (prefer stable document_id)
+        seen_doc_ids = set()
         seen_names = set()
         references = []
         for row in rows:
+            raw_id = row.get('document_id')
+            doc_id = str(raw_id).strip() if raw_id is not None else ''
             doc_name = row.get('document_name') or ''
-            if doc_name and doc_name not in seen_names:
+            if doc_id:
+                if doc_id in seen_doc_ids:
+                    continue
+                seen_doc_ids.add(doc_id)
+            elif doc_name:
+                if doc_name in seen_names:
+                    continue
                 seen_names.add(doc_name)
-                references.append({
-                    'document_name': doc_name,
-                    'source': row.get('source', 'Unknown'),
-                    'project': row.get('project', 'N/A'),
-                    'doc_type': row.get('doc_type', 'Document'),
-                    'web_url': row.get('web_url', ''),
-                })
+            else:
+                continue
+            references.append({
+                'document_name': doc_name or doc_id or 'Document',
+                'document_id': doc_id,
+                'source': row.get('source', 'Unknown'),
+                'project': row.get('project', 'N/A'),
+                'doc_type': row.get('doc_type', 'Document'),
+                'web_url': row.get('web_url') or '',
+            })
 
         context = "\n\n".join(row['content'] for row in rows)
 
@@ -540,21 +606,19 @@ class RAGService:
             user_prompt,
             system_prompt=system_prompt,
             temperature=0.3,
-            max_tokens=1000
+            max_tokens=1000,
+            provider=llm_provider
         )
         return {"answer": answer, "references": references}
 
     def list_documents(self):
         """List all unique documents with their metadata."""
-        conn = get_conn()
-        is_sqlite = self._is_sqlite(conn)
-        
         try:
-            if is_sqlite:
+            conn = get_conn()
+            if self._is_sqlite(conn):
                 # SQLite compatible version
                 with conn.cursor() as cur:
                     # SQLite doesn't support DISTINCT ON, use GROUP BY
-                    # This is a bit simplified but usually works for this schema
                     cur.execute(
                         """
                         SELECT 
@@ -570,54 +634,111 @@ class RAGService:
                     rows = [dict(row) for row in cur.fetchall()]
             else:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    # Get the first chunk per document_id (which holds html and full metadata)
+                    # One row per logical document (first chunk by id). Chunk count via subquery —
+                    # DISTINCT ON + COUNT(*) OVER fails on some PostgreSQL builds.
                     cur.execute(
                         """
-                        SELECT DISTINCT ON (document_id)
-                            document_id, document_name, source, doc_type, project,
-                            updated_by, updated_on, web_url, uuid, display_id,
-                            length(content) as content_len,
-                            COUNT(*) OVER (PARTITION BY document_id) as chunk_count
-                        FROM documents
-                        ORDER BY document_id, id
+                        SELECT DISTINCT ON (d.document_id)
+                            d.document_id,
+                            d.document_name,
+                            d.source,
+                            d.doc_type,
+                            d.project,
+                            d.updated_by,
+                            d.updated_on,
+                            d.web_url,
+                            d.uuid,
+                            d.display_id,
+                            length(d.content) AS content_len,
+                            (SELECT COUNT(*)::int FROM documents d2
+                             WHERE d2.document_id IS NOT DISTINCT FROM d.document_id) AS chunk_count
+                        FROM documents d
+                        ORDER BY d.document_id, d.id
                         """
                     )
                     rows = cur.fetchall()
         except Exception as e:
-            print(f"Error listing documents: {e}")
+            print(f"Error listing documents (primary query): {e}")
+            import traceback
+            traceback.print_exc()
+            rows = []
+            if conn:
+                try:
+                    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                        cur.execute(
+                            """
+                            SELECT DISTINCT ON (d.document_id)
+                                d.document_id,
+                                d.document_name,
+                                d.source,
+                                d.doc_type,
+                                d.project,
+                                d.updated_by,
+                                d.updated_on,
+                                d.web_url,
+                                length(d.content) AS content_len,
+                                (SELECT COUNT(*)::int FROM documents d2
+                                 WHERE d2.document_id IS NOT DISTINCT FROM d.document_id) AS chunk_count
+                            FROM documents d
+                            ORDER BY d.document_id, d.id
+                            """
+                        )
+                        rows = cur.fetchall()
+                except Exception as e2:
+                    print(f"Error listing documents (fallback query): {e2}")
+                    traceback.print_exc()
+                    return []
+        finally:
+            if conn:
+                conn.close()
+
+        doc_list = []
+        try:
+            for row in rows:
+                content_len = row.get('content_len') or 0
+                chunk_count = int(row.get('chunk_count') or 1)
+                estimated_size = content_len * chunk_count
+                size_kb = estimated_size / 1024
+                uid = row.get('uuid')
+                if uid is not None and hasattr(uid, 'hex'):
+                    uid = str(uid)
+                doc_list.append({
+                    'name': row.get('document_name') or row.get('document_id') or 'Unknown',
+                    'type': row.get('doc_type') or 'Unknown',
+                    'source': row.get('source') or 'File Upload',
+                    'project': row.get('project') or 'N/A',
+                    'updatedBy': row.get('updated_by') or 'System',
+                    'updatedOn': str(row.get('updated_on')) if row.get('updated_on') else None,
+                    'webUrl': row.get('web_url'),
+                    'documentId': row.get('document_id'),
+                    'uuid': uid or '',
+                    'size': f"{size_kb:.1f} KB" if size_kb >= 1 else f"{estimated_size} bytes",
+                    'chunks': chunk_count,
+                })
+        except Exception as e:
+            print(f"Error building document list: {e}")
             import traceback
             traceback.print_exc()
             return []
-        finally:
-            conn.close()
-
-        doc_list = []
-        for row in rows:
-            estimated_size = (row['content_len'] or 0) * (row['chunk_count'] or 1)
-            size_kb = estimated_size / 1024
-            doc_list.append({
-                'name': row['document_name'] or row['document_id'],
-                'type': row['doc_type'] or 'Unknown',
-                'source': row['source'] or 'File Upload',
-                'project': row['project'] or 'N/A',
-                'updatedBy': row['updated_by'] or 'System',
-                'updatedOn': row['updated_on'] or 'N/A',
-                'webUrl': row['web_url'],
-                'documentId': row['uuid'] or row['document_id'],
-                'size': f"{size_kb:.1f} KB" if size_kb >= 1 else f"{estimated_size} bytes",
-                'chunks': row['chunk_count'] or 1,
-            })
 
         return doc_list
 
-    def delete_document(self, filename: str) -> bool:
-        """Delete all chunks associated with a filename."""
+    def delete_document(self, identifier: str) -> bool:
+        """Delete all chunks for a document. Matches document_id (CALM id / upload filename) or legacy chunk id prefix."""
+        if not identifier or not str(identifier).strip():
+            return False
+        ident = str(identifier).strip()
         conn = get_conn()
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "DELETE FROM documents WHERE id LIKE %s",
-                    (f"{filename}_%",)
+                    """
+                    DELETE FROM documents
+                    WHERE document_id = %s
+                       OR id LIKE %s
+                       OR uuid::text = %s
+                    """,
+                    (ident, f"{ident}_%", ident),
                 )
                 deleted = cur.rowcount > 0
             conn.commit()

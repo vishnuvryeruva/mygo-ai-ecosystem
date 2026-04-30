@@ -2,11 +2,13 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import os
 import io
+import json
 import uuid
 import jwt
 import bcrypt
 import datetime
 from functools import wraps
+from typing import Optional
 from dotenv import load_dotenv
 import psycopg2
 import psycopg2.extras
@@ -21,6 +23,7 @@ from services.code_service import CodeService
 from services.test_service import TestService
 from services.advisor_service import AdvisorService
 from services.code_repository_service import CodeRepositoryService
+from services.btp_service import BTPService, BtpODataError
 from services import role_service
 from services import user_service
 from config.prompts import get_all_prompts, get_prompt, update_prompt
@@ -93,6 +96,79 @@ def token_required(f):
         return f(*args, **kwargs)
     return decorated
 
+
+def jwt_or_api_key_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get('Authorization', '')
+
+        # Accept API key in either X-API-Key or Authorization: ApiKey <key>
+        request_api_key = request.headers.get('X-API-Key', '')
+        if not request_api_key and auth_header.startswith('ApiKey '):
+            request_api_key = auth_header.split(' ', 1)[1]
+
+        expected_api_key = os.getenv('SECURE_API_KEY', '')
+        if expected_api_key and request_api_key and request_api_key == expected_api_key:
+            return f(*args, **kwargs)
+
+        token = None
+        if auth_header.startswith('Bearer '):
+            token = auth_header.split(' ', 1)[1]
+        if not token:
+            return jsonify({'error': 'Token or API key missing'}), 401
+        try:
+            payload = decode_token(token)
+            request.current_user = payload
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token expired'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'error': 'Invalid token'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
+def get_optional_current_user_id():
+    """Read user ID from bearer token if provided; otherwise return None."""
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return None
+    token = auth_header.split(' ', 1)[1]
+    try:
+        payload = decode_token(token)
+        return payload.get('sub')
+    except Exception:
+        return None
+
+
+def get_llm_provider_for_user(user_id: Optional[str], agent_id: Optional[str] = None):
+    """Resolve user's preferred LLM provider, optionally for a specific agent."""
+    if not user_id:
+        return 'openai'
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT llm_provider, agent_providers FROM users WHERE id = %s", (user_id,))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return 'openai'
+    try:
+        default_provider = (row.get('llm_provider') or 'openai').lower()
+    except Exception:
+        default_provider = 'openai'
+    if agent_id:
+        try:
+            agent_providers = json.loads(row.get('agent_providers') or '{}')
+            agent_specific = agent_providers.get(agent_id, '').lower()
+            if agent_specific in ('openai', 'claude', 'gemini'):
+                print(f"LLM_PREF: user_id={user_id} agent={agent_id} provider={agent_specific} (agent-specific)")
+                return agent_specific
+        except Exception:
+            pass
+    print(f"LLM_PREF: user_id={user_id or 'anonymous'} provider={default_provider}")
+    return default_provider
+
 # Initialize services
 openai_service = OpenAIService()
 rag_service = RAGService()
@@ -111,7 +187,44 @@ def log_request_info():
 
 @app.route('/api/health', methods=['GET'])
 def health():
-    return jsonify({"status": "ok"})
+    """Diagnostic endpoint — shows DB type, doc count, and env var presence."""
+    from db import DATABASE_URL, SQLiteConnectionProxy
+    import sqlite3 as _sqlite3
+
+    # Test DB connection and identify type
+    db_type = 'unknown'
+    db_url_hint = ''
+    doc_count = 0
+    db_error = None
+    try:
+        conn = get_conn()
+        is_sqlite = isinstance(conn, SQLiteConnectionProxy) or isinstance(conn, _sqlite3.Connection)
+        db_type = 'sqlite (FALLBACK — PostgreSQL unreachable)' if is_sqlite else 'postgresql'
+        if not is_sqlite:
+            # Show sanitised URL (hide password)
+            import re as _re
+            db_url_hint = _re.sub(r':([^@]+)@', ':***@', DATABASE_URL)
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM documents")
+            row = cur.fetchone()
+            doc_count = row[0] if row else 0
+        conn.close()
+    except Exception as e:
+        db_error = str(e)
+
+    return jsonify({
+        "status": "ok",
+        "db_type": db_type,
+        "db_url": db_url_hint,
+        "document_count": doc_count,
+        "db_error": db_error,
+        "env": {
+            "DATABASE_URL_set": bool(os.getenv("DATABASE_URL")),
+            "OPENAI_API_KEY_set": bool(os.getenv("OPENAI_API_KEY")),
+            "NEXT_PUBLIC_BACKEND_URL": os.getenv("NEXT_PUBLIC_BACKEND_URL", "not set"),
+            "FLASK_PORT": os.getenv("FLASK_PORT", "5000 (default)"),
+        }
+    })
 
 # ── Auth endpoints ──────────────────────────────────────────────────────────
 
@@ -129,15 +242,15 @@ def register():
     user_id = str(uuid.uuid4())
     created_at = datetime.datetime.utcnow().isoformat()
     
-    # All users who sign up through the registration flow get Admin role by default
-    role = 'Admin'
+    # Default role for new signups
+    role = 'Viewer'
 
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                'INSERT INTO users (id, name, email, password_hash, role, created_at) VALUES (%s, %s, %s, %s, %s, %s)',
-                (user_id, name, email, password_hash, role, created_at)
+                'INSERT INTO users (id, name, email, password_hash, role, llm_provider, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)',
+                (user_id, name, email, password_hash, role, 'openai', created_at)
             )
         conn.commit()
     except (psycopg2.errors.UniqueViolation, sqlite3.IntegrityError):
@@ -149,42 +262,136 @@ def register():
     token = create_token(user_id, email)
     return jsonify({
         'token': token,
-        'user': {'id': user_id, 'name': name, 'email': email, 'role': role}
+        'user': {'id': user_id, 'name': name, 'email': email, 'role': role, 'llm_provider': 'openai'}
     }), 201
 
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
-    # BYPASS LOGIC: Always log the user in as an Admin silently ignoring the input
-    token = create_token('dummy-bypass-id', 'bypass@mygo.com')
+    data = request.json or {}
+    email = (data.get('email') or '').strip().lower()
+    password = data.get('password') or ''
+
+    if not email or not password:
+        return jsonify({'error': 'Email and password are required'}), 400
+
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute('SELECT id, name, email, password_hash, role, llm_provider FROM users WHERE lower(email) = %s', (email,))
+            user = cur.fetchone()
+    finally:
+        conn.close()
+
+    if not user or not bcrypt.checkpw(password.encode('utf-8'), user['password_hash'].encode('utf-8')):
+        return jsonify({'error': 'Invalid email or password'}), 401
+
+    token = create_token(user['id'], user['email'])
     return jsonify({
         'token': token,
-        'user': {'id': 'dummy-bypass-id', 'name': 'Bypass Admin', 'email': 'bypass@mygo.com', 'role': 'Admin'}
-    })
+        'user': {
+            'id': user['id'],
+            'name': user['name'],
+            'email': user['email'],
+            'role': user.get('role') or 'Viewer',
+            'llm_provider': user['llm_provider'] if 'llm_provider' in user and user['llm_provider'] else 'openai'
+        }
+    }), 200
 
 
 @app.route('/api/auth/me', methods=['GET'])
 @token_required
 def me():
     payload = request.current_user
-    if payload['sub'] == 'dummy-bypass-id':
-        return jsonify({'id': 'dummy-bypass-id', 'name': 'Bypass Admin', 'email': payload['email'], 'role': 'Admin', 'created_at': datetime.datetime.utcnow().isoformat()})
-
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute('SELECT id, name, email, role, created_at FROM users WHERE id = %s', (payload['sub'],))
+            cur.execute('SELECT id, name, email, role, llm_provider, api_keys, agent_providers, created_at FROM users WHERE id = %s', (payload['sub'],))
             row = cur.fetchone()
     finally:
         conn.close()
     if not row:
         return jsonify({'error': 'User not found'}), 404
-    return jsonify({'id': row['id'], 'name': row['name'], 'email': row['email'], 'role': row['role'] or 'Viewer', 'created_at': row['created_at']})
+
+    # Parse JSON columns; mask stored API key values (show last 4 chars only)
+    try:
+        raw_keys = json.loads(row.get('api_keys') or '{}')
+    except Exception:
+        raw_keys = {}
+    masked_keys = {k: ('•••••••••••' + v[-4:] if v and len(v) > 4 else '') for k, v in raw_keys.items()}
+
+    try:
+        agent_providers = json.loads(row.get('agent_providers') or '{}')
+    except Exception:
+        agent_providers = {}
+
+    return jsonify({
+        'id': row['id'],
+        'name': row['name'],
+        'email': row['email'],
+        'role': row['role'] or 'Viewer',
+        'llm_provider': row['llm_provider'] if row.get('llm_provider') else 'openai',
+        'api_keys': masked_keys,
+        'agent_providers': agent_providers,
+        'created_at': row['created_at']
+    })
+
+
+@app.route('/api/auth/preferences', methods=['PUT'])
+@token_required
+def update_user_preferences():
+    data = request.get_json() or {}
+    allowed_providers = {'openai', 'claude', 'gemini'}
+
+    llm_provider = (data.get('llm_provider') or '').strip().lower()
+    if llm_provider not in allowed_providers:
+        return jsonify({'error': 'llm_provider must be one of: openai, claude, gemini'}), 400
+
+    # Validate and sanitise agent_providers map
+    raw_agent_providers = data.get('agent_providers') or {}
+    agent_providers = {
+        k: v for k, v in raw_agent_providers.items()
+        if isinstance(k, str) and isinstance(v, str) and v in allowed_providers
+    }
+
+    # Merge incoming api_keys with the existing stored ones so that a masked
+    # placeholder value (sent back by /me) does NOT overwrite the real key.
+    user_id = request.current_user['sub']
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT api_keys FROM users WHERE id = %s", (user_id,))
+            row = cur.fetchone()
+        stored_keys = json.loads((row or {}).get('api_keys') or '{}')
+    except Exception:
+        stored_keys = {}
+    finally:
+        conn.close()
+
+    incoming_keys = data.get('api_keys') or {}
+    for provider in ('openai', 'claude', 'gemini'):
+        val = incoming_keys.get(provider, '')
+        if val and not val.startswith('•'):  # real key, not masked placeholder
+            stored_keys[provider] = val.strip()
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET llm_provider = %s, api_keys = %s, agent_providers = %s WHERE id = %s",
+                (llm_provider, json.dumps(stored_keys), json.dumps(agent_providers), user_id)
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return jsonify({'message': 'Preferences updated successfully', 'llm_provider': llm_provider})
 
 # Ask Yoda - RAG-based Q&A
 @app.route('/api/ask-yoda', methods=['POST'])
 def ask_yoda():
     try:
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
         data = request.json
         query = data.get('query', '')
         
@@ -192,7 +399,7 @@ def ask_yoda():
             return jsonify({"error": "Query is required"}), 400
         
         # Use RAG to get relevant context and generate answer
-        result = rag_service.query(query)
+        result = rag_service.query(query, llm_provider=llm_provider)
         
         return jsonify({
             "answer": result["answer"],
@@ -251,12 +458,8 @@ def delete_document(filename):
 # Spec Assistant
 @app.route('/api/generate-spec', methods=['POST'])
 def generate_spec():
-    return jsonify({
-    "format": "preview",
-    "spec": "# Functional Specification Document for Coding Practices\n\n## 1. Executive Summary\nThis document outlines the functional specifications for the development of a comprehensive guide on coding practices. The purpose of this guide is to standardize coding practices across the organization, improve code quality, enhance maintainability, and foster collaboration among development teams. The guide will serve as a reference for developers, ensuring adherence to best practices and reducing technical debt.\n\n## 2. Business Objectives\n- Establish a standardized coding practice across all development teams.\n- Improve code quality and maintainability.\n- Enhance collaboration and communication among developers.\n- Reduce the incidence of bugs and technical debt.\n- Facilitate onboarding of new developers through clear guidelines.\n\n## 3. Functional Requirements\n### 3.1 Coding Standards\n- Define naming conventions for variables, functions, classes, and files.\n- Specify formatting guidelines (indentation, line length, whitespace).\n- Establish rules for commenting and documentation.\n\n### 3.2 Best Practices\n- Outline best practices for error handling and logging.\n- Provide guidelines for code reviews and peer programming.\n- Recommend design patterns and architectural styles.\n\n### 3.3 Tools and Technologies\n- List recommended development tools (IDEs, linters, version control systems).\n- Specify tools for automated testing and continuous integration.\n\n### 3.4 Training and Resources\n- Provide links to training resources and workshops.\n- Include a glossary of terms and concepts related to coding practices.\n\n## 4. User Stories and Use Cases\n### User Stories\n1. **As a developer**, I want to access the coding practices guide so that I can write code that adheres to organizational standards.\n2. **As a team lead**, I want to ensure that my team follows the coding standards so that we can maintain high code quality.\n3. **As a new hire**, I want to review the coding practices guide to understand the coding standards of the organization.\n\n### Use Cases\n- **Use Case 1: Accessing the Coding Practices Guide**\n  - **Actors:** Developer\n  - **Preconditions:** Developer has access to the internal documentation portal.\n  - **Postconditions:** Developer can view and navigate the coding practices guide.\n  - **Main Flow:**\n    1. Developer logs into the documentation portal.\n    2. Developer selects the coding practices section.\n    3. Developer reads the guidelines.\n\n## 5. Business Process Design\n### Process Flow\n1. **Initiation:** Identify the need for coding practices.\n2. **Development:** Collaborate with stakeholders to draft the guide.\n3. **Review:** Conduct peer reviews and incorporate feedback.\n4. **Approval:** Obtain final approval from management.\n5. **Publication:** Publish the guide on the internal documentation portal.\n6. **Training:** Conduct training sessions for developers.\n\n## 6. Data Requirements\n- The guide will be stored in a content management system (CMS).\n- Version control to track changes and updates to the guide.\n- Analytics to monitor usage and access patterns.\n\n## 7. Interface Requirements\n- The guide should be accessible via a web interface.\n- Search functionality to allow users to find specific topics quickly.\n- Responsive design to ensure usability across devices (desktop, tablet, mobile).\n\n## 8. Security and Authorization\n- Access to the coding practices guide will be restricted to internal employees.\n- Role-based access control to ensure that only authorized personnel can edit the guide.\n- Regular audits to ensure compliance with security policies.\n\n## 9. Testing Requirements\n- User acceptance testing (UAT) to validate the usability of the guide.\n- Functional testing to ensure all links, search functions, and formatting are working correctly.\n- Performance testing to ensure the guide loads quickly and efficiently.\n\n## 10. Acceptance Criteria\n- The coding practices guide is published and accessible to all developers.\n- All sections of the guide are reviewed and approved by relevant stakeholders.\n- The guide includes a feedback mechanism for continuous improvement.\n- Training sessions are conducted, and feedback is collected for future iterations.\n\n## 11. Dependencies and Constraints\n- Dependency on the availability of resources for content creation and review.\n- Constraints related to the timeline for development and publication.\n- Potential resistance to change from developers accustomed to previous practices.\n\n---\n\nThis functional specification document serves as a comprehensive guide for the development of coding practices within the organization. It outlines the necessary requirements, processes, and criteria to ensure successful implementation and adherence to best practices.",
-    "type": "functional"
-    }), 200
     try:
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
         data = request.json
         spec_type = data.get('type', 'functional')  # functional or technical
         requirements = data.get('requirements', '')
@@ -264,14 +467,14 @@ def generate_spec():
         
         # For preview, return raw text for inline display
         if format_type == 'preview':
-            spec_content = spec_service.generate_spec(spec_type, requirements, 'text')
+            spec_content = spec_service.generate_spec(spec_type, requirements, 'text', llm_provider=llm_provider)
             return jsonify({
                 "spec": spec_content,
                 "type": spec_type,
                 "format": "preview"
             })
         
-        spec_doc = spec_service.generate_spec(spec_type, requirements, format_type)
+        spec_doc = spec_service.generate_spec(spec_type, requirements, format_type, llm_provider=llm_provider)
         
         # For docx, return as downloadable file
         if format_type == 'docx':
@@ -294,14 +497,16 @@ def generate_spec():
 
 # Prompt Generator
 @app.route('/api/generate-prompt', methods=['POST'])
+@jwt_or_api_key_required
 def generate_prompt():
     try:
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
         data = request.json
         language = data.get('language', 'ABAP')
         task_description = data.get('task', '')
         context = data.get('context', '')
         
-        prompt = prompt_service.generate_prompt(language, task_description, context)
+        prompt = prompt_service.generate_prompt(language, task_description, context, llm_provider=llm_provider)
         
         return jsonify({
             "prompt": prompt,
@@ -316,6 +521,7 @@ def generate_prompt():
 @app.route('/api/generate-code', methods=['POST'])
 def generate_code_from_prompt():
     try:
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
         data = request.json
         language = data.get('language', 'ABAP')
         prompt = data.get('prompt', '')
@@ -324,7 +530,7 @@ def generate_code_from_prompt():
         if not prompt:
             return jsonify({"error": "Prompt is required"}), 400
         
-        result = prompt_service.generate_code(language, prompt, context)
+        result = prompt_service.generate_code(language, prompt, context, llm_provider=llm_provider)
         
         return jsonify({
             "code": result['code'],
@@ -340,12 +546,13 @@ def generate_code_from_prompt():
 @app.route('/api/explain-code', methods=['POST'])
 def explain_code():
     try:
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
         data = request.json
         code = data.get('code', '')
         code_type = data.get('code_type', 'ABAP')  # ABAP, Python, etc.
         program_name = data.get('program_name', '')
         
-        explanation = code_service.explain_code(code, code_type, program_name)
+        explanation = code_service.explain_code(code, code_type, program_name, llm_provider=llm_provider)
         
         return jsonify({
             "explanation": explanation,
@@ -360,6 +567,7 @@ def explain_code():
 @app.route('/api/generate-test-cases', methods=['POST'])
 def generate_test_cases():
     try:
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
         data = request.json
         code = data.get('code', '')
         test_type = data.get('test_type', 'manual')  # manual or unit
@@ -367,7 +575,7 @@ def generate_test_cases():
         
         # For preview, return raw text for inline display
         if format_type == 'preview':
-            test_content = test_service.generate_test_cases(code, test_type, 'text')
+            test_content = test_service.generate_test_cases(code, test_type, 'text', llm_provider=llm_provider)
             return jsonify({
                 "test_cases": test_content,
                 "test_type": test_type,
@@ -376,14 +584,14 @@ def generate_test_cases():
         
         # For CALM format, return structured JSON
         if format_type == 'calm':
-            test_cases = test_service.generate_test_cases(code, test_type, 'calm')
+            test_cases = test_service.generate_test_cases(code, test_type, 'calm', llm_provider=llm_provider)
             return jsonify({
                 "test_cases": test_cases,
                 "test_type": test_type,
                 "format": "calm"
             })
         
-        test_cases = test_service.generate_test_cases(code, test_type, format_type)
+        test_cases = test_service.generate_test_cases(code, test_type, format_type, llm_provider=llm_provider)
         
         # For excel/word, return as downloadable file
         if format_type == 'excel':
@@ -415,11 +623,12 @@ def generate_test_cases():
 @app.route('/api/analyze-code', methods=['POST'])
 def analyze_code():
     try:
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
         data = request.json
         code = data.get('code', '')
         code_type = data.get('code_type', 'ABAP')
         
-        analysis = advisor_service.analyze_code(code, code_type)
+        analysis = advisor_service.analyze_code(code, code_type, llm_provider=llm_provider)
         
         return jsonify({
             "suggestions": analysis['suggestions'],
@@ -444,7 +653,8 @@ def solution_advisor_requirements():
         data = request.json
         requirements = data.get('requirements', '')
         
-        result = solution_advisor.gather_requirements(requirements)
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
+        result = solution_advisor.gather_requirements(requirements, llm_provider=llm_provider)
         
         return jsonify(result)
     except Exception as e:
@@ -460,7 +670,8 @@ def solution_advisor_generate():
         data = request.json
         requirements = data.get('requirements', '')
         
-        result = solution_advisor.generate_solution(requirements)
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
+        result = solution_advisor.generate_solution(requirements, llm_provider=llm_provider)
         
         return jsonify(result)
     except Exception as e:
@@ -478,7 +689,8 @@ def solution_advisor_refine():
         current_solution = data.get('current_solution', '')
         feedback = data.get('feedback', '')
         
-        result = solution_advisor.refine_solution(requirements, current_solution, feedback)
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
+        result = solution_advisor.refine_solution(requirements, current_solution, feedback, llm_provider=llm_provider)
         
         return jsonify(result)
     except Exception as e:
@@ -494,7 +706,8 @@ def solution_advisor_search_similar():
         data = request.json
         solution_summary = data.get('solution_summary', '')
         
-        result = solution_advisor.search_similar_solutions(solution_summary, rag_service)
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
+        result = solution_advisor.search_similar_solutions(solution_summary, rag_service, llm_provider=llm_provider)
         
         return jsonify(result)
     except Exception as e:
@@ -513,8 +726,9 @@ def solution_advisor_improvise():
         similar_solutions = data.get('similar_solutions', [])
         user_input = data.get('user_input', '')
         
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
         result = solution_advisor.improvise_solution(
-            requirements, current_solution, similar_solutions, user_input
+            requirements, current_solution, similar_solutions, user_input, llm_provider=llm_provider
         )
         
         return jsonify(result)
@@ -668,6 +882,31 @@ def mcp_health():
 
 from services import source_config_service
 from services.calm_service import get_calm_service
+from services.markdown_utils import markdown_to_html
+from html import unescape
+import re
+
+
+def _normalize_document_html_for_view(raw_content: str) -> str:
+    """
+    Normalize raw document content into renderable HTML for the UI viewer.
+    Handles escaped HTML, markdown, and plain text.
+    """
+    if not raw_content:
+        return ""
+
+    # Some CALM responses return escaped HTML entities.
+    unescaped = unescape(str(raw_content)).strip()
+    if not unescaped:
+        return ""
+
+    # If content already looks like HTML, return as-is.
+    has_html_tags = bool(re.search(r'<\s*(p|h[1-6]|ul|ol|li|div|br|pre|table|span|strong|em)\b', unescaped, re.IGNORECASE))
+    if has_html_tags:
+        return unescaped
+
+    # Fallback: convert markdown/plain text to semantic HTML.
+    return markdown_to_html(unescaped)
 
 @app.route('/api/sources', methods=['GET'])
 def list_sources():
@@ -747,7 +986,7 @@ def test_new_connection():
     try:
         data = request.json
         from services.calm_service import CALMService
-        from services.btp_service import BTPService
+        from services.btp_service import BTPService, BtpODataError
         
         if data.get('type') == 'CALM':
             # Validate required fields
@@ -1191,7 +1430,11 @@ def view_calm_document(document_id):
         html_content = rag_service.get_document_html(document_id)
 
         if html_content:
-            return jsonify({"documentId": document_id, "content": html_content, "source": "local"})
+            return jsonify({
+                "documentId": document_id,
+                "content": _normalize_document_html_for_view(html_content),
+                "source": "local"
+            })
 
         # 2. Prevent invalid IDs from hitting CALM API (which expect a UUID)
         import re
@@ -1220,7 +1463,11 @@ def view_calm_document(document_id):
         if not html_content:
             return jsonify({"error": "Document has no displayable content"}), 404
 
-        return jsonify({"documentId": document_id, "content": html_content, "source": "live"})
+        return jsonify({
+            "documentId": document_id,
+            "content": _normalize_document_html_for_view(html_content),
+            "source": "live"
+        })
 
     except Exception as e:
         import traceback
@@ -1252,7 +1499,6 @@ def btp_fetch_code(source_id):
             top = request.args.get('top')
             skip = request.args.get('skip')
 
-        from services.btp_service import BTPService
         service = BTPService(source.get('config', {}))
         data = service.fetch_data(
             entity_set=entity_set,
@@ -1262,6 +1508,15 @@ def btp_fetch_code(source_id):
         )
         
         return jsonify({"data": data})
+    except BtpODataError as e:
+        import traceback
+        traceback.print_exc()
+        # Propagate the actual BTP status code and error payload to the frontend
+        body = getattr(e, "raw_body", None) or {"message": str(e)}
+        # Ensure JSON-serializable shape
+        if isinstance(body, str):
+            body = {"message": body}
+        return jsonify({"error": body}), getattr(e, "status_code", 500)
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1270,6 +1525,7 @@ def btp_fetch_code(source_id):
 @app.route('/api/btp/generate-code', methods=['POST'])
 def btp_generate_code():
     try:
+        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
         data = request.json
         prompt = data.get('prompt', '')
         code = data.get('code', '')
@@ -1282,7 +1538,7 @@ def btp_generate_code():
             {"role": "user", "content": user_msg}
         ]
         
-        response = openai_service.chat_completion(messages)
+        response = openai_service.chat_completion(messages, provider=llm_provider)
         
         if response.startswith("```"):
             lines = response.splitlines()
@@ -1334,6 +1590,7 @@ def sync_documents():
         # Support both 'documents' (full objects) and 'documentIds' (legacy)
         documents = data.get('documents', [])
         document_ids = data.get('documentIds', [])
+        synced_by = data.get('syncedBy')  # optional: name/email of the user who triggered the sync
         
         if not source_id:
             return jsonify({"error": "sourceId is required"}), 400
@@ -1354,6 +1611,9 @@ def sync_documents():
                 try:
                     # Normalize document structure to handle both old and new API formats
                     normalized_doc = _normalize_document_structure(doc)
+                    # Stamp who triggered the sync if the doc has no modifier info
+                    if synced_by and not normalized_doc['metadata'].get('updatedBy'):
+                        normalized_doc['metadata']['updatedBy'] = synced_by
                     doc_id = normalized_doc.get('id')
 
                     # Try to fetch real document content from CALM
@@ -1442,6 +1702,27 @@ def _normalize_document_structure(doc: dict) -> dict:
         'metadata': doc.get('metadata', {})
     }
     
+    # Resolve updatedOn: prefer explicit field, fall back to CALM OData modifiedAt/changedAt
+    updated_on = (
+        doc.get('updatedOn')
+        or doc.get('modifiedAt')
+        or doc.get('changedAt')
+        or doc.get('lastModified')
+        or doc.get('metadata', {}).get('updatedOn')
+        or doc.get('metadata', {}).get('modifiedAt')
+    )
+
+    # Resolve updatedBy: prefer explicit field, fall back to CALM OData changedBy/modifiedBy
+    updated_by = (
+        doc.get('updatedBy')
+        or doc.get('changedBy')
+        or doc.get('lastChangedBy')
+        or doc.get('modifiedBy')
+        or doc.get('lastChangedByUser')
+        or doc.get('metadata', {}).get('updatedBy')
+        or doc.get('metadata', {}).get('changedBy')
+    )
+
     # Merge all original fields into metadata for preservation
     normalized['metadata'].update({
         'uuid': doc.get('uuid'),
@@ -1455,6 +1736,8 @@ def _normalize_document_structure(doc: dict) -> dict:
         'sourceCode': doc.get('sourceCode'),
         'createdAt': doc.get('createdAt'),
         'modifiedAt': doc.get('modifiedAt'),
+        'updatedOn': updated_on,
+        'updatedBy': updated_by,
         'content': doc.get('content'),
         'tags': doc.get('tags', []),
         'source': doc.get('metadata', {}).get('source') if 'metadata' in doc else doc.get('source'),
@@ -1487,9 +1770,12 @@ def push_spec_to_calm(source_id):
         
         service = get_calm_service(source.get('config'))
         
-        # Convert content to bytes if string
+        # Cloud ALM expects HTML-like rich content. Convert markdown/plain text
+        # to basic semantic HTML so formatting survives upload and retrieval.
         if isinstance(content, str):
-            content = content.encode('utf-8')
+            content = markdown_to_html(content).encode('utf-8')
+        elif isinstance(content, bytes):
+            content = markdown_to_html(content.decode('utf-8', errors='ignore')).encode('utf-8')
         
         result = service.push_document(
             name=name,
@@ -1802,6 +2088,9 @@ def fetch_btp_object_content(source_id):
 if __name__ == '__main__':
     port = int(os.getenv('FLASK_PORT', 5001))
     print(f"DEBUG: Starting Flask app on port {port}")
+    print(f"DEBUG: OpenAI API Key: {os.getenv('OPENAI_API_KEY')}")
+    print(f"DEBUG: Claude API Key: {os.getenv('CLAUDE_API_KEY')}")
+    print(f"DEBUG: Gemini API Key: {os.getenv('GEMINI_API_KEY')}")
     print(f"MCP Endpoints available at /mcp/tools and /mcp/execute")
     print(f"Available MCP tools: {list(TOOLS.keys())}")
     print(f"Cloud ALM endpoints available at /api/calm/<source_id>/...")

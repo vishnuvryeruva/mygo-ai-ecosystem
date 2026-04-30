@@ -4,6 +4,7 @@ import { useState } from 'react'
 import axios from 'axios'
 import LoadingSpinner from '../LoadingSpinner'
 import RichTextResponse from '../RichTextResponse'
+import AppModal from './AppModal'
 
 interface SolutionAdvisorModalProps {
     onClose: () => void
@@ -25,6 +26,7 @@ interface SimilarSolution {
 
 export default function SolutionAdvisorModal({ onClose, onCreateSpec }: SolutionAdvisorModalProps) {
     const [currentStep, setCurrentStep] = useState<Step>('requirements')
+    const [stepHistory, setStepHistory] = useState<Step[]>([])
     const [requirements, setRequirements] = useState('')
     const [messages, setMessages] = useState<Message[]>([
         {
@@ -46,6 +48,25 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
         complete: 'Ready for Spec'
     }
 
+    const getAuthConfig = () => {
+        const token = localStorage.getItem('mygo-token')
+        return token ? { headers: { Authorization: `Bearer ${token}` } } : {}
+    }
+
+    const goToStep = (step: Step) => {
+        setStepHistory(prev => [...prev, currentStep])
+        setCurrentStep(step)
+    }
+
+    const handleBack = () => {
+        setStepHistory(prev => {
+            const history = [...prev]
+            const previous = history.pop()
+            if (previous) setCurrentStep(previous)
+            return history
+        })
+    }
+
     const handleSendMessage = async () => {
         if (!inputValue.trim() || loading) return
 
@@ -59,16 +80,14 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                 setRequirements(userMessage)
                 const response = await axios.post('/api/solution-advisor/requirements', {
                     requirements: userMessage
-                })
+                }, getAuthConfig())
 
                 setMessages(prev => [...prev, {
                     role: 'assistant',
                     content: response.data.clarifications || "Thank you for the requirements. Let me generate a solution proposal for you."
                 }])
 
-                if (response.data.needs_clarification) {
-                    // Stay in requirements step
-                } else {
+                if (!response.data.needs_clarification) {
                     await generateSolution(userMessage)
                 }
             } else if (currentStep === 'solution') {
@@ -76,7 +95,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                     requirements,
                     current_solution: generatedSolution,
                     feedback: userMessage
-                })
+                }, getAuthConfig())
                 setGeneratedSolution(response.data.solution)
                 setMessages(prev => [...prev, {
                     role: 'assistant',
@@ -88,13 +107,13 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                     current_solution: generatedSolution,
                     similar_solutions: similarSolutions.map(s => s.summary),
                     user_input: userMessage
-                })
+                }, getAuthConfig())
                 setFinalSolution(response.data.final_solution)
                 setMessages(prev => [...prev, {
                     role: 'assistant',
                     content: response.data.message || "I've incorporated the insights. Your solution is ready! You can now create a functional specification."
                 }])
-                setCurrentStep('complete')
+                goToStep('complete')
             }
         } catch (error) {
             console.error('Error in solution advisor:', error)
@@ -112,13 +131,13 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
         try {
             const response = await axios.post('/api/solution-advisor/generate', {
                 requirements: reqs
-            })
+            }, getAuthConfig())
             setGeneratedSolution(response.data.solution)
             setMessages(prev => [...prev, {
                 role: 'assistant',
                 content: `I've generated a solution proposal:\n\n${response.data.solution}\n\nWould you like to:\n1. **Refine** this solution further\n2. **Search** for similar existing solutions\n3. **Proceed** to create a functional spec`
             }])
-            setCurrentStep('solution')
+            goToStep('solution')
         } catch (error) {
             console.error('Error generating solution:', error)
             setMessages(prev => [...prev, {
@@ -132,11 +151,11 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
 
     const handleSearchSimilar = async () => {
         setLoading(true)
-        setCurrentStep('search')
+        goToStep('search')
         try {
             const response = await axios.post('/api/solution-advisor/search-similar', {
                 solution_summary: generatedSolution
-            })
+            }, getAuthConfig())
             setSimilarSolutions(response.data.similar_solutions || [])
 
             if (response.data.similar_solutions?.length > 0) {
@@ -154,34 +173,64 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                     content: "No similar solutions found in the knowledge base. Your solution appears to be unique! Would you like to proceed to create a functional specification?"
                 }])
             }
-            setCurrentStep('improvise')
+            goToStep('improvise')
         } catch (error) {
             console.error('Error searching similar solutions:', error)
             setMessages(prev => [...prev, {
                 role: 'assistant',
                 content: "Error searching for similar solutions. You can proceed to create the functional spec."
             }])
-            setCurrentStep('improvise')
+            goToStep('improvise')
         } finally {
             setLoading(false)
         }
     }
 
-    const handleProceedToSpec = () => {
-        setCurrentStep('complete')
-        const solutionContext = finalSolution || generatedSolution
-        setFinalSolution(solutionContext)
+    /** Advance from solution step to improvise (step 4) without running the search API. */
+    const handleNextFromSolution = () => {
+        goToStep('improvise')
         setMessages(prev => [...prev, {
             role: 'assistant',
-            content: "Your solution is ready! Click 'Create Functional Spec' to generate a detailed specification document based on this solution."
+            content: "Feel free to refine the solution further, or click Next to mark it ready for spec."
         }])
     }
 
-    const handleCreateFunctionalSpec = () => {
-        if (onCreateSpec) {
-            onCreateSpec(finalSolution || generatedSolution)
+    /** Advance to the final stepper step so the user can review the solution before opening Spec Assistant. */
+    const handleProceedToSpec = () => {
+        const solutionContext = finalSolution || generatedSolution
+        setFinalSolution(solutionContext)
+        goToStep('complete')
+        setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: "Your solution is ready for review. Check the summary above, then click 'Proceed to Spec' to open the Spec Assistant—you can refine the spec or upload to Cloud ALM there."
+        }])
+    }
+
+    const handleCreateFunctionalSpec = async () => {
+        if (!onCreateSpec) {
+            onClose()
+            return
         }
-        onClose()
+        const solutionContext = finalSolution || generatedSolution
+        setLoading(true)
+        try {
+            const response = await axios.post('/api/generate-spec', {
+                type: 'functional',
+                requirements: solutionContext,
+                format: 'preview'
+            }, getAuthConfig())
+            sessionStorage.setItem('solutionAdvisorContext', solutionContext)
+            sessionStorage.setItem('specAssistantPrefilledSpec', response.data.spec || '')
+            onCreateSpec(solutionContext)
+        } catch (error) {
+            console.error('Error generating spec:', error)
+            setMessages(prev => [...prev, {
+                role: 'assistant',
+                content: "Error generating specification. Please try again."
+            }])
+        } finally {
+            setLoading(false)
+        }
     }
 
     const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -192,8 +241,8 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
     }
 
     return (
-        <div className="modal-overlay" onClick={onClose}>
-            <div className="modal max-w-5xl" onClick={e => e.stopPropagation()}>
+        <AppModal onClose={onClose}>
+            <div>
                 {/* Header */}
                 <div className="modal-header">
                     <div>
@@ -206,27 +255,60 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                     <button onClick={onClose} className="modal-close">✕</button>
                 </div>
 
-                {/* Progress Steps */}
-                <div className="px-6 py-4 border-b border-[var(--glass-border)] bg-gray-50/50 dark:bg-black/20">
-                    <div className="flex justify-between items-center">
-                        {(['requirements', 'solution', 'search', 'improvise', 'complete'] as Step[]).map((step, index) => (
-                            <div key={step} className="flex items-center">
-                                <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium transition-all ${currentStep === step
-                                    ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-500/30'
-                                    : index < ['requirements', 'solution', 'search', 'improvise', 'complete'].indexOf(currentStep)
-                                        ? 'bg-green-500/10 text-green-500 border border-green-500/20'
-                                        : 'bg-white dark:bg-white/5 text-muted border border-gray-200 dark:border-white/10'
-                                    }`}>
-                                    {index < ['requirements', 'solution', 'search', 'improvise', 'complete'].indexOf(currentStep) ? '✓' : index + 1}
-                                </div>
-                                <span className={`ml-2 text-sm hidden md:inline ${currentStep === step ? 'font-medium text-indigo-400' : 'text-muted'}`}>
-                                    {stepLabels[step]}
-                                </span>
-                                {index < 4 && <div className="w-8 lg:w-12 h-0.5 mx-2 bg-white/10" />}
+                {/* Progress Steps - Stacked: number top, label below */}
+                {(() => {
+                    const steps = ['requirements', 'solution', 'search', 'improvise', 'complete'] as Step[]
+                    const activeIndex = steps.indexOf(currentStep)
+                    return (
+                        <div className="px-6 py-4 border-b border-[var(--glass-border)] flex-shrink-0 bg-white">
+                            {/* isolate + -z-10 track keeps the line strictly behind step nodes */}
+                            <div className="relative isolate flex justify-between items-center min-h-10">
+                                <div
+                                    className="pointer-events-none absolute left-[10%] right-[10%] top-1/2 -z-10 h-0.5 -translate-y-1/2 bg-gray-200 dark:bg-slate-600 rounded-full"
+                                    aria-hidden
+                                />
+                                <div
+                                    className="pointer-events-none absolute left-[10%] top-1/2 -z-10 h-0.5 -translate-y-1/2 bg-gradient-to-r from-green-500 via-indigo-400 to-indigo-500 rounded-full transition-all duration-500"
+                                    style={{ width: `${(activeIndex / 4) * 80 + 10}%` }}
+                                    aria-hidden
+                                />
+                                {steps.map((step, index) => {
+                                    const isActive = currentStep === step
+                                    const isComplete = index < activeIndex
+                                    return (
+                                        <div key={step} className="relative z-10 flex flex-1 justify-center min-w-0">
+                                            {/* Opaque backing so the track never shows through (translucent fills looked like strikethrough) */}
+                                            <div
+                                                className={`flex items-center justify-center w-9 h-9 rounded-full text-sm font-semibold transition-all flex-shrink-0 shadow-sm ${isActive
+                                                    ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-indigo-500/25 ring-2 ring-indigo-400/40'
+                                                    : isComplete
+                                                        ? 'bg-white text-green-600 ring-2 ring-green-500 dark:bg-slate-800 dark:text-green-400 dark:ring-green-500/80'
+                                                        : 'bg-white text-muted ring-2 ring-gray-200 dark:bg-slate-800 dark:text-slate-400 dark:ring-slate-600'
+                                                    }`}
+                                            >
+                                                {isComplete ? '✓' : index + 1}
+                                            </div>
+                                        </div>
+                                    )
+                                })}
                             </div>
-                        ))}
-                    </div>
-                </div>
+                            <div className="relative z-10 mt-2 flex justify-between bg-white">
+                                {steps.map((step) => {
+                                    const isActive = currentStep === step
+                                    return (
+                                        <div key={`${step}-label`} className="flex flex-1 justify-center min-w-0 px-0.5">
+                                            <span
+                                                className={`text-[10px] sm:text-[11px] leading-tight text-center line-clamp-2 max-w-[5.5rem] sm:max-w-none ${isActive ? 'font-semibold text-indigo-600 dark:text-indigo-400' : 'text-muted'}`}
+                                            >
+                                                {stepLabels[step]}
+                                            </span>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        </div>
+                    )
+                })()}
 
                 {/* Chat Messages */}
                 <div className="modal-body space-y-4" style={{ maxHeight: '400px' }}>
@@ -236,7 +318,13 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                                 ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white'
                                 : 'glass-subtle text-heading'
                                 }`}>
-                                <div className="whitespace-pre-wrap text-sm">{message.content}</div>
+                                {message.role === 'assistant' ? (
+                                    <div className="text-sm">
+                                        <RichTextResponse content={message.content} />
+                                    </div>
+                                ) : (
+                                    <div className="whitespace-pre-wrap text-sm">{message.content}</div>
+                                )}
                             </div>
                         </div>
                     ))}
@@ -257,8 +345,8 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                     <div className="px-6 py-3 border-t border-[var(--glass-border)] bg-indigo-500/10">
                         <details className="cursor-pointer">
                             <summary className="text-sm font-medium text-indigo-400">📋 Current Solution (click to expand)</summary>
-                            <div className="mt-2 text-sm text-muted whitespace-pre-wrap max-h-40 overflow-y-auto p-3 glass-subtle rounded-lg">
-                                {finalSolution || generatedSolution}
+                            <div className="mt-2 text-sm text-muted max-h-40 overflow-y-auto p-3 glass-subtle rounded-lg">
+                                <RichTextResponse content={finalSolution || generatedSolution} />
                             </div>
                         </details>
                     </div>
@@ -268,6 +356,13 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                 {currentStep === 'solution' && (
                     <div className="px-6 py-4 border-t border-[var(--glass-border)] bg-gray-50/50 dark:bg-black/20 flex gap-3">
                         <button
+                            onClick={handleBack}
+                            disabled={loading}
+                            className="btn btn-secondary"
+                        >
+                            ← Back
+                        </button>
+                        <button
                             onClick={handleSearchSimilar}
                             disabled={loading}
                             className="btn btn-secondary"
@@ -275,11 +370,30 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                             🔍 Search Similar Solutions
                         </button>
                         <button
+                            onClick={handleNextFromSolution}
+                            disabled={loading}
+                            className="btn btn-primary"
+                        >
+                            Next →
+                        </button>
+                    </div>
+                )}
+
+                {currentStep === 'improvise' && (
+                    <div className="px-6 py-4 border-t border-[var(--glass-border)] bg-gray-50/50 dark:bg-black/20 flex gap-3">
+                        <button
+                            onClick={handleBack}
+                            disabled={loading}
+                            className="btn btn-secondary"
+                        >
+                            ← Back
+                        </button>
+                        <button
                             onClick={handleProceedToSpec}
                             disabled={loading}
                             className="btn btn-primary"
                         >
-                            ➡️ Proceed to Spec
+                            Next →
                         </button>
                     </div>
                 )}
@@ -287,10 +401,25 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                 {currentStep === 'complete' && (
                     <div className="px-6 py-4 border-t border-[var(--glass-border)] bg-green-500/10 flex gap-3">
                         <button
+                            onClick={handleBack}
+                            disabled={loading}
+                            className="btn btn-secondary"
+                        >
+                            ← Back
+                        </button>
+                        <button
                             onClick={handleCreateFunctionalSpec}
+                            disabled={loading}
                             className="btn btn-success"
                         >
-                            📄 Create Functional Spec
+                            {loading ? (
+                                <span className="flex items-center gap-2">
+                                    <span className="spinner w-4 h-4" />
+                                    Generating spec...
+                                </span>
+                            ) : (
+                                '➡️ Proceed to Spec'
+                            )}
                         </button>
                     </div>
                 )}
@@ -323,6 +452,6 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                     </div>
                 )}
             </div>
-        </div>
+        </AppModal>
     )
 }

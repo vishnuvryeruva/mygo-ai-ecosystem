@@ -10,18 +10,12 @@ export default function Header({ onSettingsClick }: HeaderProps) {
       <div className="container mx-auto px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <img
-            src="/Mygo logotype.png"
-            alt="MYGO Logo"
-            width={72}
-            height={72}
-            className="object-contain"
+            src="/my-yodaai-logo.png"
+            alt="MY YodaAI"
+            width={200}
+            height={89}
+            className="object-contain max-h-14 w-auto"
           />
-          <div className="flex flex-col">
-            <h1 className="text-xl font-bold bg-gradient-to-r from-mygo-orange to-mygo-teal bg-clip-text text-transparent">
-              AI Ecosystem
-            </h1>
-            <span className="text-xs text-muted">Intelligent SAP Development Suite</span>
-          </div>
         </div>
 
         {onSettingsClick && (

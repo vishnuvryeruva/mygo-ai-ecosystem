@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
-import AIAgentsDropdown from '@/components/AIAgentsDropdown'
+import GlobalAIAgentsDropdown from '@/components/GlobalAIAgentsDropdown'
 import FetchCodeModal from '@/components/modals/FetchCodeModal'
 
 // SAP Object Type Icons mapping
@@ -73,7 +73,7 @@ export default function CodeHubPage() {
 
     const [rawJsonResponse, setRawJsonResponse] = useState<any>(null)
     const [fetchedRecords, setFetchedRecords] = useState<any[]>([])
-    const [selectedRecords, setSelectedRecords] = useState<Set<string>>(new Set())
+    const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null)
     const [isAdvising, setIsAdvising] = useState(false)
     const [showExplainPopup, setShowExplainPopup] = useState(false)
     const [explainResponse, setExplainResponse] = useState('')
@@ -188,6 +188,7 @@ export default function CodeHubPage() {
             })
 
             setFetchedRecords(mappedRecords)
+            setSelectedRecordId(null)
             // setViewMode('table') // This line was removed as it's not in the new code
             setRawJsonResponse(res.data.data)
             setToastMessage({ text: `Found ${mappedRecords.length} objects.`, type: 'success' })
@@ -211,7 +212,7 @@ export default function CodeHubPage() {
         resetAlmUpload() // Reset CALM state when starting a new action
 
         try {
-            const selectedItems = fetchedRecords.filter(r => selectedRecords.has(r.id))
+            const selectedItems = selectedRecordId ? fetchedRecords.filter(r => r.id === selectedRecordId) : []
             if (selectedItems.length === 0) {
                 setExplainResponse('Please select at least one object to process.')
                 setIsAdvising(false)
@@ -374,14 +375,6 @@ export default function CodeHubPage() {
         }
     }
 
-    const onAgentSelect = (agentId: string) => {
-        if (agentId === 'sync-documents') {
-            handleSync()
-            return
-        }
-        handleAgentAction(agentId)
-    }
-
     const filteredRecords = fetchedRecords.filter(r => {
         const searchLower = searchQuery.toLowerCase()
         const rawDataString = JSON.stringify(r.rawData).toLowerCase()
@@ -396,19 +389,8 @@ export default function CodeHubPage() {
         return matchesSearch && matchesType && matchesPackage
     })
 
-    const toggleSelectAll = () => {
-        if (selectedRecords.size === filteredRecords.length && filteredRecords.length > 0) {
-            setSelectedRecords(new Set())
-        } else {
-            setSelectedRecords(new Set(filteredRecords.map(r => r.id)))
-        }
-    }
-
-    const toggleRecord = (id: string) => {
-        const next = new Set(selectedRecords)
-        if (next.has(id)) next.delete(id)
-        else next.add(id)
-        setSelectedRecords(next)
+    const selectRecord = (id: string) => {
+        setSelectedRecordId(id)
     }
 
     // Cloud ALM Integration Functions
@@ -439,8 +421,8 @@ export default function CodeHubPage() {
         try {
             const res = await axios.get(`/api/calm/${sourceId}/projects`)
             setAlmProjects(res.data.projects || [])
-        } catch {
-            setAlmError('Failed to load projects.')
+        } catch (err: any) {
+            setAlmError(err?.response?.data?.error || 'Failed to load projects.')
         } finally {
             setAlmLoadingStep('')
         }
@@ -510,7 +492,15 @@ export default function CodeHubPage() {
                         )}
                         FETCH CODE
                     </button>
-                    <AIAgentsDropdown onAgentSelect={onAgentSelect} />
+                    <button 
+                        className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-slate-500 hover:text-emerald-600 hover:border-emerald-200 transition-all hover:shadow-sm" 
+                        title="Toggle View Mode" 
+                        onClick={() => setViewMode(viewMode === 'table' ? 'json' : 'table')}
+                    >
+                        <span className="text-[11px] font-black uppercase tracking-tighter">{viewMode === 'table' ? '{...}' : 'T'}</span>
+                    </button>
+                    <div className="h-8 w-[1px] bg-slate-200 mx-1"></div>
+                    <GlobalAIAgentsDropdown />
                 </div>
             </div>
 
@@ -565,6 +555,49 @@ export default function CodeHubPage() {
                     </svg>
                     <span>Date Range</span>
                 </div>
+
+                <div className="flex items-center gap-3 flex-1 min-w-[200px]">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">ODATA FILTER</label>
+                    <div className="relative w-full">
+                        <input 
+                            className="w-full bg-slate-50 border border-slate-100 rounded-xl py-2 px-3 text-xs font-medium text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                            placeholder="e.g. ObjectType eq 'CLAS'"
+                            value={filterQuery}
+                            onChange={(e) => setFilterQuery(e.target.value)}
+                        />
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">TOP</span>
+                        <input 
+                            type="number"
+                            className="bg-slate-50 border border-slate-100 rounded-xl py-2 px-3 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all w-16"
+                            value={top}
+                            onChange={(e) => setTop(e.target.value)}
+                        />
+                    </div>
+                </div>
+
+                <div className="h-6 w-[1px] bg-slate-100 mx-1 hidden lg:block"></div>
+
+                <div className="flex items-center gap-3">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">LOCAL</label>
+                    <div className="flex items-center bg-slate-50 border border-slate-100 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500/20 focus-within:border-emerald-500 transition-all">
+                        <div className="pl-3 text-slate-400">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        </div>
+                        <input 
+                            type="text"
+                            className="bg-transparent border-none py-2 px-3 text-xs outline-none w-40"
+                            placeholder="Search current..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                    </div>
+                </div>
+
             </div>
 
             {/* Document Count & Bulk Actions - MATCHES DOCUMENT HUB */}
@@ -614,14 +647,7 @@ export default function CodeHubPage() {
                     <table className="doc-hub-table">
                         <thead>
                             <tr>
-                                <th style={{ width: 40, textAlign: 'center' }}>
-                                    <input 
-                                        type="checkbox" 
-                                        checked={filteredRecords.length > 0 && selectedRecords.size === filteredRecords.length}
-                                        onChange={toggleSelectAll}
-                                        className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                                    />
-                                </th>
+                                <th style={{ width: 40, textAlign: 'center' }}></th>
                                 <th>OBJECT NAME</th>
                                 <th>TYPE</th>
                                 <th>DESCRIPTION</th>
@@ -631,13 +657,14 @@ export default function CodeHubPage() {
                         </thead>
                         <tbody>
                             {filteredRecords.map((record) => (
-                                <tr key={record.id} className={selectedRecords.has(record.id) ? 'bg-emerald-50/30' : ''}>
+                                <tr key={record.id} className={selectedRecordId === record.id ? 'bg-emerald-50/30' : ''}>
                                     <td style={{ textAlign: 'center' }}>
                                         <input 
-                                            type="checkbox" 
-                                            checked={selectedRecords.has(record.id)}
-                                            onChange={() => toggleRecord(record.id)}
-                                            className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                            type="radio" 
+                                            name="code-repo-record"
+                                            checked={selectedRecordId === record.id}
+                                            onChange={() => selectRecord(record.id)}
+                                            className="border-slate-300 text-emerald-600 focus:ring-emerald-500"
                                         />
                                     </td>
                                     <td>

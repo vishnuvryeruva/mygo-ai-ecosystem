@@ -1,12 +1,13 @@
 from services.openai_service import OpenAIService
 from docx import Document
 import io
+from services.markdown_utils import markdown_to_plain_text
 
 class SpecService:
     def __init__(self):
         self.openai_service = OpenAIService()
     
-    def generate_spec(self, spec_type, requirements, format_type='docx', custom_prompt=None):
+    def generate_spec(self, spec_type, requirements, format_type='docx', custom_prompt=None, llm_provider='openai'):
         """Generate functional or technical specification document"""
         
         # Use custom prompt if provided, otherwise load from config
@@ -65,11 +66,15 @@ Format the output in a clear, professional manner suitable for a Word document."
             user_prompt,
             system_prompt=system_prompt,
             temperature=0.4,
-            max_tokens=3000
+            max_tokens=3000,
+            provider=llm_provider
         )
         
         if format_type == 'docx':
             return self._create_docx(spec_content, spec_type)
+        elif format_type in ('text', 'preview'):
+            # Preview/upload flows need clean text without markdown markers.
+            return markdown_to_plain_text(spec_content)
         else:
             return spec_content
     

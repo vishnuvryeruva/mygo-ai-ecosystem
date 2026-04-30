@@ -18,9 +18,18 @@ export async function GET(
     )
 
     if (!backendRes.ok) {
-      const errorText = await backendRes.text()
+      let errorMessage = 'Backend error'
+      const rawError = await backendRes.text()
+      if (rawError) {
+        try {
+          const errorJson = JSON.parse(rawError)
+          errorMessage = errorJson?.error || rawError
+        } catch {
+          errorMessage = rawError
+        }
+      }
       return NextResponse.json(
-        { error: errorText || 'Backend error' },
+        { error: errorMessage },
         { status: backendRes.status }
       )
     }

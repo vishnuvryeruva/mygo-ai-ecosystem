@@ -4,7 +4,7 @@ class PromptService:
     def __init__(self):
         self.openai_service = OpenAIService()
     
-    def generate_prompt(self, language, task_description, context=''):
+    def generate_prompt(self, language, task_description, context='', llm_provider='openai'):
         """Generate optimized prompts for LLM code generation"""
         
         system_prompt = """You are an expert prompt engineer specializing in creating optimized prompts for LLM code generation.
@@ -35,12 +35,13 @@ Return only the optimized prompt, ready to use."""
             user_prompt,
             system_prompt=system_prompt,
             temperature=0.5,
-            max_tokens=1500
+            max_tokens=1500,
+            provider=llm_provider
         )
         
         return prompt
 
-    def generate_code(self, language, prompt, context=''):
+    def generate_code(self, language, prompt, context='', llm_provider='openai'):
         """Generate actual code from an optimized prompt.
         
         Args:
@@ -81,7 +82,8 @@ Generate production-ready {language} code that fulfills the above requirements."
             user_prompt,
             system_prompt=system_prompt,
             temperature=0.3,
-            max_tokens=4000
+            max_tokens=4000,
+            provider=llm_provider
         )
         
         # Parse the response to separate code and explanation
