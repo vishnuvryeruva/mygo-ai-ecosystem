@@ -30,12 +30,11 @@ class CodeRepositoryService:
         
         conn = get_conn()
         try:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            with conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO code_snippets 
                     (id, user_id, title, code, code_type, description, analysis_data, created_at, updated_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    RETURNING *
                 """, (
                     snippet_id,
                     user_id,
@@ -47,15 +46,8 @@ class CodeRepositoryService:
                     datetime.now(),
                     datetime.now()
                 ))
-                result = cur.fetchone()
-                conn.commit()
-                
-                # Convert to dict and handle datetime serialization
-                snippet = dict(result)
-                snippet['created_at'] = snippet['created_at'].isoformat() if snippet['created_at'] else None
-                snippet['updated_at'] = snippet['updated_at'].isoformat() if snippet['updated_at'] else None
-                
-                return snippet
+            conn.commit()
+            return self.get_snippet_by_id(snippet_id, user_id)
         except Exception as e:
             conn.rollback()
             raise e
@@ -166,17 +158,9 @@ class CodeRepositoryService:
                     UPDATE code_snippets
                     SET {', '.join(updates)}
                     WHERE id = %s AND user_id = %s
-                    RETURNING *
                 """, params)
-                result = cur.fetchone()
                 conn.commit()
-                
-                if result:
-                    snippet = dict(result)
-                    snippet['created_at'] = snippet['created_at'].isoformat() if snippet['created_at'] else None
-                    snippet['updated_at'] = snippet['updated_at'].isoformat() if snippet['updated_at'] else None
-                    return snippet
-                return None
+                return self.get_snippet_by_id(snippet_id, user_id)
         except Exception as e:
             conn.rollback()
             raise e

@@ -1800,7 +1800,7 @@ def fetch_btp_object_content(source_id):
 
 
 if __name__ == '__main__':
-    port = int(os.getenv('FLASK_PORT', 5000))
+    port = int(os.getenv('FLASK_PORT', 5001))
     print(f"DEBUG: Starting Flask app on port {port}")
     print(f"MCP Endpoints available at /mcp/tools and /mcp/execute")
     print(f"Available MCP tools: {list(TOOLS.keys())}")

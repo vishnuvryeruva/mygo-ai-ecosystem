@@ -10,7 +10,9 @@ class OpenAIService:
         print(f"DEBUG: OpenAI Version: {openai.__version__}")
         
         api_key = os.getenv('OPENAI_API_KEY')
-        print(f"DEBUG: Loaded API Key: {api_key[:8]}...{api_key[-4:] if api_key else 'None'}")
+        api_key_display = api_key[:8] if api_key else 'None'
+        api_key_last = api_key[-4:] if api_key else 'None'
+        print(f"DEBUG: Loaded API Key: {api_key_display}...{api_key_last}")
         print(f"DEBUG: Key length: {len(api_key) if api_key else 0}")
         print(f"DEBUG: Org ID: {os.getenv('OPENAI_ORG_ID')}")
         print(f"DEBUG: Project ID: {os.getenv('OPENAI_PROJECT_ID')}")

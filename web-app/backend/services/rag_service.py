@@ -24,7 +24,14 @@ SUPPORTED_EXTENSIONS = {
 class RAGService:
     def __init__(self):
         self.openai_service = OpenAIService()
-        print("DEBUG: RAG Service initialized with OpenAI embeddings + PostgreSQL (pgvector)")
+        self._is_sqlite_cache = None
+        print("DEBUG: RAG Service initialized with OpenAI embeddings + PostgreSQL (pgvector) fallback")
+
+    def _is_sqlite(self, conn):
+        """Check if the connection is SQLite."""
+        from db import SQLiteConnectionProxy
+        import sqlite3
+        return isinstance(conn, SQLiteConnectionProxy) or isinstance(conn, sqlite3.Connection)
 
     # ── Embedding ─────────────────────────────────────────────────────────────
 
@@ -78,46 +85,79 @@ class RAGService:
     def _insert_chunk(self, conn, chunk_id: str, doc_id: str, content: str,
                       embedding, metadata: dict):
         """Insert a single chunk row into the documents table."""
+        is_sqlite = self._is_sqlite(conn)
+        
+        # Convert embedding list to bytes/blob for SQLite if necessary
+        if is_sqlite and isinstance(embedding, list):
+            import json
+            embedding_val = json.dumps(embedding).encode('utf-8')
+        else:
+            embedding_val = embedding
+
         with conn.cursor() as cur:
-            cur.execute(
-                """
+            if is_sqlite:
+                # SQLite ON CONFLICT syntax
+                sql = """
                 INSERT INTO documents (
                     id, document_id, document_name, content, embedding,
                     source, doc_type, project, updated_by, updated_on,
                     web_url, is_placeholder, html_content,
                     uuid, display_id, project_id, scope_id
                 ) VALUES (
-                    %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s,
-                    %s, %s, %s,
-                    %s, %s, %s, %s
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?, ?
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     content = EXCLUDED.content,
                     embedding = EXCLUDED.embedding,
                     html_content = EXCLUDED.html_content,
                     updated_on = EXCLUDED.updated_on
-                """,
-                (
-                    chunk_id,
-                    doc_id,
-                    metadata.get('document_name', ''),
-                    content,
-                    embedding,
-                    metadata.get('source', 'File Upload'),
-                    metadata.get('type', 'Unknown'),
-                    metadata.get('project', 'N/A'),
-                    metadata.get('updatedBy', 'System'),
-                    metadata.get('updatedOn', 'N/A'),
-                    metadata.get('webUrl', ''),
-                    metadata.get('is_placeholder', False),
-                    metadata.get('html_content', ''),
-                    metadata.get('uuid', ''),
-                    metadata.get('displayId', ''),
-                    metadata.get('projectId', ''),
-                    metadata.get('scopeId', ''),
+                """
+                # SQLite proxy handles %s to ? but we can use ? directly if we know it's sqlite
+                # Actually SQLiteConnectionProxy.execute translates %s to ?
+                # So we can keep %s if we use the proxy, but here we might be using direct sqlite3
+                params = (
+                    chunk_id, doc_id, metadata.get('document_name', ''), content, embedding_val,
+                    metadata.get('source', 'File Upload'), metadata.get('type', 'Unknown'),
+                    metadata.get('project', 'N/A'), metadata.get('updatedBy', 'System'),
+                    metadata.get('updatedOn', 'N/A'), metadata.get('webUrl', ''),
+                    metadata.get('is_placeholder', False), metadata.get('html_content', ''),
+                    metadata.get('uuid', ''), metadata.get('displayId', ''),
+                    metadata.get('projectId', ''), metadata.get('scopeId', '')
                 )
-            )
+                cur.execute(sql.replace('%s', '?'), params)
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO documents (
+                        id, document_id, document_name, content, embedding,
+                        source, doc_type, project, updated_by, updated_on,
+                        web_url, is_placeholder, html_content,
+                        uuid, display_id, project_id, scope_id
+                    ) VALUES (
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s,
+                        %s, %s, %s, %s
+                    )
+                    ON CONFLICT (id) DO UPDATE SET
+                        content = EXCLUDED.content,
+                        embedding = EXCLUDED.embedding,
+                        html_content = EXCLUDED.html_content,
+                        updated_on = EXCLUDED.updated_on
+                    """,
+                    (
+                        chunk_id, doc_id, metadata.get('document_name', ''), content, embedding,
+                        metadata.get('source', 'File Upload'), metadata.get('type', 'Unknown'),
+                        metadata.get('project', 'N/A'), metadata.get('updatedBy', 'System'),
+                        metadata.get('updatedOn', 'N/A'), metadata.get('webUrl', ''),
+                        metadata.get('is_placeholder', False), metadata.get('html_content', ''),
+                        metadata.get('uuid', ''), metadata.get('displayId', ''),
+                        metadata.get('projectId', ''), metadata.get('scopeId', ''),
+                    )
+                )
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -384,18 +424,61 @@ class RAGService:
         query_embedding = self._create_embedding(query_text)
 
         conn = get_conn()
+        is_sqlite = self._is_sqlite(conn)
+        
         try:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    SELECT content, source, doc_type, project, document_name, web_url
-                    FROM documents
-                    ORDER BY embedding <=> %s::vector
-                    LIMIT %s
-                    """,
-                    (query_embedding, top_k)
-                )
-                rows = cur.fetchall()
+            if is_sqlite:
+                # Python-based cosine similarity for SQLite
+                import json
+                import math
+                
+                def cosine_similarity(v1, v2):
+                    dot_product = sum(a * b for a, b in zip(v1, v2))
+                    magnitude1 = math.sqrt(sum(a * a for a in v1))
+                    magnitude2 = math.sqrt(sum(b * b for b in v2))
+                    if not magnitude1 or not magnitude2:
+                        return 0
+                    return dot_product / (magnitude1 * magnitude2)
+
+                with conn.cursor() as cur:
+                    cur.execute("SELECT content, source, doc_type, project, document_name, web_url, embedding FROM documents")
+                    all_rows = cur.fetchall()
+                
+                scored_rows = []
+                for row in all_rows:
+                    try:
+                        # row might be sqlite3.Row or dict
+                        row_dict = dict(row)
+                        emb_data = row_dict.get('embedding')
+                        if emb_data:
+                            if isinstance(emb_data, bytes):
+                                emb_list = json.loads(emb_data.decode('utf-8'))
+                            elif isinstance(emb_data, str):
+                                emb_list = json.loads(emb_data)
+                            else:
+                                emb_list = emb_data # Should be list
+                            
+                            score = cosine_similarity(query_embedding, emb_list)
+                            row_dict['score'] = score
+                            scored_rows.append(row_dict)
+                    except Exception as e:
+                        print(f"DEBUG: Error processing embedding for row: {e}")
+                
+                # Sort by score descending
+                scored_rows.sort(key=lambda x: x.get('score', 0), reverse=True)
+                rows = scored_rows[:top_k]
+            else:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute(
+                        """
+                        SELECT content, source, doc_type, project, document_name, web_url
+                        FROM documents
+                        ORDER BY embedding <=> %s::vector
+                        LIMIT %s
+                        """,
+                        (query_embedding, top_k)
+                    )
+                    rows = cur.fetchall()
         finally:
             conn.close()
 
@@ -464,21 +547,42 @@ class RAGService:
     def list_documents(self):
         """List all unique documents with their metadata."""
         conn = get_conn()
+        is_sqlite = self._is_sqlite(conn)
+        
         try:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                # Get the first chunk per document_id (which holds html and full metadata)
-                cur.execute(
-                    """
-                    SELECT DISTINCT ON (document_id)
-                        document_id, document_name, source, doc_type, project,
-                        updated_by, updated_on, web_url, uuid, display_id,
-                        length(content) as content_len,
-                        COUNT(*) OVER (PARTITION BY document_id) as chunk_count
-                    FROM documents
-                    ORDER BY document_id, id
-                    """
-                )
-                rows = cur.fetchall()
+            if is_sqlite:
+                # SQLite compatible version
+                with conn.cursor() as cur:
+                    # SQLite doesn't support DISTINCT ON, use GROUP BY
+                    # This is a bit simplified but usually works for this schema
+                    cur.execute(
+                        """
+                        SELECT 
+                            document_id, document_name, source, doc_type, project,
+                            updated_by, updated_on, web_url, uuid, display_id,
+                            MAX(length(content)) as content_len,
+                            COUNT(*) as chunk_count
+                        FROM documents
+                        GROUP BY document_id
+                        ORDER BY document_id
+                        """
+                    )
+                    rows = [dict(row) for row in cur.fetchall()]
+            else:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    # Get the first chunk per document_id (which holds html and full metadata)
+                    cur.execute(
+                        """
+                        SELECT DISTINCT ON (document_id)
+                            document_id, document_name, source, doc_type, project,
+                            updated_by, updated_on, web_url, uuid, display_id,
+                            length(content) as content_len,
+                            COUNT(*) OVER (PARTITION BY document_id) as chunk_count
+                        FROM documents
+                        ORDER BY document_id, id
+                        """
+                    )
+                    rows = cur.fetchall()
         except Exception as e:
             print(f"Error listing documents: {e}")
             import traceback

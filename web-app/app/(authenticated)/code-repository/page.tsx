@@ -57,7 +57,7 @@ const TypeIcon = ({ type }: { type: string }) => {
     )
 }
 
-export default function CodeRepositoryPage() {
+export default function CodeHubPage() {
     const [sources, setSources] = useState<any[]>([])
     const [selectedSourceId, setSelectedSourceId] = useState<string>('')
     const [isLoading, setIsLoading] = useState(false)
@@ -479,56 +479,43 @@ export default function CodeRepositoryPage() {
 
     return (
         <div className="doc-hub-page scrollbar-hide">
-            {/* Page Header - BEAUTIFIED & STICKY */}
-            <div className="doc-hub-header sticky top-0 z-40 bg-[#f8fafc]/95 backdrop-blur-md border-b border-slate-200 px-10 py-5 -mx-10 -mt-8 mb-8 flex items-center justify-between transition-all duration-300">
-                <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-teal-500/10 flex items-center justify-center border border-emerald-100 shadow-sm">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            {/* Page Header - MATCHES DOCUMENT HUB */}
+            <div className="doc-hub-header">
+                <div className="doc-hub-header-left">
+                    <div className="doc-hub-icon">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#034354" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <polyline points="16 18 22 12 16 6" />
                             <polyline points="8 6 2 12 8 18" />
                             <line x1="12" y1="2" x2="12" y2="22" strokeDasharray="3 3" />
                         </svg>
                     </div>
                     <div>
-                        <h1 className="text-2xl font-extrabold text-[#034354] tracking-tight leading-none mb-1">SAP BTP Code Repository</h1>
-                        <div className="flex items-center gap-2">
-                            <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                            <p className="text-[13px] font-medium text-slate-500">
-                                Source: <span className="text-emerald-700 font-bold">{sources.find(s => s.id === selectedSourceId)?.name || 'Not Selected'}</span>
-                            </p>
-                        </div>
+                        <h1 className="doc-hub-title">Code Hub</h1>
+                        <p className="doc-hub-subtitle">Manage and explore your SAP BTP code objects across all sources</p>
                     </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex gap-3">
                     <button 
-                        className="flex items-center gap-2 px-5 py-2.5 bg-[#059669] hover:bg-[#047857] text-white rounded-xl font-bold text-[13px] transition-all shadow-lg shadow-emerald-200/50 hover:shadow-emerald-300/60 active:scale-95 disabled:opacity-50" 
+                        className="btn btn-primary flex items-center gap-2" 
                         onClick={() => setIsFetchModalOpen(true)} 
                         disabled={isLoading}
                     >
                         {isLoading ? (
                             <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                         ) : (
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
                                 <path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
                             </svg>
                         )}
                         FETCH CODE
                     </button>
-                    <button 
-                        className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-slate-500 hover:text-emerald-600 hover:border-emerald-200 transition-all hover:shadow-sm" 
-                        title="Toggle View Mode" 
-                        onClick={() => setViewMode(viewMode === 'table' ? 'json' : 'table')}
-                    >
-                        <span className="text-[11px] font-black uppercase tracking-tighter">{viewMode === 'table' ? '{...}' : 'T'}</span>
-                    </button>
-                    <div className="h-8 w-[1px] bg-slate-200 mx-1"></div>
                     <AIAgentsDropdown onAgentSelect={onAgentSelect} />
                 </div>
             </div>
 
-            {/* Local Filters Toolbar - REFACTORED TO MATCH DOCUMENT HUB */}
-            <div className="doc-hub-filters mb-8">
+            {/* Filters - MATCHES DOCUMENT HUB */}
+            <div className="doc-hub-filters">
                 <div className="doc-hub-filter-label">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
@@ -536,6 +523,17 @@ export default function CodeRepositoryPage() {
                     <span>FILTERS</span>
                 </div>
                 
+                <select 
+                    className="doc-hub-filter-select" 
+                    value={selectedSourceId} 
+                    onChange={(e) => setSelectedSourceId(e.target.value)}
+                >
+                    <option value="">All Sources</option>
+                    {sources.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                </select>
+
                 <select 
                     className="doc-hub-filter-select" 
                     value={typeFilter} 
@@ -558,27 +556,52 @@ export default function CodeRepositoryPage() {
                     ))}
                 </select>
 
-                <div className="flex-1"></div>
-
-                <div className="doc-hub-search-container">
-                    <div className="doc-hub-search-icon">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                    </div>
-                    <input 
-                        type="text"
-                        className="doc-hub-search-input"
-                        placeholder="Search records or raw JSON..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                    />
+                <div className="doc-hub-date-filter">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                        <line x1="16" y1="2" x2="16" y2="6" />
+                        <line x1="8" y1="2" x2="8" y2="6" />
+                        <line x1="3" y1="10" x2="21" y2="10" />
+                    </svg>
+                    <span>Date Range</span>
                 </div>
             </div>
 
-
-
-            <p className="doc-hub-count mb-4">
-                <span className="doc-hub-count-num">{filteredRecords.length}</span> objects found
-            </p>
+            {/* Document Count & Bulk Actions - MATCHES DOCUMENT HUB */}
+            <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-4">
+                    <p className="doc-hub-count" style={{ margin: 0 }}>
+                        <span className="doc-hub-count-num">{filteredRecords.length}</span> objects found
+                    </p>
+                    <div className="doc-hub-search-container" style={{ width: 250 }}>
+                        <div className="doc-hub-search-icon">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        </div>
+                        <input 
+                            type="text"
+                            className="doc-hub-search-input"
+                            placeholder="Search code..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                    </div>
+                </div>
+                {selectedRecords.size > 0 && (
+                    <div className="flex gap-2">
+                        <button 
+                            className="btn btn-secondary flex items-center gap-2"
+                            onClick={() => setViewMode(viewMode === 'table' ? 'json' : 'table')}
+                            title="Toggle View Mode"
+                        >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                                <line x1="9" y1="3" x2="9" y2="21" />
+                            </svg>
+                            {viewMode === 'table' ? 'View JSON' : 'View Table'}
+                        </button>
+                    </div>
+                )}
+            </div>
 
             {/* Content Area */}
             <div className="doc-hub-table-wrapper">
