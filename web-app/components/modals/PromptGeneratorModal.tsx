@@ -40,6 +40,88 @@ export default function PromptGeneratorModal({ onClose, initialPrompt, initialLa
   const [codeExplanation, setCodeExplanation] = useState('')
   const [codeCopied, setCodeCopied] = useState(false)
 
+  // GitHub Sync State
+  const [ghToken, setGhToken] = useState<string>('')
+  const [ghUser, setGhUser] = useState<any>(null)
+  const [ghRepos, setGhRepos] = useState<any[]>([])
+  const [ghSelectedRepo, setGhSelectedRepo] = useState<string>('')
+  const [ghPath, setGhPath] = useState<string>('')
+  const [ghIsSyncing, setGhIsSyncing] = useState(false)
+  const [ghStatus, setGhStatus] = useState<{ text: string, type: 'success' | 'error' | 'info' } | null>(null)
+  const [showGhLogin, setShowGhLogin] = useState(false)
+
+  useEffect(() => {
+    const savedToken = localStorage.getItem('gh-token')
+    if (savedToken) {
+      setGhToken(savedToken)
+      fetchGhUser(savedToken)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (ghToken && currentStep === 'code') {
+      fetchGhRepos(ghToken)
+      // Set default path based on language
+      const extMap: Record<string, string> = {
+        'ABAP': 'abap', 'ABAP_RAP': 'abap', 'CAP_NODEJS': 'js', 'CAP_JAVA': 'java',
+        'Python': 'py', 'JavaScript': 'js', 'Java': 'java', 'TypeScript': 'ts'
+      }
+      setGhPath(`generated_code.${extMap[language] || 'txt'}`)
+    }
+  }, [ghToken, currentStep])
+
+  const fetchGhUser = async (token: string) => {
+    try {
+      const res = await axios.get(`/api/github/user?github_token=${token}`, getAuthConfig())
+      setGhUser(res.data.user)
+    } catch (err) {
+      console.error('Failed to fetch GH user', err)
+      setGhToken('')
+      localStorage.removeItem('gh-token')
+    }
+  }
+
+  const fetchGhRepos = async (token: string) => {
+    try {
+      const res = await axios.get(`/api/github/repos?github_token=${token}`, getAuthConfig())
+      setGhRepos(res.data.repos || [])
+    } catch (err) {
+      console.error('Failed to fetch GH repos', err)
+    }
+  }
+
+  const handleGhLogin = (token: string) => {
+    setGhToken(token)
+    localStorage.setItem('gh-token', token)
+    fetchGhUser(token)
+    setShowGhLogin(false)
+  }
+
+  const handleGhPush = async () => {
+    if (!ghToken || !ghSelectedRepo || !ghPath || !generatedCode) return
+    setGhIsSyncing(true)
+    setGhStatus({ text: 'Pushing to GitHub...', type: 'info' })
+    try {
+      const res = await axios.post('/api/github/push', {
+        github_token: ghToken,
+        repo: ghSelectedRepo,
+        path: ghPath,
+        content: generatedCode,
+        message: `Sync from MyGO AI - ${taskDescription.slice(0, 50)}...`
+      }, getAuthConfig())
+      
+      if (res.data.status === 'success') {
+        setGhStatus({ text: 'Successfully pushed to GitHub!', type: 'success' })
+      } else {
+        setGhStatus({ text: res.data.message || 'Push failed', type: 'error' })
+      }
+    } catch (err: any) {
+      setGhStatus({ text: err?.response?.data?.message || 'Push failed', type: 'error' })
+    } finally {
+      setGhIsSyncing(false)
+    }
+  }
+
   // Auto-generate code if requested
   useEffect(() => {
     if (autoGenerateCode && initialPrompt && !generatedCode && !loading) {
@@ -543,6 +625,114 @@ export default function PromptGeneratorModal({ onClose, initialPrompt, initialLa
                         Explanation
                       </h4>
                       <RichTextResponse content={codeExplanation} />
+                    </div>
+                  )}
+
+                  {/* GitHub Sync Section */}
+                  {generatedCode && (
+                    <div className="glass-subtle" style={{ padding: '16px', marginTop: '16px', border: '1px solid #e2e8f0' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                        <h4 style={{ fontWeight: 700, fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
+                          </svg>
+                          Sync to GitHub
+                        </h4>
+                        {!ghToken ? (
+                          <button 
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => setShowGhLogin(true)}
+                          >
+                            Connect GitHub
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                            Connected as <strong>{ghUser?.login || 'User'}</strong>
+                          </span>
+                        )}
+                      </div>
+
+                      {showGhLogin && (
+                        <div style={{ marginBottom: '16px' }}>
+                          <p style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '8px' }}>
+                            Enter a GitHub Personal Access Token (PAT) with <code>repo</code> scope.
+                          </p>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <input 
+                              type="password" 
+                              placeholder="ghp_xxxxxxxxxxxx" 
+                              className="input" 
+                              style={{ flex: 1, fontSize: '0.8rem', padding: '6px 12px' }}
+                              id="gh-token-input"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleGhLogin((e.target as HTMLInputElement).value)
+                              }}
+                            />
+                            <button 
+                              className="btn btn-primary btn-sm"
+                              onClick={() => {
+                                const val = (document.getElementById('gh-token-input') as HTMLInputElement).value
+                                handleGhLogin(val)
+                              }}
+                            >
+                              Connect
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {ghToken && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', marginBottom: '4px', display: 'block' }}>REPOSITORY</label>
+                              <select 
+                                className="input select" 
+                                style={{ width: '100%', fontSize: '0.8rem', padding: '6px 12px' }}
+                                value={ghSelectedRepo}
+                                onChange={(e) => setGhSelectedRepo(e.target.value)}
+                              >
+                                <option value="">Select a repository...</option>
+                                {ghRepos.map(r => (
+                                  <option key={r.id} value={r.full_name}>{r.full_name}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', marginBottom: '4px', display: 'block' }}>FILE PATH</label>
+                              <input 
+                                type="text" 
+                                className="input" 
+                                style={{ width: '100%', fontSize: '0.8rem', padding: '6px 12px' }}
+                                value={ghPath}
+                                onChange={(e) => setGhPath(e.target.value)}
+                                placeholder="path/to/file.abap"
+                              />
+                            </div>
+                          </div>
+                          
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            {ghStatus && (
+                              <span style={{ 
+                                fontSize: '0.75rem', 
+                                color: ghStatus.type === 'error' ? '#ef4444' : ghStatus.type === 'success' ? '#10b981' : '#3b82f6',
+                                fontWeight: 500
+                              }}>
+                                {ghStatus.text}
+                              </span>
+                            )}
+                            <div style={{ flex: 1 }}></div>
+                            <button 
+                              className="btn btn-primary btn-sm"
+                              onClick={handleGhPush}
+                              disabled={ghIsSyncing || !ghSelectedRepo || !ghPath}
+                              style={{ padding: '6px 16px' }}
+                            >
+                              {ghIsSyncing ? 'Syncing...' : 'Sync Now'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 
