@@ -15,6 +15,7 @@ import CodeAdvisorModal from '@/components/modals/CodeAdvisorModal'
 import SettingsModal from '@/components/modals/SettingsModal'
 import SyncSourceModal from '@/components/modals/SyncSourceModal'
 import FileUploadModal from '@/components/modals/FileUploadModal'
+import CapPromptGeneratorModal from '@/components/modals/CapPromptGeneratorModal'
 
 export default function AuthenticatedLayout({
     children,
@@ -34,6 +35,8 @@ export default function AuthenticatedLayout({
     // Sync Source modal state
     const [syncSourceModalOpen, setSyncSourceModalOpen] = useState(false)
     const [preSelectedSourceId, setPreSelectedSourceId] = useState<string | null>(null)
+    // Prompt Studio modal initial data
+    const [promptStudioData, setPromptStudioData] = useState<{ prompt: string; language: string; task?: string } | null>(null)
 
     // Read user name from localStorage
     useEffect(() => {
@@ -108,6 +111,23 @@ export default function AuthenticatedLayout({
         return () => window.removeEventListener('sync-source-open', handler)
     }, [])
 
+    // Listen for prompt-studio-open events
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent).detail
+            if (detail?.prompt !== undefined) {
+                setPromptStudioData({ 
+                    prompt: detail.prompt, 
+                    language: detail.language || 'ABAP',
+                    task: detail.task
+                })
+                setActiveModal('prompt-generator')
+            }
+        }
+        window.addEventListener('prompt-studio-open', handler)
+        return () => window.removeEventListener('prompt-studio-open', handler)
+    }, [])
+
     const handleQuickAction = (actionId: string) => {
         // Ask Yoda opens the chatbot widget
         if (actionId === 'ask-yoda') {
@@ -125,6 +145,7 @@ export default function AuthenticatedLayout({
     const closeModal = () => {
         setActiveModal(null)
         setCodeAdvisorData(null)
+        setPromptStudioData(null)
     }
 
     const closeSyncSourceModal = () => {
@@ -194,7 +215,14 @@ export default function AuthenticatedLayout({
                 />
             )}
             {activeModal === 'spec-assistant' && <SpecAssistantModal onClose={closeModal} />}
-            {activeModal === 'prompt-generator' && <PromptGeneratorModal onClose={closeModal} />}
+            {activeModal === 'prompt-generator' && (
+                <PromptGeneratorModal 
+                    onClose={closeModal} 
+                    initialPrompt={promptStudioData?.prompt}
+                    initialLanguage={promptStudioData?.language}
+                    initialTask={promptStudioData?.task}
+                />
+            )}
             {activeModal === 'explain-code' && <ExplainCodeModal onClose={closeModal} />}
             {activeModal === 'test-case-generator' && <TestCaseGeneratorModal onClose={closeModal} />}
             {activeModal === 'document-upload' && <FileUploadModal onClose={closeModal} />}
@@ -206,6 +234,12 @@ export default function AuthenticatedLayout({
                 />
             )}
             {activeModal === 'settings' && <SettingsModal onClose={closeModal} />}
+            {activeModal === 'cap-generator' && (
+                <CapPromptGeneratorModal 
+                    isOpen={activeModal === 'cap-generator'} 
+                    onClose={closeModal} 
+                />
+            )}
 
             {/* Sync Source Modal */}
             {syncSourceModalOpen && (

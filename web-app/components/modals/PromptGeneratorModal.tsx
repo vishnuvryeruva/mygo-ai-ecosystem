@@ -7,21 +7,26 @@ import AppModal from './AppModal'
 
 interface PromptGeneratorModalProps {
   onClose: () => void
+  initialPrompt?: string
+  initialLanguage?: string
+  initialTask?: string
 }
 
 type Step = 'describe' | 'refine' | 'code'
 
-export default function PromptGeneratorModal({ onClose }: PromptGeneratorModalProps) {
-  const [language, setLanguage] = useState('ABAP')
-  const [taskDescription, setTaskDescription] = useState('')
+export default function PromptGeneratorModal({ onClose, initialPrompt, initialLanguage, initialTask }: PromptGeneratorModalProps) {
+  const [language, setLanguage] = useState(initialLanguage || 'ABAP')
+  const [taskDescription, setTaskDescription] = useState(initialTask || '')
   // const [context, setContext] = useState('')
-  const [prompt, setPrompt] = useState('')
+  const [prompt, setPrompt] = useState(initialPrompt || '')
   const [loading, setLoading] = useState(false)
-  const [currentStep, setCurrentStep] = useState<Step>('describe')
+  const [currentStep, setCurrentStep] = useState<Step>(initialPrompt ? 'refine' : 'describe')
 
   // Conversational refinement state
   const [refinementInput, setRefinementInput] = useState('')
-  const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'assistant', content: string }[]>([])
+  const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'assistant', content: string }[]>(
+    initialPrompt ? [{ role: 'assistant', content: initialPrompt }] : []
+  )
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   // Auto-scroll to bottom when chat history updates
