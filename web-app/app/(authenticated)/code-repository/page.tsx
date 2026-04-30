@@ -619,7 +619,7 @@ export default function CodeHubPage() {
                         />
                     </div>
                 </div>
-                {selectedRecords.size > 0 && (
+                {selectedRecordId !== null && (
                     <div className="flex gap-2">
                         <button 
                             className="btn btn-secondary flex items-center gap-2"
