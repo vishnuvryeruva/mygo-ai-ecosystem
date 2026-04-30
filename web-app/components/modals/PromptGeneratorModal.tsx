@@ -10,17 +10,18 @@ interface PromptGeneratorModalProps {
   initialPrompt?: string
   initialLanguage?: string
   initialTask?: string
+  autoGenerateCode?: boolean
 }
 
 type Step = 'describe' | 'refine' | 'code'
 
-export default function PromptGeneratorModal({ onClose, initialPrompt, initialLanguage, initialTask }: PromptGeneratorModalProps) {
+export default function PromptGeneratorModal({ onClose, initialPrompt, initialLanguage, initialTask, autoGenerateCode }: PromptGeneratorModalProps) {
   const [language, setLanguage] = useState(initialLanguage || 'ABAP')
   const [taskDescription, setTaskDescription] = useState(initialTask || '')
   // const [context, setContext] = useState('')
   const [prompt, setPrompt] = useState(initialPrompt || '')
   const [loading, setLoading] = useState(false)
-  const [currentStep, setCurrentStep] = useState<Step>(initialPrompt ? 'refine' : 'describe')
+  const [currentStep, setCurrentStep] = useState<Step>(initialPrompt ? (autoGenerateCode ? 'code' : 'refine') : 'describe')
 
   // Conversational refinement state
   const [refinementInput, setRefinementInput] = useState('')
@@ -38,6 +39,13 @@ export default function PromptGeneratorModal({ onClose, initialPrompt, initialLa
   const [generatedCode, setGeneratedCode] = useState('')
   const [codeExplanation, setCodeExplanation] = useState('')
   const [codeCopied, setCodeCopied] = useState(false)
+
+  // Auto-generate code if requested
+  useEffect(() => {
+    if (autoGenerateCode && initialPrompt && !generatedCode && !loading) {
+      handleGenerateCode()
+    }
+  }, [autoGenerateCode, initialPrompt])
 
   const getAuthConfig = () => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('mygo-token') : null

@@ -36,7 +36,12 @@ export default function AuthenticatedLayout({
     const [syncSourceModalOpen, setSyncSourceModalOpen] = useState(false)
     const [preSelectedSourceId, setPreSelectedSourceId] = useState<string | null>(null)
     // Prompt Studio modal initial data
-    const [promptStudioData, setPromptStudioData] = useState<{ prompt: string; language: string; task?: string } | null>(null)
+    const [promptStudioData, setPromptStudioData] = useState<{ 
+        prompt: string; 
+        language: string; 
+        task?: string;
+        autoGenerate?: boolean;
+    } | null>(null)
 
     // Read user name from localStorage
     useEffect(() => {
@@ -119,7 +124,8 @@ export default function AuthenticatedLayout({
                 setPromptStudioData({ 
                     prompt: detail.prompt, 
                     language: detail.language || 'ABAP',
-                    task: detail.task
+                    task: detail.task,
+                    autoGenerate: detail.autoGenerate
                 })
                 setActiveModal('prompt-generator')
             }
@@ -221,6 +227,7 @@ export default function AuthenticatedLayout({
                     initialPrompt={promptStudioData?.prompt}
                     initialLanguage={promptStudioData?.language}
                     initialTask={promptStudioData?.task}
+                    autoGenerateCode={promptStudioData?.autoGenerate}
                 />
             )}
             {activeModal === 'explain-code' && <ExplainCodeModal onClose={closeModal} />}

@@ -296,10 +296,12 @@ export default function CapPromptGeneratorModal({ isOpen, onClose }: CapPromptGe
                                         window.dispatchEvent(new CustomEvent('prompt-studio-open', {
                                             detail: {
                                                 prompt: promptText,
-                                                language: 'CAP_NODEJS'
+                                                language: 'CAP_NODEJS',
+                                                task: `Generate a CAP application for ${selectedEntities.size} entities.`,
+                                                autoGenerate: true
                                             }
                                         }))
-                                        onClose()
+                                        // Removed onClose() to prevent state conflict with the new modal
                                     }}
                                 >
                                     Code Studio 🚀
