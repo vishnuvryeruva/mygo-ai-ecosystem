@@ -606,6 +606,7 @@ export default function ChatbotWidget({
                                     className="minimized-chat-bubble-close"
                                     onClick={(e) => {
                                         e.stopPropagation()
+                                        delete messagesStore.current[chatAgentId]
                                         onDismissBubble(chatAgentId)
                                     }}
                                     title={`Close ${chatAgent.name}`}
