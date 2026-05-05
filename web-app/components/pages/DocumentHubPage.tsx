@@ -1,21 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import axios from 'axios'
 import GlobalAIAgentsDropdown from '@/components/GlobalAIAgentsDropdown'
 import SyncSourceModal from '@/components/modals/SyncSourceModal'
-
-interface Source {
-    id: string
-    name: string
-    type: string
-}
-
-interface Project {
-    id: string
-    name: string
-    webUrl?: string
-}
 
 interface Document {
     id: string
@@ -31,6 +19,15 @@ interface Document {
     documentTypeCode?: string
 }
 
+interface PaginationMeta {
+    total: number
+    page: number
+    page_size: number
+    total_pages: number
+}
+
+const PAGE_SIZE = 10
+
 const sourceColors: Record<string, { bg: string; text: string }> = {
     CALM: { bg: '#dbeafe', text: '#1e40af' },
     SharePoint: { bg: '#d1fae5', text: '#065f46' },
@@ -38,7 +35,6 @@ const sourceColors: Record<string, { bg: string; text: string }> = {
     Solman: { bg: '#ffedd5', text: '#9a3412' },
 }
 
-// Map SAP document type codes to human-readable names
 const documentTypeNames: Record<string, string> = {
     NT: 'Note',
     FS: 'Functional Spec',
@@ -48,71 +44,69 @@ const documentTypeNames: Record<string, string> = {
     DP: 'Decision Paper',
 }
 
+const formatDate = (dateStr: string | null | undefined): string => {
+    if (!dateStr) return 'N/A'
+    const d = new Date(dateStr)
+    if (isNaN(d.getTime())) return dateStr
+    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
 export default function DocumentHubPage() {
     const [documents, setDocuments] = useState<Document[]>([])
     const [isLoading, setIsLoading] = useState(true)
+    const [pagination, setPagination] = useState<PaginationMeta>({ total: 0, page: 1, page_size: PAGE_SIZE, total_pages: 1 })
 
-    // Filters
-    const [sourceFilter, setSourceFilter] = useState('All Sources')
-    const [typeFilter, setTypeFilter] = useState('All Types')
-    const [projectFilter, setProjectFilter] = useState('All Projects')
+    // Server-side filters
+    const [search, setSearch] = useState('')
+    const [sourceFilter, setSourceFilter] = useState('')
+    const [typeFilter, setTypeFilter] = useState('')
+    const [projectFilter, setProjectFilter] = useState('')
     const [dateFrom, setDateFrom] = useState('')
     const [dateTo, setDateTo] = useState('')
+    const [currentPage, setCurrentPage] = useState(1)
+
+    // Filter option lists (populated from first unfiltered fetch)
+    const [sourceOptions, setSourceOptions] = useState<string[]>([])
+    const [typeOptions, setTypeOptions] = useState<string[]>([])
+    const [projectOptions, setProjectOptions] = useState<string[]>([])
+    const optionsLoaded = useRef(false)
 
     const [showSyncModal, setShowSyncModal] = useState(false)
 
-    // Document selection & delete state
     const [selectedDocumentIds, setSelectedDocumentIds] = useState<Set<string>>(new Set())
     const [isDeleting, setIsDeleting] = useState(false)
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
-    // Document viewer modal state
     const [viewerDoc, setViewerDoc] = useState<{ name: string; content: string } | null>(null)
     const [isLoadingContent, setIsLoadingContent] = useState(false)
 
-    useEffect(() => {
-        fetchDocuments()
-    }, [])
+    // Debounce search input
+    const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-
-    const fetchDocuments = async () => {
+    const fetchDocuments = useCallback(async (page: number = 1) => {
         setIsLoading(true)
         try {
-            const res = await axios.get('/api/documents')
-            // Map backend docs to frontend format
-            const mappedDocs = res.data.documents.map((doc: any) => {
-                // documentId / document_id = DB document_id (chunk prefix); never use display name for delete/view
-                const docId =
-                    doc.documentId ||
-                    doc.document_id ||
-                    doc.uuid ||
-                    doc.id ||
-                    doc.name ||
-                    doc.filename
+            const params = new URLSearchParams()
+            params.set('page', String(page))
+            params.set('page_size', String(PAGE_SIZE))
+            if (search) params.set('search', search)
+            if (sourceFilter) params.set('source', sourceFilter)
+            if (typeFilter) params.set('type', typeFilter)
+            if (projectFilter) params.set('project', projectFilter)
+            if (dateFrom) params.set('date_from', dateFrom)
+            if (dateTo) params.set('date_to', dateTo)
+
+            const res = await axios.get(`/api/documents?${params.toString()}`)
+            const { documents: rawDocs, total, total_pages, page: pg, page_size } = res.data
+
+            const mappedDocs: Document[] = (rawDocs ?? []).map((doc: any) => {
+                const docId = doc.documentId || doc.document_id || doc.uuid || doc.id || doc.name || doc.filename
                 const docName = doc.title || doc.name || doc.metadata?.name || doc.filename
                 const docTypeCode = doc.documentTypeCode || doc.type || doc.metadata?.documentType
                 const docType = documentTypeNames[docTypeCode] || docTypeCode || 'Document'
-
                 const rawDate = doc.modifiedAt || doc.updatedOn || doc.metadata?.updatedAt || doc.metadata?.modifiedAt || null
                 const parsedTs = rawDate ? new Date(rawDate).getTime() : NaN
-                const updatedAt = isNaN(parsedTs) ? 0 : parsedTs
-
-                const formatDate = (dateStr: string | null | undefined): string => {
-                    if (!dateStr) return 'N/A'
-                    const d = new Date(dateStr)
-                    if (isNaN(d.getTime())) return dateStr
-                    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
-                }
-
-                const resolvedUpdatedBy =
-                    doc.updatedBy ||
-                    doc.changedBy ||
-                    doc.lastChangedBy ||
-                    doc.modifiedBy ||
-                    doc.metadata?.updatedBy ||
-                    doc.metadata?.changedBy ||
-                    null
-
+                const resolvedUpdatedBy = doc.updatedBy || doc.changedBy || doc.lastChangedBy || doc.modifiedBy || doc.metadata?.updatedBy || doc.metadata?.changedBy || null
                 return {
                     id: docId,
                     name: docName,
@@ -121,19 +115,51 @@ export default function DocumentHubPage() {
                     project: doc.project || doc.metadata?.project || 'N/A',
                     updatedBy: resolvedUpdatedBy || 'System',
                     updatedOn: formatDate(rawDate),
-                    updatedAt,
+                    updatedAt: isNaN(parsedTs) ? 0 : parsedTs,
                     webUrl: doc.webUrl || doc.metadata?.webUrl,
-                    // Same stable key as id (Postgres document_id) for view/delete
                     documentId: docId,
                 }
             })
+
             setDocuments(mappedDocs)
+            setPagination({ total: total ?? 0, page: pg ?? page, page_size: page_size ?? PAGE_SIZE, total_pages: total_pages ?? 1 })
+            setCurrentPage(pg ?? page)
         } catch (err) {
             console.error('Failed to fetch documents:', err)
         } finally {
             setIsLoading(false)
         }
-    }
+    }, [search, sourceFilter, typeFilter, projectFilter, dateFrom, dateTo])
+
+    // Load filter options once on mount (unfiltered, large page)
+    useEffect(() => {
+        if (optionsLoaded.current) return
+        optionsLoaded.current = true
+        axios.get('/api/documents?page=1&page_size=1000').then(res => {
+            const docs: any[] = res.data.documents ?? []
+            setSourceOptions([...new Set<string>(docs.map(d => d.source).filter(Boolean))].sort())
+            setTypeOptions([...new Set<string>(docs.map(d => d.type || d.doc_type).filter(Boolean))].sort())
+            setProjectOptions([...new Set<string>(docs.map(d => d.project).filter(p => p && p !== 'N/A'))].sort())
+        }).catch(() => {})
+    }, [])
+
+    // Re-fetch when filters change (reset to page 1)
+    useEffect(() => {
+        fetchDocuments(1)
+        setSelectedDocumentIds(new Set())
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [sourceFilter, typeFilter, projectFilter, dateFrom, dateTo])
+
+    // Debounced search
+    useEffect(() => {
+        if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
+        searchDebounceRef.current = setTimeout(() => {
+            fetchDocuments(1)
+            setSelectedDocumentIds(new Set())
+        }, 400)
+        return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current) }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [search])
 
 
 
@@ -146,10 +172,10 @@ export default function DocumentHubPage() {
     }
 
     const toggleSelectAllDocuments = () => {
-        if (selectedDocumentIds.size === filteredDocs.length) {
+        if (selectedDocumentIds.size === documents.length) {
             setSelectedDocumentIds(new Set())
         } else {
-            setSelectedDocumentIds(new Set(filteredDocs.map(d => d.id)))
+            setSelectedDocumentIds(new Set(documents.map(d => d.id)))
         }
     }
 
@@ -157,19 +183,23 @@ export default function DocumentHubPage() {
         setIsDeleting(true)
         setShowDeleteConfirm(false)
         try {
-            // Path delete: matches Flask /api/documents/<id> and Next [document_id] proxy (local Postgres only — not Cloud ALM)
             await Promise.all(
                 Array.from(selectedDocumentIds).map((id) =>
                     axios.delete(`/api/documents/${encodeURIComponent(id)}`)
                 )
             )
             setSelectedDocumentIds(new Set())
-            await fetchDocuments()
+            await fetchDocuments(currentPage)
         } catch (err) {
             console.error('Delete failed:', err)
         } finally {
             setIsDeleting(false)
         }
+    }
+
+    const goToPage = (page: number) => {
+        if (page < 1 || page > pagination.total_pages) return
+        fetchDocuments(page)
     }
 
     const openDocumentViewer = async (doc: Document) => {
@@ -315,25 +345,6 @@ export default function DocumentHubPage() {
         }
     }
 
-    // Filter Logic
-    const dateFromTs = dateFrom ? new Date(dateFrom).setHours(0, 0, 0, 0) : null
-    const dateToTs = dateTo ? new Date(dateTo).setHours(23, 59, 59, 999) : null
-
-    const filteredDocs = documents
-        .filter(doc => {
-            if (sourceFilter !== 'All Sources' && doc.source !== sourceFilter) return false
-            if (typeFilter !== 'All Types' && doc.type !== typeFilter) return false
-            if (projectFilter !== 'All Projects' && doc.project !== projectFilter) return false
-            if (dateFromTs || dateToTs) {
-                // Docs with no date should never match a date range filter
-                if (!doc.updatedAt) return false
-                if (dateFromTs && doc.updatedAt < dateFromTs) return false
-                if (dateToTs && doc.updatedAt > dateToTs) return false
-            }
-            return true
-        })
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-
     return (
         <div className="doc-hub-page">
             {/* Page Header */}
@@ -367,31 +378,44 @@ export default function DocumentHubPage() {
                 </div>
             </div>
 
-            {/* Filters */}
-            <div className="doc-hub-filters">
+            {/* Search + Filters */}
+            <div className="doc-hub-filters" style={{ flexWrap: 'wrap', gap: 8 }}>
                 <div className="doc-hub-filter-label">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
                     </svg>
                     <span>FILTERS</span>
                 </div>
+
+                {/* Search box */}
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', left: 9, pointerEvents: 'none' }}>
+                        <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                    <input
+                        type="text"
+                        placeholder="Search documents…"
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        className="doc-hub-filter-select"
+                        style={{ paddingLeft: 28, minWidth: 180 }}
+                    />
+                    {search && (
+                        <button onClick={() => setSearch('')} style={{ position: 'absolute', right: 7, border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 13, lineHeight: 1 }}>✕</button>
+                    )}
+                </div>
+
                 <select className="doc-hub-filter-select" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
-                    <option value="All Sources">All Sources</option>
-                    {Array.from(new Set(documents.map(d => d.source))).filter(s => s && s !== 'File Upload').sort().map(s => (
-                        <option key={s} value={s}>{s}</option>
-                    ))}
+                    <option value="">All Sources</option>
+                    {sourceOptions.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
                 <select className="doc-hub-filter-select" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-                    <option value="All Types">All Types</option>
-                    {Array.from(new Set(documents.map(d => d.type))).filter(Boolean).sort().map(t => (
-                        <option key={t} value={t}>{t}</option>
-                    ))}
+                    <option value="">All Types</option>
+                    {typeOptions.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
                 <select className="doc-hub-filter-select" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
-                    <option value="All Projects">All Projects</option>
-                    {Array.from(new Set(documents.map(d => d.project))).filter(p => p && p !== 'N/A').sort().map(p => (
-                        <option key={p} value={p}>{p}</option>
-                    ))}
+                    <option value="">All Projects</option>
+                    {projectOptions.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
                 <div className="doc-hub-date-filter">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
@@ -417,13 +441,8 @@ export default function DocumentHubPage() {
                         style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: 13, color: dateTo ? '#1e293b' : '#94a3b8', cursor: 'pointer' }}
                     />
                     {(dateFrom || dateTo) && (
-                        <button
-                            onClick={() => { setDateFrom(''); setDateTo('') }}
-                            title="Clear date filter"
-                            style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8', padding: '0 2px', fontSize: 14, lineHeight: 1 }}
-                        >
-                            ✕
-                        </button>
+                        <button onClick={() => { setDateFrom(''); setDateTo('') }} title="Clear date filter"
+                            style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8', padding: '0 2px', fontSize: 14, lineHeight: 1 }}>✕</button>
                     )}
                 </div>
             </div>
@@ -431,7 +450,12 @@ export default function DocumentHubPage() {
             {/* Document Count & Bulk Actions */}
             <div className="flex items-center justify-between mb-2">
                 <p className="doc-hub-count" style={{ margin: 0 }}>
-                    <span className="doc-hub-count-num">{filteredDocs.length}</span> documents found
+                    <span className="doc-hub-count-num">{pagination.total}</span> documents found
+                    {pagination.total_pages > 1 && (
+                        <span style={{ color: '#94a3b8', fontWeight: 400, fontSize: 13, marginLeft: 6 }}>
+                            — page {pagination.page} of {pagination.total_pages}
+                        </span>
+                    )}
                 </p>
                 {selectedDocumentIds.size > 0 && (
                     <button
@@ -462,10 +486,10 @@ export default function DocumentHubPage() {
                                 <th style={{ width: 40, textAlign: 'center' }}>
                                     <input
                                         type="checkbox"
-                                        checked={filteredDocs.length > 0 && selectedDocumentIds.size === filteredDocs.length}
+                                        checked={documents.length > 0 && selectedDocumentIds.size === documents.length}
                                         onChange={toggleSelectAllDocuments}
                                         style={{ cursor: 'pointer' }}
-                                        title="Select all"
+                                        title="Select all on this page"
                                     />
                                 </th>
                                 <th>SOURCE</th>
@@ -477,7 +501,7 @@ export default function DocumentHubPage() {
                             </tr>
                         </thead>
                         <tbody>
-                            {filteredDocs.map((doc) => (
+                            {documents.map((doc) => (
                                 <tr key={doc.id} style={selectedDocumentIds.has(doc.id) ? { backgroundColor: '#f0f7ff' } : {}}>
                                     <td style={{ textAlign: 'center' }}>
                                         <input
@@ -525,7 +549,7 @@ export default function DocumentHubPage() {
                                     <td>{doc.project}</td>
                                 </tr>
                             ))}
-                            {filteredDocs.length === 0 && (
+                            {documents.length === 0 && (
                                 <tr>
                                     <td colSpan={7} className="text-center p-8 text-gray-400">
                                         No documents found. Try adjusting filters or syncing a source.
@@ -536,6 +560,64 @@ export default function DocumentHubPage() {
                     </table>
                 )}
             </div>
+
+            {/* Pagination */}
+            {pagination.total_pages > 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '16px 0' }}>
+                    <button
+                        onClick={() => goToPage(1)}
+                        disabled={pagination.page <= 1}
+                        style={{ padding: '6px 10px', border: '1px solid #e2e8f0', borderRadius: 6, background: 'white', cursor: pagination.page <= 1 ? 'not-allowed' : 'pointer', color: pagination.page <= 1 ? '#cbd5e1' : '#475569', fontSize: 13 }}
+                        title="First page"
+                    >«</button>
+                    <button
+                        onClick={() => goToPage(pagination.page - 1)}
+                        disabled={pagination.page <= 1}
+                        style={{ padding: '6px 10px', border: '1px solid #e2e8f0', borderRadius: 6, background: 'white', cursor: pagination.page <= 1 ? 'not-allowed' : 'pointer', color: pagination.page <= 1 ? '#cbd5e1' : '#475569', fontSize: 13 }}
+                        title="Previous page"
+                    >‹</button>
+
+                    {/* Page number buttons */}
+                    {Array.from({ length: pagination.total_pages }, (_, i) => i + 1)
+                        .filter(p => p === 1 || p === pagination.total_pages || Math.abs(p - pagination.page) <= 2)
+                        .reduce<(number | '…')[]>((acc, p, idx, arr) => {
+                            if (idx > 0 && p - (arr[idx - 1] as number) > 1) acc.push('…')
+                            acc.push(p)
+                            return acc
+                        }, [])
+                        .map((p, idx) =>
+                            p === '…' ? (
+                                <span key={`ellipsis-${idx}`} style={{ padding: '6px 4px', color: '#94a3b8', fontSize: 13 }}>…</span>
+                            ) : (
+                                <button
+                                    key={p}
+                                    onClick={() => goToPage(p as number)}
+                                    style={{
+                                        padding: '6px 11px', border: '1px solid', borderRadius: 6, fontSize: 13, cursor: 'pointer',
+                                        borderColor: p === pagination.page ? '#034354' : '#e2e8f0',
+                                        background: p === pagination.page ? '#034354' : 'white',
+                                        color: p === pagination.page ? 'white' : '#475569',
+                                        fontWeight: p === pagination.page ? 600 : 400,
+                                    }}
+                                >{p}</button>
+                            )
+                        )
+                    }
+
+                    <button
+                        onClick={() => goToPage(pagination.page + 1)}
+                        disabled={pagination.page >= pagination.total_pages}
+                        style={{ padding: '6px 10px', border: '1px solid #e2e8f0', borderRadius: 6, background: 'white', cursor: pagination.page >= pagination.total_pages ? 'not-allowed' : 'pointer', color: pagination.page >= pagination.total_pages ? '#cbd5e1' : '#475569', fontSize: 13 }}
+                        title="Next page"
+                    >›</button>
+                    <button
+                        onClick={() => goToPage(pagination.total_pages)}
+                        disabled={pagination.page >= pagination.total_pages}
+                        style={{ padding: '6px 10px', border: '1px solid #e2e8f0', borderRadius: 6, background: 'white', cursor: pagination.page >= pagination.total_pages ? 'not-allowed' : 'pointer', color: pagination.page >= pagination.total_pages ? '#cbd5e1' : '#475569', fontSize: 13 }}
+                        title="Last page"
+                    >»</button>
+                </div>
+            )}
 
             {/* Document Viewer Modal */}
             {viewerDoc && (

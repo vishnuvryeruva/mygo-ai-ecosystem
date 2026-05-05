@@ -435,8 +435,26 @@ def upload_documents():
 @app.route('/api/documents', methods=['GET'])
 def list_documents():
     try:
-        documents = rag_service.list_documents()
-        return jsonify({"documents": documents})
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 10))
+        search = request.args.get('search', '').strip()
+        source = request.args.get('source', '').strip()
+        doc_type = request.args.get('type', '').strip()
+        project = request.args.get('project', '').strip()
+        date_from = request.args.get('date_from', '').strip()
+        date_to = request.args.get('date_to', '').strip()
+
+        result = rag_service.list_documents(
+            page=page,
+            page_size=page_size,
+            search=search,
+            source=source,
+            doc_type=doc_type,
+            project=project,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        return jsonify(result)
     except Exception as e:
         import traceback
         traceback.print_exc()

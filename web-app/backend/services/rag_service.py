@@ -611,62 +611,119 @@ class RAGService:
         )
         return {"answer": answer, "references": references}
 
-    def list_documents(self):
-        """List all unique documents with their metadata."""
+    def list_documents(self, page: int = 1, page_size: int = 10, search: str = '',
+                       source: str = '', doc_type: str = '', project: str = '',
+                       date_from: str = '', date_to: str = ''):
+        """List unique documents with optional filtering and pagination.
+
+        Returns a dict with keys: documents (list), total (int), page (int), page_size (int), total_pages (int).
+        """
+        page = max(1, page)
+        page_size = min(max(1, page_size), 100)
+        offset = (page - 1) * page_size
+
+        conn = None
         try:
             conn = get_conn()
             if self._is_sqlite(conn):
-                # SQLite compatible version
+                # ── SQLite path ──────────────────────────────────────────────
+                where_clauses = []
+                params: list = []
+
+                if search:
+                    where_clauses.append("(document_name LIKE ? OR document_id LIKE ?)")
+                    like = f"%{search}%"
+                    params += [like, like]
+                if source:
+                    where_clauses.append("source = ?")
+                    params.append(source)
+                if doc_type:
+                    where_clauses.append("doc_type = ?")
+                    params.append(doc_type)
+                if project:
+                    where_clauses.append("project = ?")
+                    params.append(project)
+                if date_from:
+                    where_clauses.append("updated_on >= ?")
+                    params.append(date_from)
+                if date_to:
+                    where_clauses.append("updated_on <= ?")
+                    params.append(date_to + "T23:59:59")
+
+                where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
                 with conn.cursor() as cur:
-                    # SQLite doesn't support DISTINCT ON, use GROUP BY
                     cur.execute(
-                        """
-                        SELECT 
+                        f"""
+                        SELECT COUNT(DISTINCT document_id) AS total
+                        FROM documents
+                        {where_sql}
+                        """,
+                        params,
+                    )
+                    total = cur.fetchone()[0] or 0
+
+                    cur.execute(
+                        f"""
+                        SELECT
                             document_id, document_name, source, doc_type, project,
                             updated_by, updated_on, web_url, uuid, display_id,
-                            MAX(length(content)) as content_len,
-                            COUNT(*) as chunk_count
+                            MAX(length(content)) AS content_len,
+                            COUNT(*) AS chunk_count
                         FROM documents
+                        {where_sql}
                         GROUP BY document_id
-                        ORDER BY document_id
-                        """
+                        ORDER BY updated_on DESC NULLS LAST
+                        LIMIT ? OFFSET ?
+                        """,
+                        params + [page_size, offset],
                     )
                     rows = [dict(row) for row in cur.fetchall()]
             else:
+                # ── PostgreSQL path ──────────────────────────────────────────
+                where_clauses = []
+                params = []
+
+                if search:
+                    where_clauses.append("(d.document_name ILIKE %s OR d.document_id ILIKE %s)")
+                    like = f"%{search}%"
+                    params += [like, like]
+                if source:
+                    where_clauses.append("d.source = %s")
+                    params.append(source)
+                if doc_type:
+                    where_clauses.append("d.doc_type = %s")
+                    params.append(doc_type)
+                if project:
+                    where_clauses.append("d.project = %s")
+                    params.append(project)
+                if date_from:
+                    where_clauses.append("d.updated_on >= %s")
+                    params.append(date_from)
+                if date_to:
+                    where_clauses.append("d.updated_on <= %s")
+                    params.append(date_to + "T23:59:59")
+
+                where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    # One row per logical document (first chunk by id). Chunk count via subquery —
-                    # DISTINCT ON + COUNT(*) OVER fails on some PostgreSQL builds.
+                    # Total count of distinct documents matching the filter
                     cur.execute(
-                        """
-                        SELECT DISTINCT ON (d.document_id)
-                            d.document_id,
-                            d.document_name,
-                            d.source,
-                            d.doc_type,
-                            d.project,
-                            d.updated_by,
-                            d.updated_on,
-                            d.web_url,
-                            d.uuid,
-                            d.display_id,
-                            length(d.content) AS content_len,
-                            (SELECT COUNT(*)::int FROM documents d2
-                             WHERE d2.document_id IS NOT DISTINCT FROM d.document_id) AS chunk_count
-                        FROM documents d
-                        ORDER BY d.document_id, d.id
-                        """
+                        f"""
+                        SELECT COUNT(*) AS total FROM (
+                            SELECT 1 FROM documents d
+                            {where_sql}
+                            GROUP BY d.document_id
+                        ) sub
+                        """,
+                        params,
                     )
-                    rows = cur.fetchall()
-        except Exception as e:
-            print(f"Error listing documents (primary query): {e}")
-            import traceback
-            traceback.print_exc()
-            rows = []
-            if conn:
-                try:
-                    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                        cur.execute(
-                            """
+                    total = (cur.fetchone() or {}).get('total') or 0
+
+                    # Paginated page using a CTE so DISTINCT ON + ORDER/LIMIT work cleanly
+                    cur.execute(
+                        f"""
+                        WITH unique_docs AS (
                             SELECT DISTINCT ON (d.document_id)
                                 d.document_id,
                                 d.document_name,
@@ -676,18 +733,29 @@ class RAGService:
                                 d.updated_by,
                                 d.updated_on,
                                 d.web_url,
+                                d.uuid,
+                                d.display_id,
                                 length(d.content) AS content_len,
                                 (SELECT COUNT(*)::int FROM documents d2
                                  WHERE d2.document_id IS NOT DISTINCT FROM d.document_id) AS chunk_count
                             FROM documents d
+                            {where_sql}
                             ORDER BY d.document_id, d.id
-                            """
                         )
-                        rows = cur.fetchall()
-                except Exception as e2:
-                    print(f"Error listing documents (fallback query): {e2}")
-                    traceback.print_exc()
-                    return []
+                        SELECT * FROM unique_docs
+                        ORDER BY updated_on DESC NULLS LAST
+                        LIMIT %s OFFSET %s
+                        """,
+                        params + [page_size, offset],
+                    )
+                    rows = cur.fetchall()
+
+        except Exception as e:
+            print(f"Error listing documents: {e}")
+            import traceback
+            traceback.print_exc()
+            rows = []
+            total = 0
         finally:
             if conn:
                 conn.close()
@@ -719,9 +787,16 @@ class RAGService:
             print(f"Error building document list: {e}")
             import traceback
             traceback.print_exc()
-            return []
 
-        return doc_list
+        import math
+        total_pages = math.ceil(total / page_size) if page_size else 1
+        return {
+            'documents': doc_list,
+            'total': total,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': max(1, total_pages),
+        }
 
     def delete_document(self, identifier: str) -> bool:
         """Delete all chunks for a document. Matches document_id (CALM id / upload filename) or legacy chunk id prefix."""
