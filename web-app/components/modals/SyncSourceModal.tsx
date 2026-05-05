@@ -345,7 +345,11 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                                         </div>
                                     </div>
                                     <div className="max-h-60 overflow-y-auto border rounded p-2 bg-gray-50">
-                                        {docsToSync.map(doc => {
+                                        {[...docsToSync].sort((a, b) => {
+                                            const aTime = a.modifiedAt ? new Date(a.modifiedAt).getTime() : 0
+                                            const bTime = b.modifiedAt ? new Date(b.modifiedAt).getTime() : 0
+                                            return bTime - aTime
+                                        }).map(doc => {
                                             const docId = doc.uuid || doc.id
                                             const isTestCase = doc.itemType === 'test_case'
                                             const typeCode = doc.documentTypeCode || doc.documentType || doc.type

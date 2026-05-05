@@ -6,6 +6,7 @@ export async function GET(req: NextRequest) {
   try {
     const backendRes = await fetch(`${BACKEND_URL}/api/documents`, {
       method: 'GET',
+      cache: 'no-store',
     })
 
     if (!backendRes.ok) {
