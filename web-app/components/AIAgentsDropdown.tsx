@@ -21,13 +21,13 @@ const agents = [
     },
     {
         id: 'sync-sources',
-        title: 'Fetch Code',
-        description: 'Fetch latest code from BTP sources',
+        title: 'Sync Sources',
+        description: 'Sync documents from connected sources',
         icon: (
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c2632a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="23 4 23 10 17 10" />
-                <polyline points="1 20 1 14 7 14" />
-                <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
         ),
     },
