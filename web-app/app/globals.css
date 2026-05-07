@@ -1496,6 +1496,7 @@ body {
   background: var(--mygo-orange);
   color: white;
   box-shadow: 0 2px 8px rgba(255, 104, 44, 0.25);
+  max-height: 40px;
 }
 
 .btn-primary:hover {
@@ -1987,6 +1988,7 @@ body {
 
 .chatbot-send-btn {
   width: 40px;
+  margin-top: auto;
   height: 40px;
   border-radius: 10px;
   border: none;

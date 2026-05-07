@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import axios from 'axios'
 import RichTextResponse from '../RichTextResponse'
 import AppModal from './AppModal'
+import { useAutoResize } from '@/hooks/useAutoResize'
 
 interface TestCaseGeneratorModalProps {
   onClose: () => void
@@ -38,6 +39,7 @@ type AlmUploadStep = 'idle' | 'form' | 'uploading' | 'success' | 'error'
 export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorModalProps) {
   const [code, setCode] = useState('')
   const [testType, setTestType] = useState('manual')
+  const codeRef = useAutoResize(code, 8)
   const [loading, setLoading] = useState(false)
   const [testCases, setTestCases] = useState('')
   const [testCasesStructured, setTestCasesStructured] = useState<TestCase[]>([])
@@ -257,12 +259,12 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
             <div className="input-group">
               <label className="input-label">Code</label>
               <textarea
+                ref={codeRef}
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 placeholder="Paste the code you want to generate test cases for..."
                 className="input font-mono text-sm"
-                rows={8}
-                style={{ resize: 'vertical' }}
+                style={{ resize: 'none' }}
               />
             </div>
 

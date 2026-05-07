@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import axios from 'axios'
 import AppModal from './AppModal'
+import { useAutoResize } from '@/hooks/useAutoResize'
 
 interface CodeAdvisorModalProps {
   onClose: () => void
@@ -29,6 +30,7 @@ interface AntiPattern {
 export default function CodeAdvisorModal({ onClose, initialCode = '', initialCodeType = 'ABAP' }: CodeAdvisorModalProps) {
   const [code, setCode] = useState(initialCode)
   const [codeType, setCodeType] = useState(initialCodeType)
+  const codeRef = useAutoResize(code, 12)
   const [analysis, setAnalysis] = useState<{
     suggestions: Suggestion[]
     anti_patterns: AntiPattern[]
@@ -90,12 +92,12 @@ export default function CodeAdvisorModal({ onClose, initialCode = '', initialCod
             <div className="input-group">
               <label className="input-label">Code</label>
               <textarea
+                ref={codeRef}
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 placeholder="Paste your code for analysis..."
                 className="input font-mono text-sm"
-                rows={12}
-                style={{ resize: 'vertical' }}
+                style={{ resize: 'none' }}
               />
             </div>
 

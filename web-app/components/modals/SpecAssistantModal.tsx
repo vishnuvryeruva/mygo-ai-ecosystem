@@ -5,6 +5,7 @@ import axios from 'axios'
 import LoadingSpinner from '../LoadingSpinner'
 import RichTextResponse from '../RichTextResponse'
 import AppModal from './AppModal'
+import { useAutoResize } from '@/hooks/useAutoResize'
 
 interface SpecAssistantModalProps {
   onClose: () => void
@@ -19,6 +20,7 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
   const [requirements, setRequirements] = useState('')
   const [specType, setSpecType] = useState('functional')
   const [loading, setLoading] = useState(false)
+  const requirementsRef = useAutoResize(requirements, 6)
   const [specContent, setSpecContent] = useState('')
   const [downloadLoading, setDownloadLoading] = useState(false)
 
@@ -414,12 +416,12 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
               <div className="input-group">
                 <label className="input-label">Requirements</label>
                 <textarea
+                  ref={requirementsRef}
                   value={requirements}
                   onChange={(e) => setRequirements(e.target.value)}
                   placeholder="Describe the requirements for the specification..."
                   className="input"
-                  rows={6}
-                  style={{ resize: 'vertical' }}
+                  style={{ resize: 'none' }}
                 />
               </div>
 

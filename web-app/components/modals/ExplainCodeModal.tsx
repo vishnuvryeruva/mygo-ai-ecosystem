@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import axios from 'axios'
 import AppModal from './AppModal'
+import { useAutoResize } from '@/hooks/useAutoResize'
 
 interface ExplainCodeModalProps {
   onClose: () => void
@@ -14,6 +15,7 @@ export default function ExplainCodeModal({ onClose }: ExplainCodeModalProps) {
   const [programName, setProgramName] = useState('')
   const [explanation, setExplanation] = useState('')
   const [loading, setLoading] = useState(false)
+  const codeRef = useAutoResize(code, 12)
 
   const handleExplain = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -75,12 +77,12 @@ export default function ExplainCodeModal({ onClose }: ExplainCodeModalProps) {
             <div className="input-group">
               <label className="input-label">Code</label>
               <textarea
+                ref={codeRef}
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 placeholder="Paste your code here or enter program name to fetch from SAP..."
                 className="input font-mono text-sm"
-                rows={12}
-                style={{ resize: 'vertical' }}
+                style={{ resize: 'none' }}
               />
             </div>
 

@@ -5,6 +5,7 @@ import axios from 'axios'
 import LoadingSpinner from '../LoadingSpinner'
 import RichTextResponse from '../RichTextResponse'
 import AppModal from './AppModal'
+import { useAutoResize } from '@/hooks/useAutoResize'
 
 interface SolutionAdvisorModalProps {
     onClose: () => void
@@ -36,6 +37,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
     ])
     const [inputValue, setInputValue] = useState('')
     const [loading, setLoading] = useState(false)
+    const inputRef = useAutoResize(inputValue, 1)
     const [generatedSolution, setGeneratedSolution] = useState('')
     const [similarSolutions, setSimilarSolutions] = useState<SimilarSolution[]>([])
     const [finalSolution, setFinalSolution] = useState('')
@@ -428,11 +430,11 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                 {currentStep !== 'complete' && (
                     <div className="modal-footer">
                         <div className="flex gap-3 w-full">
-                            <input
-                                type="text"
+                            <textarea
+                                ref={inputRef}
                                 value={inputValue}
                                 onChange={(e) => setInputValue(e.target.value)}
-                                onKeyPress={handleKeyPress}
+                                onKeyDown={handleKeyPress}
                                 placeholder={
                                     currentStep === 'requirements'
                                         ? "Describe your requirements or answer the questions..."
@@ -440,11 +442,12 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
                                 }
                                 className="input flex-1"
                                 disabled={loading}
+                                style={{ resize: 'none' }}
                             />
                             <button
                                 onClick={handleSendMessage}
                                 disabled={loading || !inputValue.trim()}
-                                className="btn btn-primary"
+                                className="btn btn-primary mt-auto"
                             >
                                 Send
                             </button>

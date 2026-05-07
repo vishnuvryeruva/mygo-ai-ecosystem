@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import axios from 'axios'
 import RichTextResponse from '../RichTextResponse'
 import AppModal from './AppModal'
+import { useAutoResize } from '@/hooks/useAutoResize'
 
 interface PromptGeneratorModalProps {
   onClose: () => void
@@ -18,6 +19,7 @@ type Step = 'describe' | 'refine' | 'code'
 export default function PromptGeneratorModal({ onClose, initialPrompt, initialLanguage, initialTask, autoGenerateCode }: PromptGeneratorModalProps) {
   const [language, setLanguage] = useState(initialLanguage || 'ABAP')
   const [taskDescription, setTaskDescription] = useState(initialTask || '')
+  const taskRef = useAutoResize(taskDescription, 4)
   // const [context, setContext] = useState('')
   const [prompt, setPrompt] = useState(initialPrompt || '')
   const [loading, setLoading] = useState(false)
@@ -369,12 +371,12 @@ export default function PromptGeneratorModal({ onClose, initialPrompt, initialLa
               <div className="input-group">
                 <label className="input-label">Task Description</label>
                 <textarea
+                  ref={taskRef}
                   value={taskDescription}
                   onChange={(e) => setTaskDescription(e.target.value)}
                   placeholder="Describe the code generation task..."
                   className="input"
-                  rows={4}
-                  style={{ resize: 'vertical' }}
+                  style={{ resize: 'none' }}
                 />
               </div>
 

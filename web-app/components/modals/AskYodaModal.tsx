@@ -5,6 +5,7 @@ import axios from 'axios'
 import LoadingSpinner from '../LoadingSpinner'
 import RichTextResponse from '../RichTextResponse'
 import SourceReferences, { Reference } from '../SourceReferences'
+import { useAutoResize } from '@/hooks/useAutoResize'
 
 interface AskYodaModalProps {
   onClose: () => void
@@ -16,6 +17,7 @@ export default function AskYodaModal({ onClose }: AskYodaModalProps) {
   const [answer, setAnswer] = useState('')
   const [references, setReferences] = useState<Reference[]>([])
   const [loading, setLoading] = useState(false)
+  const queryRef = useAutoResize(query, 4)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -62,11 +64,12 @@ export default function AskYodaModal({ onClose }: AskYodaModalProps) {
               Ask a Question
             </label>
             <textarea
+              ref={queryRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Query historical blueprints, specs, tickets, and test cases..."
               className="input w-full"
-              rows={4}
+              style={{ resize: 'none' }}
             />
             <button
               type="submit"

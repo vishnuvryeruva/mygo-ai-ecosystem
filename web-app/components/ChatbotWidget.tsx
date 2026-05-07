@@ -5,6 +5,7 @@ import axios from 'axios'
 import RichTextResponse from '@/components/RichTextResponse'
 import SourceReferences, { Reference } from '@/components/SourceReferences'
 import AppModal from '@/components/modals/AppModal'
+import { useAutoResize } from '@/hooks/useAutoResize'
 
 // ═══════════════════════════════════════════════════════════
 //  SVG Icon Components (replacing emoji)
@@ -384,6 +385,7 @@ export default function ChatbotWidget({
     const [input, setInput] = useState('')
     const [loading, setLoading] = useState(false)
     const messagesEndRef = useRef<HTMLDivElement>(null)
+    const inputRef = useAutoResize(input, 1)
 
     const agentId = expandedAgent || 'ask-yoda'
     const agent = agentConfigs[agentId] || agentConfigs['ask-yoda']
@@ -727,8 +729,8 @@ export default function ChatbotWidget({
                         {/* Input */}
                         <div className="chatbot-input-area">
                             <form onSubmit={handleSubmit} className="chatbot-input-form">
-                                <input
-                                    type="text"
+                                <textarea
+                                    ref={inputRef}
                                     value={input}
                                     onChange={(e) => setInput(e.target.value)}
                                     onKeyDown={(e) => {
@@ -740,6 +742,7 @@ export default function ChatbotWidget({
                                     placeholder={agent.placeholder}
                                     className="chatbot-input"
                                     disabled={loading}
+                                    style={{ resize: 'none' }}
                                 />
                                 <button
                                     type="submit"
