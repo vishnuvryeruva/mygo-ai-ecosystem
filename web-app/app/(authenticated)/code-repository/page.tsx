@@ -99,6 +99,20 @@ export default function CodeHubPage() {
         fetchSources()
     }, [])
 
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent).detail
+            if (detail?.agentId && selectedRecordId) {
+                // If a record is selected, handle the agent action locally in this page
+                handleAgentAction(detail.agentId)
+                // Stop propagation to prevent the global layout from opening a generic modal
+                e.stopImmediatePropagation()
+            }
+        }
+        window.addEventListener('agent-select', handler, { capture: true })
+        return () => window.removeEventListener('agent-select', handler, { capture: true })
+    }, [selectedRecordId, handleAgentAction])
+
     const fetchSources = async () => {
         try {
             const res = await axios.get('/api/sources')
@@ -205,7 +219,7 @@ export default function CodeHubPage() {
         }
     }
 
-    const handleAgentAction = async (agentId: string) => {
+    const handleAgentAction = React.useCallback(async (agentId: string) => {
         setIsAdvising(true)
         setExplainResponse('')
         setShowExplainPopup(true)
@@ -376,7 +390,7 @@ export default function CodeHubPage() {
         } finally {
             setIsAdvising(false)
         }
-    }
+    }, [selectedRecordId, fetchedRecords, sources, selectedSourceId, getServiceRoot, resetAlmUpload])
 
     const filteredRecords = fetchedRecords.filter(r => {
         const searchLower = searchQuery.toLowerCase()
@@ -388,7 +402,7 @@ export default function CodeHubPage() {
                              rawDataString.includes(searchLower)
                              
         const matchesType = typeFilter === 'All Types' || r.type === typeFilter
-        const matchesPackage = !packageFilter || r.package.toLowerCase().includes(packageFilter.toLowerCase())
+        const matchesPackage = !packageName || r.package.toLowerCase().includes(packageName.toLowerCase())
         return matchesSearch && matchesType && matchesPackage
     })
 
