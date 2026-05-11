@@ -117,7 +117,7 @@ export default function CapPromptGeneratorModal({ isOpen, onClose }: CapPromptGe
     }
 
     return (
-        <div className="settings-modal-overlay" onClick={onClose}>
+        <div className="settings-modal-overlay">
             <div className="settings-modal sync-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '800px', width: '90%' }}>
                 <div className="settings-modal-header">
                     <div>

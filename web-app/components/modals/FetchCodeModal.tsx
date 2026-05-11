@@ -14,15 +14,13 @@ interface FetchCodeModalProps {
     sources: Source[]
     onFetch: (config: {
         sourceId: string
-        entitySet: string
-        filterQuery: string
+        packageName: string
         top: string
     }) => void
     isLoading: boolean
     initialConfig?: {
         sourceId: string
-        entitySet: string
-        filterQuery: string
+        packageName: string
         top: string
     }
 }
@@ -36,15 +34,13 @@ export default function FetchCodeModal({
     initialConfig
 }: FetchCodeModalProps) {
     const [sourceId, setSourceId] = useState(initialConfig?.sourceId || '')
-    const [entitySet, setEntitySet] = useState(initialConfig?.entitySet || '')
-    const [filterQuery, setFilterQuery] = useState(initialConfig?.filterQuery || '')
+    const [packageName, setPackageName] = useState(initialConfig?.packageName || '')
     const [top, setTop] = useState(initialConfig?.top || '100')
 
     useEffect(() => {
         if (initialConfig) {
             setSourceId(initialConfig.sourceId)
-            setEntitySet(initialConfig.entitySet)
-            setFilterQuery(initialConfig.filterQuery)
+            setPackageName(initialConfig.packageName)
             setTop(initialConfig.top)
         }
     }, [initialConfig])
@@ -67,8 +63,8 @@ export default function FetchCodeModal({
                             </svg>
                         </div>
                         <div>
-                            <h3 className="font-extrabold text-xl text-slate-800 tracking-tight">Fetch From BTP</h3>
-                            <p className="text-slate-500 text-sm font-medium">Configure your data source and filters</p>
+                            <h3 className="font-extrabold text-xl text-slate-800 tracking-tight">Sync Code Repository</h3>
+                            <p className="text-slate-500 text-sm font-medium">Configure your data source and package filters</p>
                         </div>
                     </div>
                     <button onClick={onClose} className="w-10 h-10 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-all">
@@ -77,7 +73,7 @@ export default function FetchCodeModal({
                 </div>
 
                 <div className="p-8 space-y-6">
-                    {/* First Row: Source & Entity Set */}
+                    {/* First Row: Source & Package */}
                     <div className="grid grid-cols-2 gap-6">
                         <div>
                             <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.15em] mb-2.5 block">BTP Source</label>
@@ -93,29 +89,17 @@ export default function FetchCodeModal({
                             </select>
                         </div>
                         <div>
-                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.15em] mb-2.5 block">Entity Set</label>
+                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.15em] mb-2.5 block">Package</label>
                             <input 
                                 className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3.5 px-5 text-sm font-bold text-[#034354] outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all placeholder:text-slate-300 shadow-sm"
-                                placeholder="e.g. ObjlistSet"
-                                value={entitySet}
-                                onChange={(e) => setEntitySet(e.target.value)}
+                                placeholder="e.g. ZCOMMON"
+                                value={packageName}
+                                onChange={(e) => setPackageName(e.target.value)}
                             />
                         </div>
                     </div>
 
-                    {/* Second Row: Filter Box */}
-                    <div>
-                        <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.15em] mb-2.5 block">OData Filter Query</label>
-                        <textarea 
-                            className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 px-5 text-sm font-medium text-slate-700 outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all min-h-[100px] shadow-sm resizable-none"
-                            placeholder="e.g. ObjectType eq 'CLAS' and Package eq 'ZCOMMON'"
-                            value={filterQuery}
-                            onChange={(e) => setFilterQuery(e.target.value)}
-                        />
-                        <p className="mt-2 text-[11px] text-slate-400 italic">Example: ObjectType eq 'CLAS'</p>
-                    </div>
-
-                    {/* Third Row: Max Records (Top) */}
+                    {/* Second Row: Max Records (Top) */}
                     <div>
                         <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.15em] mb-2.5 block">Max Records (Top)</label>
                         <input 
@@ -135,7 +119,7 @@ export default function FetchCodeModal({
                         CANCEL
                     </button>
                     <button 
-                        onClick={() => onFetch({ sourceId, entitySet, filterQuery, top })}
+                        onClick={() => onFetch({ sourceId, packageName, top })}
                         disabled={isLoading || !sourceId}
                         className="flex-[2] py-3.5 px-6 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm tracking-wider flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-200 disabled:opacity-50 active:scale-[0.98]"
                     >

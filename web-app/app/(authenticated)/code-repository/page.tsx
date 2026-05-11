@@ -63,13 +63,11 @@ export default function CodeHubPage() {
     const [isLoading, setIsLoading] = useState(false)
 
     // OData Filter State
-    const [entitySet, setEntitySet] = useState('') // Blank by default as requested
-    const [filterQuery, setFilterQuery] = useState('')
     const [top, setTop] = useState('100')
     const [skip, setSkip] = useState('0')
     const [searchQuery, setSearchQuery] = useState('')
     const [typeFilter, setTypeFilter] = useState('All Types')
-    const [packageFilter, setPackageFilter] = useState('')
+    const [packageName, setPackageName] = useState('')
 
     const [rawJsonResponse, setRawJsonResponse] = useState<any>(null)
     const [fetchedRecords, setFetchedRecords] = useState<any[]>([])
@@ -101,6 +99,20 @@ export default function CodeHubPage() {
         fetchSources()
     }, [])
 
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent).detail
+            if (detail?.agentId && selectedRecordId) {
+                // If a record is selected, handle the agent action locally in this page
+                handleAgentAction(detail.agentId)
+                // Stop propagation to prevent the global layout from opening a generic modal
+                e.stopImmediatePropagation()
+            }
+        }
+        window.addEventListener('agent-select', handler, { capture: true })
+        return () => window.removeEventListener('agent-select', handler, { capture: true })
+    }, [selectedRecordId, handleAgentAction])
+
     const fetchSources = async () => {
         try {
             const res = await axios.get('/api/sources')
@@ -127,10 +139,9 @@ export default function CodeHubPage() {
         return root.endsWith('/') ? root : root + '/'
     }
 
-    const handleSync = async (config?: { sourceId: string, entitySet: string, filterQuery: string, top: string }) => {
+    const handleSync = async (config?: { sourceId: string, packageName: string, top: string }) => {
         const targetSourceId = config?.sourceId || selectedSourceId
-        const targetEntitySet = config?.entitySet || entitySet
-        const targetFilterQuery = config?.filterQuery || filterQuery
+        const targetPackage = config?.packageName || packageName
         const targetTop = config?.top || top
 
         if (!targetSourceId) return
@@ -140,20 +151,26 @@ export default function CodeHubPage() {
         setIsFetchModalOpen(false)
 
         try {
+            // Build filter query for PROG, FUGR, CLAS and optional package
+            let filterParts = ["(ObjectType eq 'PROG' or ObjectType eq 'FUGR' or ObjectType eq 'CLAS')"]
+            if (targetPackage) {
+                filterParts.push(`Package eq '${targetPackage}'`)
+            }
+            const finalFilterQuery = filterParts.join(' and ')
+
             const res = await axios.get(`/api/btp/${targetSourceId}/fetch-code`, {
                 params: {
-                    entity_set: targetEntitySet,
-                    filter_query: targetFilterQuery,
-                    top: targetTop, // Limit for better performance
+                    entity_set: 'ObjlistSet', // Default to ObjlistSet
+                    filter_query: finalFilterQuery,
+                    top: targetTop,
                     skip: skip
                 }
             })
 
-            // Update persistent state if coming from modal
+            // Update persistent state
             if (config) {
                 setSelectedSourceId(config.sourceId)
-                setEntitySet(config.entitySet)
-                setFilterQuery(config.filterQuery)
+                setPackageName(config.packageName)
                 setTop(config.top)
             }
 
@@ -202,7 +219,7 @@ export default function CodeHubPage() {
         }
     }
 
-    const handleAgentAction = async (agentId: string) => {
+    const handleAgentAction = React.useCallback(async (agentId: string) => {
         setIsAdvising(true)
         setExplainResponse('')
         setShowExplainPopup(true)
@@ -373,7 +390,7 @@ export default function CodeHubPage() {
         } finally {
             setIsAdvising(false)
         }
-    }
+    }, [selectedRecordId, fetchedRecords, sources, selectedSourceId, getServiceRoot, resetAlmUpload])
 
     const filteredRecords = fetchedRecords.filter(r => {
         const searchLower = searchQuery.toLowerCase()
@@ -385,7 +402,7 @@ export default function CodeHubPage() {
                              rawDataString.includes(searchLower)
                              
         const matchesType = typeFilter === 'All Types' || r.type === typeFilter
-        const matchesPackage = !packageFilter || r.package.toLowerCase().includes(packageFilter.toLowerCase())
+        const matchesPackage = !packageName || r.package.toLowerCase().includes(packageName.toLowerCase())
         return matchesSearch && matchesType && matchesPackage
     })
 
@@ -492,14 +509,6 @@ export default function CodeHubPage() {
                         )}
                         FETCH CODE
                     </button>
-                    <button 
-                        className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-slate-500 hover:text-emerald-600 hover:border-emerald-200 transition-all hover:shadow-sm" 
-                        title="Toggle View Mode" 
-                        onClick={() => setViewMode(viewMode === 'table' ? 'json' : 'table')}
-                    >
-                        <span className="text-[11px] font-black uppercase tracking-tighter">{viewMode === 'table' ? '{...}' : 'T'}</span>
-                    </button>
-                    <div className="h-8 w-[1px] bg-slate-200 mx-1"></div>
                     <GlobalAIAgentsDropdown />
                 </div>
             </div>
@@ -537,8 +546,8 @@ export default function CodeHubPage() {
 
                 <select 
                     className="doc-hub-filter-select" 
-                    value={packageFilter} 
-                    onChange={(e) => setPackageFilter(e.target.value)}
+                    value={packageName} 
+                    onChange={(e) => setPackageName(e.target.value)}
                 >
                     <option value="">All Packages</option>
                     {Array.from(new Set(fetchedRecords.map(r => r.package))).filter(p => p && p !== '-').sort().map(p => (
@@ -556,17 +565,6 @@ export default function CodeHubPage() {
                     <span>Date Range</span>
                 </div>
 
-                <div className="flex items-center gap-3 flex-1 min-w-[200px]">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">ODATA FILTER</label>
-                    <div className="relative w-full">
-                        <input 
-                            className="w-full bg-slate-50 border border-slate-100 rounded-xl py-2 px-3 text-xs font-medium text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                            placeholder="e.g. ObjectType eq 'CLAS'"
-                            value={filterQuery}
-                            onChange={(e) => setFilterQuery(e.target.value)}
-                        />
-                    </div>
-                </div>
 
                 <div className="flex items-center gap-4">
                     <div className="flex items-center gap-2">
@@ -886,8 +884,7 @@ export default function CodeHubPage() {
                 isLoading={isLoading}
                 initialConfig={{
                     sourceId: selectedSourceId,
-                    entitySet: entitySet,
-                    filterQuery: filterQuery,
+                    packageName: packageName,
                     top: top
                 }}
             />
