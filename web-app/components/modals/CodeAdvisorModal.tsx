@@ -9,11 +9,6 @@ interface CodeAdvisorModalProps {
   onClose: () => void
   initialCode?: string
   initialCodeType?: string
-  initialData?: {
-    code?: string
-    language?: string
-    autoProcess?: boolean
-  }
 }
 
 interface Suggestion {
@@ -32,9 +27,9 @@ interface AntiPattern {
   suggestion: string
 }
 
-export default function CodeAdvisorModal({ onClose, initialCode = '', initialCodeType = 'ABAP', initialData }: CodeAdvisorModalProps) {
-  const [code, setCode] = useState(initialData?.code || initialCode)
-  const [codeType, setCodeType] = useState(initialData?.language || initialCodeType)
+export default function CodeAdvisorModal({ onClose, initialCode = '', initialCodeType = 'ABAP' }: CodeAdvisorModalProps) {
+  const [code, setCode] = useState(initialCode)
+  const [codeType, setCodeType] = useState(initialCodeType)
   const codeRef = useAutoResize(code, 12)
   const [analysis, setAnalysis] = useState<{
     suggestions: Suggestion[]
@@ -44,16 +39,9 @@ export default function CodeAdvisorModal({ onClose, initialCode = '', initialCod
   const [loading, setLoading] = useState(false)
   const [pushed, setPushed] = useState(false)
 
-  useState(() => {
-    if (initialData?.autoProcess && initialData?.code) {
-        handleAnalyze(null as any)
-    }
-  })
-
-  const handleAnalyze = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault()
-    const targetCode = code.trim() || initialData?.code?.trim()
-    if (!targetCode) return
+  const handleAnalyze = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!code.trim()) return
 
     setLoading(true)
     setPushed(false)

@@ -306,31 +306,99 @@ export default function CodeHubPage() {
 
             setToastMessage({ text: `Running AI Agent...`, type: 'success' })
 
-            // Dispatch event to open the unified global AI agent modal
-            window.dispatchEvent(new CustomEvent('agent-data-open', {
-                detail: {
-                    agentId: agentId,
-                    data: {
-                        code: rawJsonString,
-                        language: 'ABAP',
-                        programName: selectedItems.length === 1 ? selectedItems[0].name : 'Multiple Objects',
-                        autoProcess: true
-                    }
+            // Determine endpoint and payload based on agentId
+            let endpoint = '/api/explain-code'
+            let payload: any = {
+                code: rawJsonString,
+                code_type: 'SAP ABAP (Raw JSON Metadata)',
+                program_name: selectedItems.length === 1 ? selectedItems[0].name : 'Multiple Objects'
+            }
+
+            if (agentId === 'spec-assistant') {
+                endpoint = '/api/generate-spec'
+                payload = { 
+                    requirements: `ABAP Object Metadata:\n${rawJsonString}`,
+                    type: 'technical',
+                    format: 'preview'
                 }
-            }))
+            } else if (agentId === 'test-case-generator') {
+                endpoint = '/api/generate-test-cases'
+                payload = {
+                    code: rawJsonString,
+                    test_type: 'manual',
+                    format: 'preview'
+                }
+            } else if (agentId === 'solution-advisor') {
+                endpoint = '/api/analyze-code'
+                payload = {
+                    code: rawJsonString,
+                    code_type: 'ABAP'
+                }
+            } else if (agentId === 'prompt-generator') {
+                endpoint = '/api/generate-prompt'
+                payload = {
+                    language: 'ABAP',
+                    task: 'Improve or understand this code',
+                    context: rawJsonString
+                }
+            } else if (agentId === 'ask-yoda') {
+                endpoint = '/api/ask-yoda'
+                payload = {
+                    question: 'Analyze this SAP object and explain its business implications and technical logic in a clear way.',
+                    context: rawJsonString
+                }
+            }
+
+            const aiRes = await axios.post(endpoint, payload)
             
-            // We no longer need to run the local AI logic or show the local popup
-            setIsAdvising(false)
-            setShowExplainPopup(false)
+            // Format response if specialized
+            let finalOutput = ''
+            if (agentId === 'solution-advisor') {
+                const data = aiRes.data
+                finalOutput = `## Code Analysis & Recommendations\n\n### Anti-Patterns Found\n`
+                if (data.anti_patterns?.length) {
+                    data.anti_patterns.forEach((ap: any) => {
+                        finalOutput += `- **${ap.pattern}** (${ap.severity}): ${ap.description}\n  *Suggestion: ${ap.suggestion}*\n`
+                    })
+                } else finalOutput += "_No obvious anti-patterns detected._\n"
+
+                finalOutput += `\n### Suggested Improvements\n`
+                if (data.suggestions?.length) {
+                    data.suggestions.forEach((s: any) => {
+                        finalOutput += `#### ${s.type}\n- **Reason**: ${s.reason}\n- **Suggested**: \`${s.suggested}\`\n`
+                    })
+                }
+
+                finalOutput += `\n### Strategic Roadmap\n`
+                if (data.improvements?.length) {
+                    data.improvements.forEach((i: any) => {
+                        finalOutput += `- [${i.priority}] **${i.category}**: ${i.description}\n`
+                    })
+                }
+            } else if (agentId === 'test-case-generator') {
+                finalOutput = aiRes.data.test_cases || aiRes.data.explanation || 'No test cases generated.'
+            } else if (agentId === 'spec-assistant') {
+                finalOutput = aiRes.data.spec || aiRes.data.explanation || 'No spec generated.'
+            } else if (agentId === 'prompt-generator') {
+                finalOutput = `### Optimized System Prompt\n\n${aiRes.data.prompt}`
+            } else if (agentId === 'ask-yoda') {
+                finalOutput = aiRes.data.answer || aiRes.data.explanation || 'Yoda has no answer today.'
+            } else {
+                finalOutput = aiRes.data.explanation || aiRes.data.answer || JSON.stringify(aiRes.data, null, 2)
+            }
+
+            setExplainResponse(finalOutput)
             setToastMessage({ text: `Task complete!`, type: 'success' })
             setTimeout(() => setToastMessage(null), 3000)
-
-        } catch (err: any) {
-            console.error('Error in handleAgentAction:', err)
-            setToastMessage({ text: 'Failed to process AI agent request.', type: 'error' })
+        } catch (err) {
+            console.error(err)
+            setExplainResponse('Failed to communicate with AI Agent.')
+            setToastMessage({ text: 'AI agent error', type: 'error' })
+            setTimeout(() => setToastMessage(null), 5000)
+        } finally {
             setIsAdvising(false)
         }
-    }, [selectedRecordId, fetchedRecords, selectedSourceId, resetAlmUpload])
+    }, [selectedRecordId, fetchedRecords, sources, selectedSourceId, getServiceRoot, resetAlmUpload])
 
     // --- Effects ---
 

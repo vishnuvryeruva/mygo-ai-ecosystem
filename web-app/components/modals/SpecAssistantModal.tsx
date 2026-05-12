@@ -9,12 +9,6 @@ import { useAutoResize } from '@/hooks/useAutoResize'
 
 interface SpecAssistantModalProps {
   onClose: () => void
-  initialData?: {
-    code?: string
-    language?: string
-    requirements?: string
-    autoProcess?: boolean
-  }
 }
 
 interface Source { id: string; name: string; type: string }
@@ -22,9 +16,9 @@ interface Project { id: string; name: string }
 
 type AlmUploadStep = 'idle' | 'form' | 'uploading' | 'success' | 'error'
 
-export default function SpecAssistantModal({ onClose, initialData }: SpecAssistantModalProps) {
-  const [requirements, setRequirements] = useState(initialData?.requirements || initialData?.code || '')
-  const [specType, setSpecType] = useState('technical')
+export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps) {
+  const [requirements, setRequirements] = useState('')
+  const [specType, setSpecType] = useState('functional')
   const [loading, setLoading] = useState(false)
   const requirementsRef = useAutoResize(requirements, 6)
   const [specContent, setSpecContent] = useState('')
@@ -48,12 +42,6 @@ export default function SpecAssistantModal({ onClose, initialData }: SpecAssista
 
   // Check for context and prefilled spec from Solution Advisor (Create Functional Spec flow)
   useEffect(() => {
-    // If we have initial data from Code Hub etc.
-    if (initialData?.autoProcess && (initialData?.code || initialData?.requirements)) {
-        handleGenerate(null as any)
-        return
-    }
-
     const context = sessionStorage.getItem('solutionAdvisorContext')
     const prefilledSpec = sessionStorage.getItem('specAssistantPrefilledSpec')
 
