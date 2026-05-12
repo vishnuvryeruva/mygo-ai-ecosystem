@@ -410,10 +410,11 @@ export default function CodeHubPage() {
         const handler = (e: Event) => {
             const detail = (e as CustomEvent).detail
             if (detail?.agentId && selectedRecordId) {
-                // If a record is selected, handle the agent action locally in this page
-                handleAgentAction(detail.agentId)
                 // Stop propagation to prevent the global layout from opening a generic modal
+                e.stopPropagation()
                 e.stopImmediatePropagation()
+                
+                handleAgentAction(detail.agentId)
             }
         }
         window.addEventListener('agent-select', handler, { capture: true })
