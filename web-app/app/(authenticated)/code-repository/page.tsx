@@ -162,7 +162,8 @@ export default function CodeHubPage() {
 
         try {
             // Build filter query for PROG, FUGR, CLAS and optional package
-            let filterParts = ["(ObjectType eq 'PROG' or ObjectType eq 'FUGR' or ObjectType eq 'CLAS')"]
+            // Using Objtype which is standard for this SAP BTP OData service
+            let filterParts = ["(Objtype eq 'PROG' or Objtype eq 'FUGR' or Objtype eq 'CLAS')"]
             if (targetPackage) {
                 filterParts.push(`Package eq '${targetPackage}'`)
             }
@@ -194,8 +195,8 @@ export default function CodeHubPage() {
             const sourceName = sources.find(s => s.id === selectedSourceId)?.name || 'Unknown'
             const savedTime = new Date().toLocaleString()
             const mappedRecords = records.map((r, i) => {
-                const name = r.ObjectName || r.Objname || r.name || r.Object || r.Title || r.ID || `Item_${i}`
-                const type = r.ObjectType || r.Objtype || r.type || r.Type || '-'
+                const name = r.Objname || r.ObjectName || r.name || r.Object || r.Title || r.ID || `Item_${i}`
+                const type = r.Objtype || r.ObjectType || r.type || r.Type || '-'
                 const pkg = r.Package || r.Devclass || '-'
                 const createdBy = r.Createby || r.Author || r.CreatedBy || '-'
                 const desc = r.Objdesc || r.Description || r.title || 'No description available'
