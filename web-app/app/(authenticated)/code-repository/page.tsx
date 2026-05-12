@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
-import GlobalAIAgentsDropdown from '@/components/GlobalAIAgentsDropdown'
+import AIAgentsDropdown from '@/components/AIAgentsDropdown'
 import FetchCodeModal from '@/components/modals/FetchCodeModal'
 
 // SAP Object Type Icons mapping
@@ -400,29 +400,24 @@ export default function CodeHubPage() {
         }
     }, [selectedRecordId, fetchedRecords, sources, selectedSourceId, getServiceRoot, resetAlmUpload])
 
+    // Code Hub AI Agents menu: run agents in-page only. Do not dispatch `agent-select` — the authenticated
+    // layout listens for that and opens global agent modals (second dialog on top of this page's popup).
+    // To restore global modals from this dropdown, use GlobalAIAgentsDropdown and uncomment:
+    //   const openModal = agentId !== 'ask-yoda'
+    //   window.dispatchEvent(new CustomEvent('agent-select', { detail: { agentId, openModal } }))
+    const handleCodeHubAgentSelect = React.useCallback((agentId: string) => {
+        if (agentId === 'sync-sources') {
+            window.dispatchEvent(new CustomEvent('sync-source-open', { detail: { sourceId: null } }))
+            return
+        }
+        void handleAgentAction(agentId)
+    }, [handleAgentAction])
+
     // --- Effects ---
 
     useEffect(() => {
         fetchSources()
     }, [])
-
-    useEffect(() => {
-        const handler = (e: Event) => {
-            const detail = (e as CustomEvent).detail
-            if (detail?.agentId && selectedRecordId) {
-                // Mark as handled so layout.tsx ignores it
-                detail.handled = true
-                
-                // Stop propagation to prevent the global layout from opening a generic modal
-                e.stopPropagation()
-                e.stopImmediatePropagation()
-                
-                handleAgentAction(detail.agentId)
-            }
-        }
-        window.addEventListener('agent-select', handler, { capture: true })
-        return () => window.removeEventListener('agent-select', handler, { capture: true })
-    }, [selectedRecordId, handleAgentAction])
 
     const filteredRecords = fetchedRecords.filter(r => {
         const searchLower = searchQuery.toLowerCase()
@@ -516,7 +511,7 @@ export default function CodeHubPage() {
                         )}
                         FETCH CODE
                     </button>
-                    <GlobalAIAgentsDropdown />
+                    <AIAgentsDropdown onAgentSelect={handleCodeHubAgentSelect} />
                 </div>
             </div>
 
