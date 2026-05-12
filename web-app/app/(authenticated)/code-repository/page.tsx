@@ -410,6 +410,9 @@ export default function CodeHubPage() {
         const handler = (e: Event) => {
             const detail = (e as CustomEvent).detail
             if (detail?.agentId && selectedRecordId) {
+                // Mark as handled so layout.tsx ignores it
+                detail.handled = true
+                
                 // Stop propagation to prevent the global layout from opening a generic modal
                 e.stopPropagation()
                 e.stopImmediatePropagation()
