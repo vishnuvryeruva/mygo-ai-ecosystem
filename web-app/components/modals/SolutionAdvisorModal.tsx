@@ -10,6 +10,11 @@ import { useAutoResize } from '@/hooks/useAutoResize'
 interface SolutionAdvisorModalProps {
     onClose: () => void
     onCreateSpec?: (solutionContext: string) => void
+    initialData?: {
+        code?: string
+        requirements?: string
+        autoProcess?: boolean
+    }
 }
 
 type Step = 'requirements' | 'solution' | 'search' | 'improvise' | 'complete'
@@ -25,10 +30,10 @@ interface SimilarSolution {
     relevance: number
 }
 
-export default function SolutionAdvisorModal({ onClose, onCreateSpec }: SolutionAdvisorModalProps) {
+export default function SolutionAdvisorModal({ onClose, onCreateSpec, initialData }: SolutionAdvisorModalProps) {
     const [currentStep, setCurrentStep] = useState<Step>('requirements')
     const [stepHistory, setStepHistory] = useState<Step[]>([])
-    const [requirements, setRequirements] = useState('')
+    const [requirements, setRequirements] = useState(initialData?.requirements || initialData?.code || '')
     const [messages, setMessages] = useState<Message[]>([
         {
             role: 'assistant',
@@ -41,6 +46,13 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
     const [generatedSolution, setGeneratedSolution] = useState('')
     const [similarSolutions, setSimilarSolutions] = useState<SimilarSolution[]>([])
     const [finalSolution, setFinalSolution] = useState('')
+
+    useState(() => {
+        if (initialData?.autoProcess && (initialData?.requirements || initialData?.code)) {
+            const reqs = initialData.requirements || initialData.code || ''
+            generateSolution(reqs)
+        }
+    })
 
     const stepLabels: Record<Step, string> = {
         requirements: 'Gather Requirements',

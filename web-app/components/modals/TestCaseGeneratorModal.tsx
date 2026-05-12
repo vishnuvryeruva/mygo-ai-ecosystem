@@ -8,6 +8,12 @@ import { useAutoResize } from '@/hooks/useAutoResize'
 
 interface TestCaseGeneratorModalProps {
   onClose: () => void
+  initialData?: {
+    code?: string
+    language?: string
+    testType?: string
+    autoProcess?: boolean
+  }
 }
 
 interface Source { id: string; name: string; type: string }
@@ -36,9 +42,9 @@ interface TestCase {
 
 type AlmUploadStep = 'idle' | 'form' | 'uploading' | 'success' | 'error'
 
-export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorModalProps) {
-  const [code, setCode] = useState('')
-  const [testType, setTestType] = useState('manual')
+export default function TestCaseGeneratorModal({ onClose, initialData }: TestCaseGeneratorModalProps) {
+  const [code, setCode] = useState(initialData?.code || '')
+  const [testType, setTestType] = useState(initialData?.testType || 'manual')
   const codeRef = useAutoResize(code, 8)
   const [loading, setLoading] = useState(false)
   const [testCases, setTestCases] = useState('')
@@ -155,9 +161,16 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
     setAlmLoadingStep('')
   }
 
-  const handleGenerate = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!code.trim()) return
+  useEffect(() => {
+    if (initialData?.autoProcess && initialData?.code) {
+        handleGenerate(null as any)
+    }
+  }, [])
+
+  const handleGenerate = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    const targetCode = code.trim() || initialData?.code?.trim()
+    if (!targetCode) return
 
     setLoading(true)
     setTestCases('')

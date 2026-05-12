@@ -59,8 +59,15 @@ export default function AuthenticatedLayout({
         return currentUserName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
     }, [currentUserName])
 
+    // Agent initial data for pre-filling modals
+    const [agentInitialData, setAgentInitialData] = useState<any>(null)
+    
     // Agent selection — opens the chatbot with the selected agent
-    const handleAgentSelect = useCallback((agentId: string, openModal?: boolean) => {
+    const handleAgentSelect = useCallback((agentId: string, openModal?: boolean, initialData?: any) => {
+        if (initialData) {
+            setAgentInitialData(initialData)
+        }
+
         if (openModal) {
             // Open the corresponding modal (chatbot stays minimized)
             setActiveModal(agentId)
@@ -86,59 +93,24 @@ export default function AuthenticatedLayout({
             if (detail?.handled) return
             
             if (detail?.agentId) {
-                handleAgentSelect(detail.agentId, detail.openModal)
+                handleAgentSelect(detail.agentId, detail.openModal, detail.initialData)
             }
         }
         window.addEventListener('agent-select', handler)
         return () => window.removeEventListener('agent-select', handler)
     }, [handleAgentSelect])
 
-    // Listen for code-advisor-open events with initial data
+    // Listen for agent-data-open events (specifically for opening agents with pre-fetched data)
     useEffect(() => {
         const handler = (e: Event) => {
             const detail = (e as CustomEvent).detail
-            if (detail?.code !== undefined && detail?.codeType !== undefined) {
-                setCodeAdvisorData({ code: detail.code, codeType: detail.codeType })
-                setActiveModal('code-advisor')
+            if (detail?.agentId && detail?.data) {
+                handleAgentSelect(detail.agentId, true, detail.data)
             }
         }
-        window.addEventListener('code-advisor-open', handler)
-        return () => window.removeEventListener('code-advisor-open', handler)
-    }, [])
-
-    // Listen for sync-source-open events with pre-selected source
-    useEffect(() => {
-        const handler = (e: Event) => {
-            const detail = (e as CustomEvent).detail
-            if (detail?.sourceId !== undefined) {
-                setPreSelectedSourceId(detail.sourceId)
-                setSyncSourceModalOpen(true)
-            }
-        }
-        window.addEventListener('sync-source-open', handler)
-        return () => window.removeEventListener('sync-source-open', handler)
-    }, [])
-
-    // Listen for prompt-studio-open events
-    useEffect(() => {
-        const handler = (e: Event) => {
-            const detail = (e as CustomEvent).detail
-            // If the event was already handled by a local page, ignore it
-            if (detail?.handled) return
-
-            if (detail?.prompt !== undefined) {
-                setPromptStudioData({ 
-                    prompt: detail.prompt, 
-                    language: detail.language || 'ABAP',
-                    task: detail.task,
-                    autoGenerate: detail.autoGenerate
-                })
-                setActiveModal('prompt-generator')
-            }
-        }
-        window.addEventListener('prompt-studio-open', handler)
-        return () => window.removeEventListener('prompt-studio-open', handler)
-    }, [])
+        window.addEventListener('agent-data-open', handler)
+        return () => window.removeEventListener('agent-data-open', handler)
+    }, [handleAgentSelect])
 
     const handleQuickAction = (actionId: string) => {
         // Ask Yoda opens the chatbot widget
@@ -158,6 +130,7 @@ export default function AuthenticatedLayout({
         setActiveModal(null)
         setCodeAdvisorData(null)
         setPromptStudioData(null)
+        setAgentInitialData(null)
     }
 
     const closeSyncSourceModal = () => {
@@ -226,24 +199,24 @@ export default function AuthenticatedLayout({
                     }}
                 />
             )}
-            {activeModal === 'spec-assistant' && <SpecAssistantModal onClose={closeModal} />}
+            {activeModal === 'spec-assistant' && <SpecAssistantModal onClose={closeModal} initialData={agentInitialData} />}
             {activeModal === 'prompt-generator' && (
                 <PromptGeneratorModal 
                     onClose={closeModal} 
-                    initialPrompt={promptStudioData?.prompt}
-                    initialLanguage={promptStudioData?.language}
-                    initialTask={promptStudioData?.task}
-                    autoGenerateCode={promptStudioData?.autoGenerate}
+                    initialPrompt={promptStudioData?.prompt || agentInitialData?.code || agentInitialData?.prompt}
+                    initialLanguage={promptStudioData?.language || agentInitialData?.language || 'ABAP'}
+                    initialTask={promptStudioData?.task || agentInitialData?.task}
+                    autoGenerateCode={promptStudioData?.autoGenerate || agentInitialData?.autoGenerate}
                 />
             )}
-            {activeModal === 'explain-code' && <ExplainCodeModal onClose={closeModal} />}
-            {activeModal === 'test-case-generator' && <TestCaseGeneratorModal onClose={closeModal} />}
+            {activeModal === 'explain-code' && <ExplainCodeModal onClose={closeModal} initialData={agentInitialData} />}
+            {activeModal === 'test-case-generator' && <TestCaseGeneratorModal onClose={closeModal} initialData={agentInitialData} />}
             {activeModal === 'document-upload' && <FileUploadModal onClose={closeModal} />}
             {activeModal === 'code-advisor' && (
                 <CodeAdvisorModal 
                     onClose={closeModal} 
-                    initialCode={codeAdvisorData?.code}
-                    initialCodeType={codeAdvisorData?.codeType}
+                    initialCode={codeAdvisorData?.code || agentInitialData?.code}
+                    initialCodeType={codeAdvisorData?.codeType || agentInitialData?.language || 'ABAP'}
                 />
             )}
             {activeModal === 'settings' && <SettingsModal onClose={closeModal} />}

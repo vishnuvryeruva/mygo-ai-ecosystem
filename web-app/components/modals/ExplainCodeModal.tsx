@@ -7,19 +7,32 @@ import { useAutoResize } from '@/hooks/useAutoResize'
 
 interface ExplainCodeModalProps {
   onClose: () => void
+  initialData?: {
+    code?: string
+    language?: string
+    programName?: string
+    autoProcess?: boolean
+  }
 }
 
-export default function ExplainCodeModal({ onClose }: ExplainCodeModalProps) {
-  const [code, setCode] = useState('')
-  const [codeType, setCodeType] = useState('ABAP')
-  const [programName, setProgramName] = useState('')
+export default function ExplainCodeModal({ onClose, initialData }: ExplainCodeModalProps) {
+  const [code, setCode] = useState(initialData?.code || '')
+  const [codeType, setCodeType] = useState(initialData?.language || 'ABAP')
+  const [programName, setProgramName] = useState(initialData?.programName || '')
   const [explanation, setExplanation] = useState('')
   const [loading, setLoading] = useState(false)
   const codeRef = useAutoResize(code, 12)
 
-  const handleExplain = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!code.trim()) return
+  useEffect(() => {
+    if (initialData?.autoProcess && initialData?.code) {
+      handleExplain()
+    }
+  }, [])
+
+  const handleExplain = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    const targetCode = code.trim() || initialData?.code?.trim()
+    if (!targetCode) return
 
     setLoading(true)
     try {
