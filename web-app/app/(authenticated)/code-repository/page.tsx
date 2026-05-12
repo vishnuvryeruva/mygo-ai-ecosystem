@@ -95,23 +95,45 @@ export default function CodeHubPage() {
     const [almError, setAlmError] = useState('')
     const [almSuccessDoc, setAlmSuccessDoc] = useState<any>(null)
 
-    useEffect(() => {
-        fetchSources()
-    }, [])
+    // --- Helper Functions ---
 
-    useEffect(() => {
-        const handler = (e: Event) => {
-            const detail = (e as CustomEvent).detail
-            if (detail?.agentId && selectedRecordId) {
-                // If a record is selected, handle the agent action locally in this page
-                handleAgentAction(detail.agentId)
-                // Stop propagation to prevent the global layout from opening a generic modal
-                e.stopImmediatePropagation()
+    const getServiceRoot = (url: string) => {
+        if (!url) return ''
+        let root = url.split('?')[0].replace(/\/$/, '')
+        const sets = ['objectsSet', 'ObjlistSet', 'sourcecodeSet']
+        for (const s of sets) {
+            if (root.endsWith(`/${s}`)) {
+                root = root.substring(0, root.length - s.length).replace(/\/$/, '')
             }
         }
-        window.addEventListener('agent-select', handler, { capture: true })
-        return () => window.removeEventListener('agent-select', handler, { capture: true })
-    }, [selectedRecordId, handleAgentAction])
+        return root.endsWith('/') ? root : root + '/'
+    }
+
+    const resetAlmUpload = React.useCallback(() => {
+        setAlmUploadStep('idle')
+        setAlmSources([])
+        setAlmSelectedSource('')
+        setAlmProjects([])
+        setAlmSelectedProject('')
+        setAlmDocName('')
+        setAlmError('')
+        setAlmSuccessDoc(null)
+        setAlmLoadingStep('')
+    }, [])
+
+    const loadAlmProjects = React.useCallback(async (sourceId: string) => {
+        setAlmLoadingStep('projects')
+        setAlmProjects([])
+        setAlmSelectedProject('')
+        try {
+            const res = await axios.get(`/api/calm/${sourceId}/projects`)
+            setAlmProjects(res.data.projects || [])
+        } catch (err: any) {
+            setAlmError(err?.response?.data?.error || 'Failed to load projects.')
+        } finally {
+            setAlmLoadingStep('')
+        }
+    }, [])
 
     const fetchSources = async () => {
         try {
@@ -125,18 +147,6 @@ export default function CodeHubPage() {
         } catch (err) {
             console.error('Failed to fetch sources:', err)
         }
-    }
-
-    const getServiceRoot = (url: string) => {
-        if (!url) return ''
-        let root = url.split('?')[0].replace(/\/$/, '')
-        const sets = ['objectsSet', 'ObjlistSet', 'sourcecodeSet']
-        for (const s of sets) {
-            if (root.endsWith(`/${s}`)) {
-                root = root.substring(0, root.length - s.length).replace(/\/$/, '')
-            }
-        }
-        return root.endsWith('/') ? root : root + '/'
     }
 
     const handleSync = async (config?: { sourceId: string, packageName: string, top: string }) => {
@@ -179,7 +189,6 @@ export default function CodeHubPage() {
             if (Array.isArray(res.data.data)) records = res.data.data
             else if (res.data.data?.value && Array.isArray(res.data.data.value)) records = res.data.data.value
             else if (res.data.data?.d?.results && Array.isArray(res.data.data.d.results)) records = res.data.data.d.results
-            // else if (res.data.data && typeof res.data.data === 'object' && res.data.data.Object) records = [res.data.data] // This line was removed as it's not in the new code
 
             // Map to standard table structure
             const sourceName = sources.find(s => s.id === selectedSourceId)?.name || 'Unknown'
@@ -206,7 +215,6 @@ export default function CodeHubPage() {
 
             setFetchedRecords(mappedRecords)
             setSelectedRecordId(null)
-            // setViewMode('table') // This line was removed as it's not in the new code
             setRawJsonResponse(res.data.data)
             setToastMessage({ text: `Found ${mappedRecords.length} objects.`, type: 'success' })
             setTimeout(() => setToastMessage(null), 3000)
@@ -392,6 +400,26 @@ export default function CodeHubPage() {
         }
     }, [selectedRecordId, fetchedRecords, sources, selectedSourceId, getServiceRoot, resetAlmUpload])
 
+    // --- Effects ---
+
+    useEffect(() => {
+        fetchSources()
+    }, [])
+
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent).detail
+            if (detail?.agentId && selectedRecordId) {
+                // If a record is selected, handle the agent action locally in this page
+                handleAgentAction(detail.agentId)
+                // Stop propagation to prevent the global layout from opening a generic modal
+                e.stopImmediatePropagation()
+            }
+        }
+        window.addEventListener('agent-select', handler, { capture: true })
+        return () => window.removeEventListener('agent-select', handler, { capture: true })
+    }, [selectedRecordId, handleAgentAction])
+
     const filteredRecords = fetchedRecords.filter(r => {
         const searchLower = searchQuery.toLowerCase()
         const rawDataString = JSON.stringify(r.rawData).toLowerCase()
@@ -431,20 +459,6 @@ export default function CodeHubPage() {
         }
     }
 
-    const loadAlmProjects = async (sourceId: string) => {
-        setAlmLoadingStep('projects')
-        setAlmProjects([])
-        setAlmSelectedProject('')
-        try {
-            const res = await axios.get(`/api/calm/${sourceId}/projects`)
-            setAlmProjects(res.data.projects || [])
-        } catch (err: any) {
-            setAlmError(err?.response?.data?.error || 'Failed to load projects.')
-        } finally {
-            setAlmLoadingStep('')
-        }
-    }
-
     const handleAlmUpload = async () => {
         if (!almSelectedSource || !almSelectedProject || !almDocName.trim()) return
         setAlmUploadStep('uploading')
@@ -464,17 +478,6 @@ export default function CodeHubPage() {
         }
     }
 
-    const resetAlmUpload = () => {
-        setAlmUploadStep('idle')
-        setAlmSources([])
-        setAlmSelectedSource('')
-        setAlmProjects([])
-        setAlmSelectedProject('')
-        setAlmDocName('')
-        setAlmError('')
-        setAlmSuccessDoc(null)
-        setAlmLoadingStep('')
-    }
 
     return (
         <div className="doc-hub-page scrollbar-hide">
