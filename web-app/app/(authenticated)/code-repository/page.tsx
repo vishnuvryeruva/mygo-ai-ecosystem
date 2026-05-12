@@ -258,9 +258,10 @@ export default function CodeHubPage() {
                 try {
                     setToastMessage({ text: `Fetching source for ${objName}...`, type: 'success' })
 
-                    let filterQuery = `ObjectName eq '${objName}'`
+                    // Use Objname and Objtype confirmed by backend logs and Postman
+                    let filterQuery = `Objname eq '${objName}'`
                     if (objType && objType !== '-') {
-                        filterQuery = `ObjectType eq '${objType}' and ObjectName eq '${objName}'`
+                        filterQuery = `Objtype eq '${objType}' and Objname eq '${objName}'`
                     }
 
                     const source = sources.find(s => s.id === selectedSourceId)
