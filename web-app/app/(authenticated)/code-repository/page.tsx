@@ -258,22 +258,18 @@ export default function CodeHubPage() {
                 try {
                     setToastMessage({ text: `Fetching source for ${objName}...`, type: 'success' })
 
-                    // Use Objname and Objtype confirmed by backend logs and Postman
-                    let filterQuery = `Objname eq '${objName}'`
+                    // For sourcecodeSet, SAP often uses the full property names ObjectName and ObjectType
+                    // even if ObjlistSet uses the short versions.
+                    let filterQuery = `ObjectName eq '${objName}'`
                     if (objType && objType !== '-') {
-                        filterQuery = `Objtype eq '${objType}' and Objname eq '${objName}'`
+                        filterQuery = `ObjectType eq '${objType}' and ObjectName eq '${objName}'`
                     }
-
-                    const source = sources.find(s => s.id === selectedSourceId)
-                    const baseUrl = source?.config?.apiEndpoint || ''
-                    const rootUrl = getServiceRoot(baseUrl)
-                    const displayUrl = `${rootUrl}sourcecodeSet?$filter=${encodeURIComponent(filterQuery)}`
-                    setRequestedUrl(displayUrl)
-
+                    
+                    // Fallback for systems that might still use Objname/Objtype here
                     const res = await axios.post(`/api/btp/${selectedSourceId}/fetch-code`, {
                         entity_set: 'sourcecodeSet',
                         filter_query: filterQuery,
-                        top: '1000'
+                        top: '5000' // Fetch more lines for large programs
                     }, {
                         headers: {
                             Authorization: token ? `Bearer ${token}` : ''
@@ -281,10 +277,16 @@ export default function CodeHubPage() {
                     })
 
                     const responseData = res.data.data
+                    
+                    // Extract actual code lines to reduce token count and fix 429 errors
+                    const linesArray = Array.isArray(responseData) ? responseData : (responseData?.value || responseData?.d?.results || [])
+                    const extractedCode = linesArray.map((l: any) => l.Line || l.line || '').join('\n')
+
                     codeContents.push({
                         object_name: objName,
                         object_type: objType,
-                        raw_sourcecode_response: responseData
+                        code_text: extractedCode,
+                        raw_response: responseData
                     })
 
                 } catch (fetchErr) {
@@ -298,12 +300,8 @@ export default function CodeHubPage() {
                 return
             }
 
-            let rawJsonString = ''
-            if (codeContents.length === 1) {
-                rawJsonString = JSON.stringify(codeContents[0].raw_sourcecode_response, null, 2)
-            } else {
-                rawJsonString = JSON.stringify(codeContents, null, 2)
-            }
+            // Use the extracted code text instead of raw JSON for the AI prompt
+            const rawJsonString = codeContents.map(c => `--- OBJECT: ${c.object_name} ---\n${c.code_text}`).join('\n\n')
             setFetchedRawCode(rawJsonString)
 
             setToastMessage({ text: `Running AI Agent...`, type: 'success' })
