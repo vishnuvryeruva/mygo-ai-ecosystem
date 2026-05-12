@@ -82,6 +82,9 @@ export default function AuthenticatedLayout({
     useEffect(() => {
         const handler = (e: Event) => {
             const detail = (e as CustomEvent).detail
+            // If the event was already handled by a local page (like Code Hub), ignore it
+            if (detail?.handled) return
+            
             if (detail?.agentId) {
                 handleAgentSelect(detail.agentId, detail.openModal)
             }
@@ -120,6 +123,9 @@ export default function AuthenticatedLayout({
     useEffect(() => {
         const handler = (e: Event) => {
             const detail = (e as CustomEvent).detail
+            // If the event was already handled by a local page, ignore it
+            if (detail?.handled) return
+
             if (detail?.prompt !== undefined) {
                 setPromptStudioData({ 
                     prompt: detail.prompt, 

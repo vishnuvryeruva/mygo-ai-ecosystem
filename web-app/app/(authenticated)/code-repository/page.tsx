@@ -95,23 +95,45 @@ export default function CodeHubPage() {
     const [almError, setAlmError] = useState('')
     const [almSuccessDoc, setAlmSuccessDoc] = useState<any>(null)
 
-    useEffect(() => {
-        fetchSources()
-    }, [])
+    // --- Helper Functions ---
 
-    useEffect(() => {
-        const handler = (e: Event) => {
-            const detail = (e as CustomEvent).detail
-            if (detail?.agentId && selectedRecordId) {
-                // If a record is selected, handle the agent action locally in this page
-                handleAgentAction(detail.agentId)
-                // Stop propagation to prevent the global layout from opening a generic modal
-                e.stopImmediatePropagation()
+    const getServiceRoot = (url: string) => {
+        if (!url) return ''
+        let root = url.split('?')[0].replace(/\/$/, '')
+        const sets = ['objectsSet', 'ObjlistSet', 'sourcecodeSet']
+        for (const s of sets) {
+            if (root.endsWith(`/${s}`)) {
+                root = root.substring(0, root.length - s.length).replace(/\/$/, '')
             }
         }
-        window.addEventListener('agent-select', handler, { capture: true })
-        return () => window.removeEventListener('agent-select', handler, { capture: true })
-    }, [selectedRecordId, handleAgentAction])
+        return root.endsWith('/') ? root : root + '/'
+    }
+
+    const resetAlmUpload = React.useCallback(() => {
+        setAlmUploadStep('idle')
+        setAlmSources([])
+        setAlmSelectedSource('')
+        setAlmProjects([])
+        setAlmSelectedProject('')
+        setAlmDocName('')
+        setAlmError('')
+        setAlmSuccessDoc(null)
+        setAlmLoadingStep('')
+    }, [])
+
+    const loadAlmProjects = React.useCallback(async (sourceId: string) => {
+        setAlmLoadingStep('projects')
+        setAlmProjects([])
+        setAlmSelectedProject('')
+        try {
+            const res = await axios.get(`/api/calm/${sourceId}/projects`)
+            setAlmProjects(res.data.projects || [])
+        } catch (err: any) {
+            setAlmError(err?.response?.data?.error || 'Failed to load projects.')
+        } finally {
+            setAlmLoadingStep('')
+        }
+    }, [])
 
     const fetchSources = async () => {
         try {
@@ -127,18 +149,6 @@ export default function CodeHubPage() {
         }
     }
 
-    const getServiceRoot = (url: string) => {
-        if (!url) return ''
-        let root = url.split('?')[0].replace(/\/$/, '')
-        const sets = ['objectsSet', 'ObjlistSet', 'sourcecodeSet']
-        for (const s of sets) {
-            if (root.endsWith(`/${s}`)) {
-                root = root.substring(0, root.length - s.length).replace(/\/$/, '')
-            }
-        }
-        return root.endsWith('/') ? root : root + '/'
-    }
-
     const handleSync = async (config?: { sourceId: string, packageName: string, top: string }) => {
         const targetSourceId = config?.sourceId || selectedSourceId
         const targetPackage = config?.packageName || packageName
@@ -152,7 +162,8 @@ export default function CodeHubPage() {
 
         try {
             // Build filter query for PROG, FUGR, CLAS and optional package
-            let filterParts = ["(ObjectType eq 'PROG' or ObjectType eq 'FUGR' or ObjectType eq 'CLAS')"]
+            // Using Objtype which is standard for this SAP BTP OData service
+            let filterParts = ["(Objtype eq 'PROG' or Objtype eq 'FUGR' or Objtype eq 'CLAS')"]
             if (targetPackage) {
                 filterParts.push(`Package eq '${targetPackage}'`)
             }
@@ -179,14 +190,13 @@ export default function CodeHubPage() {
             if (Array.isArray(res.data.data)) records = res.data.data
             else if (res.data.data?.value && Array.isArray(res.data.data.value)) records = res.data.data.value
             else if (res.data.data?.d?.results && Array.isArray(res.data.data.d.results)) records = res.data.data.d.results
-            // else if (res.data.data && typeof res.data.data === 'object' && res.data.data.Object) records = [res.data.data] // This line was removed as it's not in the new code
 
             // Map to standard table structure
             const sourceName = sources.find(s => s.id === selectedSourceId)?.name || 'Unknown'
             const savedTime = new Date().toLocaleString()
             const mappedRecords = records.map((r, i) => {
-                const name = r.ObjectName || r.Objname || r.name || r.Object || r.Title || r.ID || `Item_${i}`
-                const type = r.ObjectType || r.Objtype || r.type || r.Type || '-'
+                const name = r.Objname || r.ObjectName || r.name || r.Object || r.Title || r.ID || `Item_${i}`
+                const type = r.Objtype || r.ObjectType || r.type || r.Type || '-'
                 const pkg = r.Package || r.Devclass || '-'
                 const createdBy = r.Createby || r.Author || r.CreatedBy || '-'
                 const desc = r.Objdesc || r.Description || r.title || 'No description available'
@@ -206,7 +216,6 @@ export default function CodeHubPage() {
 
             setFetchedRecords(mappedRecords)
             setSelectedRecordId(null)
-            // setViewMode('table') // This line was removed as it's not in the new code
             setRawJsonResponse(res.data.data)
             setToastMessage({ text: `Found ${mappedRecords.length} objects.`, type: 'success' })
             setTimeout(() => setToastMessage(null), 3000)
@@ -249,21 +258,18 @@ export default function CodeHubPage() {
                 try {
                     setToastMessage({ text: `Fetching source for ${objName}...`, type: 'success' })
 
+                    // For sourcecodeSet, SAP often uses the full property names ObjectName and ObjectType
+                    // even if ObjlistSet uses the short versions.
                     let filterQuery = `ObjectName eq '${objName}'`
                     if (objType && objType !== '-') {
                         filterQuery = `ObjectType eq '${objType}' and ObjectName eq '${objName}'`
                     }
-
-                    const source = sources.find(s => s.id === selectedSourceId)
-                    const baseUrl = source?.config?.apiEndpoint || ''
-                    const rootUrl = getServiceRoot(baseUrl)
-                    const displayUrl = `${rootUrl}sourcecodeSet?$filter=${encodeURIComponent(filterQuery)}`
-                    setRequestedUrl(displayUrl)
-
+                    
+                    // Fallback for systems that might still use Objname/Objtype here
                     const res = await axios.post(`/api/btp/${selectedSourceId}/fetch-code`, {
                         entity_set: 'sourcecodeSet',
                         filter_query: filterQuery,
-                        top: '1000'
+                        top: '5000' // Fetch more lines for large programs
                     }, {
                         headers: {
                             Authorization: token ? `Bearer ${token}` : ''
@@ -271,10 +277,16 @@ export default function CodeHubPage() {
                     })
 
                     const responseData = res.data.data
+                    
+                    // Extract actual code lines to reduce token count and fix 429 errors
+                    const linesArray = Array.isArray(responseData) ? responseData : (responseData?.value || responseData?.d?.results || [])
+                    const extractedCode = linesArray.map((l: any) => l.Line || l.line || '').join('\n')
+
                     codeContents.push({
                         object_name: objName,
                         object_type: objType,
-                        raw_sourcecode_response: responseData
+                        code_text: extractedCode,
+                        raw_response: responseData
                     })
 
                 } catch (fetchErr) {
@@ -288,12 +300,8 @@ export default function CodeHubPage() {
                 return
             }
 
-            let rawJsonString = ''
-            if (codeContents.length === 1) {
-                rawJsonString = JSON.stringify(codeContents[0].raw_sourcecode_response, null, 2)
-            } else {
-                rawJsonString = JSON.stringify(codeContents, null, 2)
-            }
+            // Use the extracted code text instead of raw JSON for the AI prompt
+            const rawJsonString = codeContents.map(c => `--- OBJECT: ${c.object_name} ---\n${c.code_text}`).join('\n\n')
             setFetchedRawCode(rawJsonString)
 
             setToastMessage({ text: `Running AI Agent...`, type: 'success' })
@@ -392,6 +400,30 @@ export default function CodeHubPage() {
         }
     }, [selectedRecordId, fetchedRecords, sources, selectedSourceId, getServiceRoot, resetAlmUpload])
 
+    // --- Effects ---
+
+    useEffect(() => {
+        fetchSources()
+    }, [])
+
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent).detail
+            if (detail?.agentId && selectedRecordId) {
+                // Mark as handled so layout.tsx ignores it
+                detail.handled = true
+                
+                // Stop propagation to prevent the global layout from opening a generic modal
+                e.stopPropagation()
+                e.stopImmediatePropagation()
+                
+                handleAgentAction(detail.agentId)
+            }
+        }
+        window.addEventListener('agent-select', handler, { capture: true })
+        return () => window.removeEventListener('agent-select', handler, { capture: true })
+    }, [selectedRecordId, handleAgentAction])
+
     const filteredRecords = fetchedRecords.filter(r => {
         const searchLower = searchQuery.toLowerCase()
         const rawDataString = JSON.stringify(r.rawData).toLowerCase()
@@ -431,20 +463,6 @@ export default function CodeHubPage() {
         }
     }
 
-    const loadAlmProjects = async (sourceId: string) => {
-        setAlmLoadingStep('projects')
-        setAlmProjects([])
-        setAlmSelectedProject('')
-        try {
-            const res = await axios.get(`/api/calm/${sourceId}/projects`)
-            setAlmProjects(res.data.projects || [])
-        } catch (err: any) {
-            setAlmError(err?.response?.data?.error || 'Failed to load projects.')
-        } finally {
-            setAlmLoadingStep('')
-        }
-    }
-
     const handleAlmUpload = async () => {
         if (!almSelectedSource || !almSelectedProject || !almDocName.trim()) return
         setAlmUploadStep('uploading')
@@ -464,17 +482,6 @@ export default function CodeHubPage() {
         }
     }
 
-    const resetAlmUpload = () => {
-        setAlmUploadStep('idle')
-        setAlmSources([])
-        setAlmSelectedSource('')
-        setAlmProjects([])
-        setAlmSelectedProject('')
-        setAlmDocName('')
-        setAlmError('')
-        setAlmSuccessDoc(null)
-        setAlmLoadingStep('')
-    }
 
     return (
         <div className="doc-hub-page scrollbar-hide">
