@@ -110,6 +110,8 @@ class BTPService:
         try:
             token = self._get_token()
             
+            import urllib.parse
+            
             # Use Service Root + UI Entity Set if provided, otherwise use api_endpoint
             if entity_set:
                 base_url = self.get_service_root()
@@ -121,12 +123,11 @@ class BTPService:
             
             # Handle $filter
             if filter_query:
-                # Allow raw OData expressions to pass through without URL-encoding.
-                # The incoming Flask request has already decoded query params, and
-                # the `requests` library will handle any required encoding.
                 clean_filter = filter_query.replace('$filter=', '').strip()
                 if clean_filter:
-                    query_params.append(f"$filter={clean_filter}")
+                    # Explicitly encode the filter value
+                    encoded_filter = urllib.parse.quote(clean_filter)
+                    query_params.append(f"$filter={encoded_filter}")
             
             # Handle $skip
             if skip and str(skip) != '0':

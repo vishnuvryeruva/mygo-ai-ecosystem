@@ -409,13 +409,17 @@ export default function CodeHubPage() {
     useEffect(() => {
         const handler = (e: Event) => {
             const detail = (e as CustomEvent).detail
-            if (detail?.agentId && selectedRecordId) {
-                // Mark as handled so layout.tsx ignores it
+            if (detail?.agentId) {
+                // Mark as handled and stop propagation so layout.tsx never opens global modals in Code Hub
                 detail.handled = true
-                
-                // Stop propagation to prevent the global layout from opening a generic modal
                 e.stopPropagation()
                 e.stopImmediatePropagation()
+
+                if (!selectedRecordId) {
+                    setToastMessage({ text: 'No object selected. Please select an object from the list first.', type: 'error' })
+                    setTimeout(() => setToastMessage(null), 5000)
+                    return
+                }
                 
                 handleAgentAction(detail.agentId)
             }
