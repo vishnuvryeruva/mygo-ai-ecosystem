@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import AIAgentsDropdown from '@/components/AIAgentsDropdown'
 import FetchCodeModal from '@/components/modals/FetchCodeModal'
+import RichTextResponse from '@/components/RichTextResponse'
 
 // SAP Object Type Icons mapping
 const TypeIcon = ({ type }: { type: string }) => {
@@ -895,10 +896,10 @@ export default function CodeHubPage() {
                                         </div>
                                         
                                         <div 
-                                            className="text-slate-700 text-base leading-relaxed whitespace-pre-wrap font-sans space-y-4"
+                                            className="text-slate-700 text-base leading-relaxed font-sans space-y-4"
                                             style={{ letterSpacing: '-0.011em' }}
                                         >
-                                            {explainResponse}
+                                            <RichTextResponse content={explainResponse} />
                                         </div>
                                     </div>
                                 )}
