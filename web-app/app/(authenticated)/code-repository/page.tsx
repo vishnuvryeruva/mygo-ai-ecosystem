@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import AIAgentsDropdown from '@/components/AIAgentsDropdown'
 import FetchCodeModal from '@/components/modals/FetchCodeModal'
+import RichTextResponse from '@/components/RichTextResponse'
 
 // SAP Object Type Icons mapping
 const TypeIcon = ({ type }: { type: string }) => {
@@ -304,6 +305,19 @@ export default function CodeHubPage() {
             const rawJsonString = codeContents.map(c => `--- OBJECT: ${c.object_name} ---\n${c.code_text}`).join('\n\n')
             setFetchedRawCode(rawJsonString)
 
+            if (agentId === 'code-advisor') {
+                window.dispatchEvent(new CustomEvent('code-advisor-open', {
+                    detail: {
+                        code: rawJsonString,
+                        codeType: 'ABAP'
+                    }
+                }))
+                setIsAdvising(false)
+                setShowExplainPopup(false)
+                setToastMessage(null)
+                return
+            }
+
             setToastMessage({ text: `Running AI Agent...`, type: 'success' })
 
             // Determine endpoint and payload based on agentId
@@ -418,6 +432,28 @@ export default function CodeHubPage() {
     useEffect(() => {
         fetchSources()
     }, [])
+
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent).detail
+            if (detail?.agentId) {
+                // Mark as handled and stop propagation so layout.tsx never opens global modals in Code Hub
+                detail.handled = true
+                e.stopPropagation()
+                e.stopImmediatePropagation()
+
+                if (!selectedRecordId) {
+                    setToastMessage({ text: 'No object selected. Please select an object from the list first.', type: 'error' })
+                    setTimeout(() => setToastMessage(null), 5000)
+                    return
+                }
+                
+                handleAgentAction(detail.agentId)
+            }
+        }
+        window.addEventListener('agent-select', handler, { capture: true })
+        return () => window.removeEventListener('agent-select', handler, { capture: true })
+    }, [selectedRecordId, handleAgentAction])
 
     const filteredRecords = fetchedRecords.filter(r => {
         const searchLower = searchQuery.toLowerCase()
@@ -840,7 +876,7 @@ export default function CodeHubPage() {
                             )}
 
                             {/* Main Explanation Block */}
-                            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-8 flex-1 min-h-[400px]">
+                            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-8 w-full min-h-[400px] h-auto flex-shrink-0">
                                 {isAdvising ? (
                                     <div className="flex flex-col items-center justify-center h-full gap-4">
                                         <div className="relative">
@@ -860,10 +896,10 @@ export default function CodeHubPage() {
                                         </div>
                                         
                                         <div 
-                                            className="text-slate-700 text-base leading-relaxed whitespace-pre-wrap font-sans space-y-4"
+                                            className="text-slate-700 text-base leading-relaxed font-sans space-y-4"
                                             style={{ letterSpacing: '-0.011em' }}
                                         >
-                                            {explainResponse}
+                                            <RichTextResponse content={explainResponse} />
                                         </div>
                                     </div>
                                 )}
