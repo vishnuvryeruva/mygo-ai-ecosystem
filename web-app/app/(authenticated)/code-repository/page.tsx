@@ -876,7 +876,7 @@ export default function CodeHubPage() {
                             )}
 
                             {/* Main Explanation Block */}
-                            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-8 flex-1 min-h-[400px]">
+                            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-8 w-full min-h-[400px] h-auto">
                                 {isAdvising ? (
                                     <div className="flex flex-col items-center justify-center h-full gap-4">
                                         <div className="relative">
