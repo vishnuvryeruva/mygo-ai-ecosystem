@@ -304,6 +304,19 @@ export default function CodeHubPage() {
             const rawJsonString = codeContents.map(c => `--- OBJECT: ${c.object_name} ---\n${c.code_text}`).join('\n\n')
             setFetchedRawCode(rawJsonString)
 
+            if (agentId === 'code-advisor') {
+                window.dispatchEvent(new CustomEvent('code-advisor-open', {
+                    detail: {
+                        code: rawJsonString,
+                        codeType: 'ABAP'
+                    }
+                }))
+                setIsAdvising(false)
+                setShowExplainPopup(false)
+                setToastMessage(null)
+                return
+            }
+
             setToastMessage({ text: `Running AI Agent...`, type: 'success' })
 
             // Determine endpoint and payload based on agentId
