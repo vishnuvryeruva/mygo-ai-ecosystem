@@ -16,12 +16,37 @@ const settingsTabs = [
 /* ─── Prompts data ─────────────────────────────────────── */
 const aiScenarios = [
     { id: 'ask-yoda', title: 'Ask Yoda - RAG Q&A', subtitle: 'System prompt used for answering questions using RAG (Retrieval Augmented Generation)', active: true },
+    { id: 'solution-advisor', title: 'Solution Advisor Agent', subtitle: 'System prompt used for gathering requirements and producing solution guidance', active: true },
     { id: 'code-quality', title: 'Code Quality Advisor', subtitle: 'Prompts for code quality analysis and recommendations', active: false },
     { id: 'code-explanation', title: 'Code Explanation', subtitle: 'Prompts for explaining code functionality', active: false },
     { id: 'llm-prompt', title: 'LLM Prompt Generator', subtitle: 'Prompts for generating optimized LLM prompts for code generation', active: false },
     { id: 'func-spec', title: 'Functional Specification Generator', subtitle: 'Prompts for generating functional specification documents', active: false },
     { id: 'tech-spec', title: 'Technical Specification Generator', subtitle: 'Prompts for generating technical specification documents', active: false },
 ]
+
+const defaultSystemPrompts: Record<string, string> = {
+    'ask-yoda': `You are Yoda, a wise AI assistant with access to a knowledge base of SAP documents, specifications, blueprints, and test cases. Provide accurate, helpful answers based on the provided context.
+If the context doesn't contain enough information, say so clearly.
+Always cite relevant documents when answering.`,
+    'solution-advisor': `You are an expert SAP Solution Architect helping users design solutions.
+Your PRIMARY goal is to PROVIDE ANSWERS AND SOLUTIONS, not to ask questions.
+
+When a user describes their requirements:
+1. Acknowledge their requirements and provide a concise initial solution approach (3-5 sentences)
+2. Include specific SAP recommendations: modules, transactions, BAPIs, or function modules
+3. ONLY set needs_clarification to true if a CRITICAL piece of information is missing that would fundamentally change the solution
+
+RULES:
+- If requirements are at least 60% clear, proceed with a solution and note assumptions
+- If you must ask, ask only ONE critical question
+- Keep the response concise — the full detailed solution is generated in the next step
+- Default to needs_clarification: false
+
+You MUST return a JSON object with these three keys:
+  "needs_clarification": a boolean, true or false
+  "clarifications": plain text only — your concise solution approach or clarifying question. NEVER put JSON, code blocks, or markdown fences inside this field.
+  "summary": plain text only — one sentence describing the requirement`,
+}
 
 /* ─── Roles default data ───────────────────────────────── */
 interface Role {
@@ -116,9 +141,8 @@ export default function SettingsPage() {
 
     /* Prompts state */
     const [activeScenario, setActiveScenario] = useState('ask-yoda')
-    const [systemPrompt, setSystemPrompt] = useState(
-        `You are Yoda, a wise AI assistant with access to a knowledge base of SAP documents, specifications, blueprints, and test cases. Provide accurate, helpful answers based on the provided context.\nIf the context doesn't contain enough information, say so clearly.\nAlways cite relevant documents when answering.`
-    )
+    const [scenarioPrompts, setScenarioPrompts] = useState<Record<string, string>>(defaultSystemPrompts)
+    const [systemPrompt, setSystemPrompt] = useState(defaultSystemPrompts['ask-yoda'])
 
     /* Sources state */
     const [sources, setSources] = useState<Source[]>([])
@@ -160,6 +184,10 @@ export default function SettingsPage() {
             setTestResult(null)
         }
     }, [showAddConnection])
+
+    useEffect(() => {
+        setSystemPrompt(scenarioPrompts[activeScenario] || '')
+    }, [activeScenario, scenarioPrompts])
 
     const fetchCurrentUser = async () => {
         setIsLoadingAuth(true)
@@ -601,7 +629,11 @@ export default function SettingsPage() {
                             <textarea
                                 className="settings-prompt-textarea"
                                 value={systemPrompt}
-                                onChange={(e) => setSystemPrompt(e.target.value)}
+                                onChange={(e) => {
+                                    const nextPrompt = e.target.value
+                                    setSystemPrompt(nextPrompt)
+                                    setScenarioPrompts(prev => ({ ...prev, [activeScenario]: nextPrompt }))
+                                }}
                                 rows={10}
                             />
                             <div className="settings-editor-actions">
