@@ -35,6 +35,10 @@ export default function AuthenticatedLayout({
     // Sync Source modal state
     const [syncSourceModalOpen, setSyncSourceModalOpen] = useState(false)
     const [preSelectedSourceId, setPreSelectedSourceId] = useState<string | null>(null)
+    // Explain Code modal initial data
+    const [explainCodeData, setExplainCodeData] = useState<{ code: string; codeType: string; programName?: string } | null>(null)
+    // Solution Advisor modal initial data
+    const [solutionAdvisorData, setSolutionAdvisorData] = useState<{ requirements: string } | null>(null)
     // Prompt Studio modal initial data
     const [promptStudioData, setPromptStudioData] = useState<{ 
         prompt: string; 
@@ -106,6 +110,32 @@ export default function AuthenticatedLayout({
         return () => window.removeEventListener('code-advisor-open', handler)
     }, [])
 
+    // Listen for explain-code-open events with initial data
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent).detail
+            if (detail?.code !== undefined && detail?.codeType !== undefined) {
+                setExplainCodeData({ code: detail.code, codeType: detail.codeType, programName: detail.programName })
+                setActiveModal('explain-code')
+            }
+        }
+        window.addEventListener('explain-code-open', handler)
+        return () => window.removeEventListener('explain-code-open', handler)
+    }, [])
+
+    // Listen for solution-advisor-open events with initial data
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent).detail
+            if (detail?.requirements !== undefined) {
+                setSolutionAdvisorData({ requirements: detail.requirements })
+                setActiveModal('solution-advisor')
+            }
+        }
+        window.addEventListener('solution-advisor-open', handler)
+        return () => window.removeEventListener('solution-advisor-open', handler)
+    }, [])
+
     // Listen for sync-source-open events with pre-selected source
     useEffect(() => {
         const handler = (e: Event) => {
@@ -126,11 +156,11 @@ export default function AuthenticatedLayout({
             // If the event was already handled by a local page, ignore it
             if (detail?.handled) return
 
-            if (detail?.prompt !== undefined) {
+            if (detail?.prompt !== undefined || detail?.task !== undefined) {
                 setPromptStudioData({ 
-                    prompt: detail.prompt, 
+                    prompt: detail.prompt || '', 
                     language: detail.language || 'ABAP',
-                    task: detail.task,
+                    task: detail.task || '',
                     autoGenerate: detail.autoGenerate
                 })
                 setActiveModal('prompt-generator')
@@ -158,6 +188,8 @@ export default function AuthenticatedLayout({
         setActiveModal(null)
         setCodeAdvisorData(null)
         setPromptStudioData(null)
+        setSolutionAdvisorData(null)
+        setExplainCodeData(null)
     }
 
     const closeSyncSourceModal = () => {
@@ -219,6 +251,7 @@ export default function AuthenticatedLayout({
             {activeModal === 'solution-advisor' && (
                 <SolutionAdvisorModal
                     onClose={closeModal}
+                    initialRequirements={solutionAdvisorData?.requirements}
                     onCreateSpec={(solutionContext) => {
                         setActiveModal('spec-assistant')
                         sessionStorage.setItem('solutionAdvisorContext', solutionContext)
@@ -236,7 +269,14 @@ export default function AuthenticatedLayout({
                     autoGenerateCode={promptStudioData?.autoGenerate}
                 />
             )}
-            {activeModal === 'explain-code' && <ExplainCodeModal onClose={closeModal} />}
+            {activeModal === 'explain-code' && (
+                <ExplainCodeModal 
+                    onClose={closeModal}
+                    initialCode={explainCodeData?.code}
+                    initialCodeType={explainCodeData?.codeType}
+                    initialProgramName={explainCodeData?.programName}
+                />
+            )}
             {activeModal === 'test-case-generator' && <TestCaseGeneratorModal onClose={closeModal} />}
             {activeModal === 'document-upload' && <FileUploadModal onClose={closeModal} />}
             {activeModal === 'code-advisor' && (

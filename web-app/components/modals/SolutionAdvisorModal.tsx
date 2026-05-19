@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import axios from 'axios'
 import LoadingSpinner from '../LoadingSpinner'
 import RichTextResponse from '../RichTextResponse'
@@ -10,6 +10,7 @@ import { useAutoResize } from '@/hooks/useAutoResize'
 interface SolutionAdvisorModalProps {
     onClose: () => void
     onCreateSpec?: (solutionContext: string) => void
+    initialRequirements?: string
 }
 
 type Step = 'requirements' | 'solution' | 'search' | 'improvise' | 'complete'
@@ -25,7 +26,7 @@ interface SimilarSolution {
     relevance: number
 }
 
-export default function SolutionAdvisorModal({ onClose, onCreateSpec }: SolutionAdvisorModalProps) {
+export default function SolutionAdvisorModal({ onClose, onCreateSpec, initialRequirements }: SolutionAdvisorModalProps) {
     const [currentStep, setCurrentStep] = useState<Step>('requirements')
     const [stepHistory, setStepHistory] = useState<Step[]>([])
     const [requirements, setRequirements] = useState('')
@@ -150,6 +151,49 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec }: Solution
             setLoading(false)
         }
     }
+
+    // Automatically trigger requirements discovery if initialRequirements is provided
+    useEffect(() => {
+        if (initialRequirements && initialRequirements.trim()) {
+            const startFlow = async () => {
+                setRequirements(initialRequirements)
+                setMessages([
+                    {
+                        role: 'assistant',
+                        content: "Welcome to Solution Advisor! I'll help you explore and refine your solution before creating a functional specification.\n\nPlease describe your requirements or the problem you're trying to solve:"
+                    },
+                    {
+                        role: 'user',
+                        content: `Here is the system context / code:\n\n${initialRequirements}`
+                    }
+                ])
+                setLoading(true)
+                try {
+                    const response = await axios.post('/api/solution-advisor/requirements', {
+                        requirements: initialRequirements
+                    }, getAuthConfig())
+
+                    setMessages(prev => [...prev, {
+                        role: 'assistant',
+                        content: response.data.clarifications || "Thank you for the requirements. Let me generate a solution proposal for you."
+                    }])
+
+                    if (!response.data.needs_clarification) {
+                        await generateSolution(initialRequirements)
+                    }
+                } catch (error) {
+                    console.error('Error in solution advisor auto start:', error)
+                    setMessages(prev => [...prev, {
+                        role: 'assistant',
+                        content: "I encountered an error starting the discovery process. Please describe your requirements below."
+                    }])
+                } finally {
+                    setLoading(false)
+                }
+            }
+            startFlow()
+        }
+    }, [initialRequirements])
 
     const handleSearchSimilar = async () => {
         setLoading(true)

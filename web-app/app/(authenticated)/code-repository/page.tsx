@@ -81,6 +81,7 @@ export default function CodeHubPage() {
     const [requestedUrl, setRequestedUrl] = useState<string>('')
     const [activeAgentId, setActiveAgentId] = useState<string>('')
     const [isFetchModalOpen, setIsFetchModalOpen] = useState(false)
+    const [isStateLoaded, setIsStateLoaded] = useState(false)
 
     // Toast State
     const [toastMessage, setToastMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null)
@@ -143,7 +144,13 @@ export default function CodeHubPage() {
             const btpOnly = allSources.filter((s: any) => s.type === 'BTP')
             setSources(btpOnly)
             if (btpOnly.length > 0) {
-                setSelectedSourceId(btpOnly[0].id)
+                const storedSourceId = localStorage.getItem('mygo-codehub-source-id')
+                const hasStoredSource = btpOnly.some((s: any) => s.id === storedSourceId)
+                if (storedSourceId && hasStoredSource) {
+                    setSelectedSourceId(storedSourceId)
+                } else {
+                    setSelectedSourceId(btpOnly[0].id)
+                }
             }
         } catch (err) {
             console.error('Failed to fetch sources:', err)
@@ -318,6 +325,32 @@ export default function CodeHubPage() {
                 return
             }
 
+            if (agentId === 'solution-advisor') {
+                window.dispatchEvent(new CustomEvent('solution-advisor-open', {
+                    detail: {
+                        requirements: rawJsonString
+                    }
+                }))
+                setIsAdvising(false)
+                setShowExplainPopup(false)
+                setToastMessage(null)
+                return
+            }
+
+            if (agentId === 'explain-code') {
+                window.dispatchEvent(new CustomEvent('explain-code-open', {
+                    detail: {
+                        code: rawJsonString,
+                        codeType: 'ABAP',
+                        programName: selectedItems.length === 1 ? selectedItems[0].name : 'Multiple Objects'
+                    }
+                }))
+                setIsAdvising(false)
+                setShowExplainPopup(false)
+                setToastMessage(null)
+                return
+            }
+
             setToastMessage({ text: `Running AI Agent...`, type: 'success' })
 
             // Determine endpoint and payload based on agentId
@@ -428,6 +461,106 @@ export default function CodeHubPage() {
     }, [handleAgentAction])
 
     // --- Effects ---
+
+    useEffect(() => {
+        try {
+            const storedRecords = localStorage.getItem('mygo-codehub-records')
+            if (storedRecords) {
+                setFetchedRecords(JSON.parse(storedRecords))
+            }
+            const storedRawJson = localStorage.getItem('mygo-codehub-raw-json')
+            if (storedRawJson) {
+                setRawJsonResponse(JSON.parse(storedRawJson))
+            }
+            const storedSourceId = localStorage.getItem('mygo-codehub-source-id')
+            if (storedSourceId) {
+                setSelectedSourceId(storedSourceId)
+            }
+            const storedPackage = localStorage.getItem('mygo-codehub-package')
+            if (storedPackage) {
+                setPackageName(storedPackage)
+            }
+            const storedTop = localStorage.getItem('mygo-codehub-top')
+            if (storedTop) {
+                setTop(storedTop)
+            }
+            const storedTypeFilter = localStorage.getItem('mygo-codehub-type-filter')
+            if (storedTypeFilter) {
+                setTypeFilter(storedTypeFilter)
+            }
+            const storedRecordId = localStorage.getItem('mygo-codehub-selected-record-id')
+            if (storedRecordId) {
+                setSelectedRecordId(storedRecordId)
+            }
+        } catch (e) {
+            console.error('Failed to load code hub state from localStorage:', e)
+        } finally {
+            setIsStateLoaded(true)
+        }
+    }, [])
+
+    useEffect(() => {
+        if (!isStateLoaded) return
+        if (fetchedRecords && fetchedRecords.length > 0) {
+            localStorage.setItem('mygo-codehub-records', JSON.stringify(fetchedRecords))
+        } else {
+            localStorage.removeItem('mygo-codehub-records')
+        }
+    }, [fetchedRecords, isStateLoaded])
+
+    useEffect(() => {
+        if (!isStateLoaded) return
+        if (rawJsonResponse) {
+            localStorage.setItem('mygo-codehub-raw-json', JSON.stringify(rawJsonResponse))
+        } else {
+            localStorage.removeItem('mygo-codehub-raw-json')
+        }
+    }, [rawJsonResponse, isStateLoaded])
+
+    useEffect(() => {
+        if (!isStateLoaded) return
+        if (selectedSourceId) {
+            localStorage.setItem('mygo-codehub-source-id', selectedSourceId)
+        } else {
+            localStorage.removeItem('mygo-codehub-source-id')
+        }
+    }, [selectedSourceId, isStateLoaded])
+
+    useEffect(() => {
+        if (!isStateLoaded) return
+        if (packageName) {
+            localStorage.setItem('mygo-codehub-package', packageName)
+        } else {
+            localStorage.removeItem('mygo-codehub-package')
+        }
+    }, [packageName, isStateLoaded])
+
+    useEffect(() => {
+        if (!isStateLoaded) return
+        if (top) {
+            localStorage.setItem('mygo-codehub-top', top)
+        } else {
+            localStorage.removeItem('mygo-codehub-top')
+        }
+    }, [top, isStateLoaded])
+
+    useEffect(() => {
+        if (!isStateLoaded) return
+        if (typeFilter) {
+            localStorage.setItem('mygo-codehub-type-filter', typeFilter)
+        } else {
+            localStorage.removeItem('mygo-codehub-type-filter')
+        }
+    }, [typeFilter, isStateLoaded])
+
+    useEffect(() => {
+        if (!isStateLoaded) return
+        if (selectedRecordId) {
+            localStorage.setItem('mygo-codehub-selected-record-id', selectedRecordId)
+        } else {
+            localStorage.removeItem('mygo-codehub-selected-record-id')
+        }
+    }, [selectedRecordId, isStateLoaded])
 
     useEffect(() => {
         fetchSources()
