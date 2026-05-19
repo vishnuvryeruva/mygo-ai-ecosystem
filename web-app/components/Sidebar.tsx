@@ -86,6 +86,13 @@ export default function Sidebar() {
     const handleLogout = () => {
         localStorage.removeItem('mygo-token')
         localStorage.removeItem('mygo-user')
+        localStorage.removeItem('mygo-codehub-records')
+        localStorage.removeItem('mygo-codehub-raw-json')
+        localStorage.removeItem('mygo-codehub-source-id')
+        localStorage.removeItem('mygo-codehub-package')
+        localStorage.removeItem('mygo-codehub-top')
+        localStorage.removeItem('mygo-codehub-type-filter')
+        localStorage.removeItem('mygo-codehub-selected-record-id')
         document.cookie = 'mygo-auth=; path=/; max-age=0; SameSite=Lax'
         router.push('/login')
     }
