@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  output: 'standalone',
   experimental: {
     // Default 30s timeout too short for solution-advisor/generate (LLM calls can take 60+ seconds)
     proxyTimeout: 120000, // 2 minutes

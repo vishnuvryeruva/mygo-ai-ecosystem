@@ -2180,7 +2180,7 @@ def github_push():
 
 
 if __name__ == '__main__':
-    port = int(os.getenv('FLASK_PORT', 5001))
+    port = int(os.getenv('PORT', 5000))
     print(f"DEBUG: Starting Flask app on port {port}")
     print(f"DEBUG: OpenAI API Key: {os.getenv('OPENAI_API_KEY')}")
     print(f"DEBUG: Claude API Key: {os.getenv('CLAUDE_API_KEY')}")

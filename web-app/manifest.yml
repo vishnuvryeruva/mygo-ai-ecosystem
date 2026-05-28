@@ -1,0 +1,20 @@
+applications:
+  - name: mygo-backend
+    docker:
+      image: vishnuvryeruva98/mygo-backend:v1
+    memory: 512M
+    disk_quota: 2G
+    instances: 1
+    routes:
+      - route: mygo-backend-vd2026.cfapps.us10-001.hana.ondemand.com
+
+  - name: mygo-frontend
+    docker:
+      image: vishnuvryeruva98/mygo-frontend:v1
+    memory: 1G
+    disk_quota: 2G
+    instances: 1
+    routes:
+      - route: mygo-frontend-vd2026.cfapps.us10-001.hana.ondemand.com
+    env:
+      BACKEND_URL: https://mygo-backend-vd2026.cfapps.us10-001.hana.ondemand.com

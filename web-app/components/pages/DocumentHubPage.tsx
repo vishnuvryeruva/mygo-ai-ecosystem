@@ -137,9 +137,9 @@ export default function DocumentHubPage() {
         optionsLoaded.current = true
         axios.get('/api/documents?page=1&page_size=1000').then(res => {
             const docs: any[] = res.data.documents ?? []
-            setSourceOptions([...new Set<string>(docs.map(d => d.source).filter(Boolean))].sort())
-            setTypeOptions([...new Set<string>(docs.map(d => d.type || d.doc_type).filter(Boolean))].sort())
-            setProjectOptions([...new Set<string>(docs.map(d => d.project).filter(p => p && p !== 'N/A'))].sort())
+            setSourceOptions(Array.from(new Set<string>(docs.map(d => d.source).filter(Boolean))).sort())
+            setTypeOptions(Array.from(new Set<string>(docs.map(d => d.type || d.doc_type).filter(Boolean))).sort())
+            setProjectOptions(Array.from(new Set<string>(docs.map(d => d.project).filter(p => p && p !== 'N/A'))).sort())
         }).catch(() => {})
     }, [])
 
