@@ -1,6 +1,49 @@
+import os
+import json
+def _setup_database_url_from_vcap():
+    vcap = os.environ.get('VCAP_SERVICES')
+    if not vcap:
+        return
+    try:
+        services = json.loads(vcap)
+        # Try common service offering names for BTP Postgres
+        pg_services = (
+            services.get('postgresql-db')
+            or services.get('postgresql')
+            or services.get('hyperscaler-postgresql')
+            or []
+        )
+        if not pg_services:
+            return
+        creds = pg_services[0].get('credentials', {})
+        
+        # Build URI from credentials
+        if creds.get('uri'):
+            db_url = creds['uri']
+        else:
+            db_url = (
+                f"postgresql://{creds['username']}:{creds['password']}"
+                f"@{creds['hostname']}:{creds['port']}/{creds['dbname']}"
+            )
+        
+        # Normalize postgres:// to postgresql://
+        if db_url.startswith('postgres://'):
+            db_url = db_url.replace('postgres://', 'postgresql://', 1)
+        
+        # Add sslmode=require if missing
+        if 'sslmode' not in db_url:
+            sep = '&' if '?' in db_url else '?'
+            db_url = f"{db_url}{sep}sslmode=require"
+        
+        os.environ['DATABASE_URL'] = db_url
+        print(f"DEBUG: DATABASE_URL set from VCAP_SERVICES (host: {creds.get('hostname', 'unknown')})")
+    except Exception as e:
+        print(f"DEBUG: Failed to parse VCAP_SERVICES: {e}")
+
+_setup_database_url_from_vcap()
+
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-import os
 import io
 import json
 import uuid
