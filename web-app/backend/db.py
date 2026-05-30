@@ -18,6 +18,33 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/mygo_ai")
 
+# Set during init_db(); None until first PostgreSQL init probe.
+PGVECTOR_AVAILABLE = None
+
+
+def _probe_pgvector(conn) -> bool:
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM pg_extension WHERE extname = %s;", ("vector",))
+        return cur.fetchone() is not None
+    except Exception:
+        return False
+
+
+def pgvector_available() -> bool:
+    """True when PostgreSQL has the pgvector extension (False for SQLite)."""
+    if PGVECTOR_AVAILABLE is not None:
+        return PGVECTOR_AVAILABLE
+    return False
+
+
+def _sql_without_pgvector(sql: str) -> str:
+    """Schema DDL for hosts without pgvector (e.g. managed RDS without the extension)."""
+    sql = re.sub(r'CREATE EXTENSION[^;]*;', '', sql, flags=re.IGNORECASE)
+    sql = sql.replace("embedding       vector(1536),", "embedding       BYTEA,")
+    sql = re.sub(r'CREATE INDEX.*?USING ivfflat.*?;', '', sql, flags=re.IGNORECASE | re.DOTALL)
+    return sql
+
 
 class SQLiteCursorProxy:
     def __init__(self, cursor):
@@ -78,7 +105,7 @@ def get_conn(register_vec=True):
     try:
         conn = psycopg2.connect(DATABASE_URL)
         # Register pgvector types on this connection (skip during init_db)
-        if register_vec:
+        if register_vec and pgvector_available():
             try:
                 register_vector(conn)
             except Exception as e:
@@ -94,43 +121,82 @@ def get_conn(register_vec=True):
         conn.row_factory = sqlite3.Row
         return SQLiteConnectionProxy(conn)
 
-
 def init_db():
     """
     Create all required tables if they don't exist.
     Run once on application startup.
     """
     sql_path = os.path.join(os.path.dirname(__file__), "migrations", "init.sql")
+    global PGVECTOR_AVAILABLE
+
     conn = get_conn(register_vec=False)
     
-    # Check if we are using SQLite (via proxy or direct)
     is_sqlite = isinstance(conn, SQLiteConnectionProxy) or isinstance(conn, sqlite3.Connection)
     
     try:
         with open(sql_path, "r") as f:
             sql = f.read()
         
-        # SQL compatibility tweaks for SQLite
         if is_sqlite:
-            # Remove Postgres-specific extensions and types
-            sql = re.sub(r'CREATE EXTENSION.*?;', '', sql, flags=re.IGNORECASE | re.DOTALL)
-            sql = sql.replace("embedding       vector(1536),", "embedding       BLOB,")
+            PGVECTOR_AVAILABLE = False
+            # SQLite compatibility tweaks
+            sql = _sql_without_pgvector(sql)
+            sql = sql.replace("BYTEA,", "BLOB,")
             sql = sql.replace("JSONB", "TEXT")
-            # Remove any IVFFLAT index stuff which SQLite won't understand
-            sql = re.sub(r'CREATE INDEX.*?USING ivfflat.*?;', '', sql, flags=re.IGNORECASE | re.DOTALL)
-            # Replace %s with ? for SQLite placeholders in migrations if necessary, 
-            # but init.sql usually has literal SQL.
-        
-        cur = conn.cursor()
-        if is_sqlite:
-            cur.executescript(sql)
-        else:
-            cur.execute(sql)
             
-        conn.commit()
-        
-        if not is_sqlite:
-            register_vector(conn)
+            cur = conn.cursor()
+            cur.executescript(sql)
+            conn.commit()
+        else:
+            # PostgreSQL: extract CREATE EXTENSION statements and run them separately
+            # so a permission error on one doesn't roll back the whole schema.
+            extension_statements = re.findall(r'CREATE EXTENSION[^;]*;', sql, flags=re.IGNORECASE)
+            sql_without_extensions = re.sub(r'CREATE EXTENSION[^;]*;', '', sql, flags=re.IGNORECASE)
+            
+            # Try extensions individually — tolerate insufficient privilege
+            # (the extension may already be installed by another app on shared DB)
+            for ext_sql in extension_statements:
+                try:
+                    cur = conn.cursor()
+                    cur.execute(ext_sql)
+                    conn.commit()
+                    print(f"DEBUG: Executed extension: {ext_sql.strip()}")
+                except psycopg2.errors.InsufficientPrivilege:
+                    conn.rollback()
+                    # Check if it's already installed — if so, we're fine
+                    ext_name_match = re.search(r'CREATE EXTENSION(?:\s+IF\s+NOT\s+EXISTS)?\s+"?(\w+)"?', ext_sql, re.IGNORECASE)
+                    if ext_name_match:
+                        ext_name = ext_name_match.group(1)
+                        cur = conn.cursor()
+                        cur.execute("SELECT 1 FROM pg_extension WHERE extname = %s;", (ext_name,))
+                        if cur.fetchone():
+                            print(f"DEBUG: Extension '{ext_name}' already installed — continuing")
+                            conn.commit()
+                        else:
+                            print(f"WARNING: Extension '{ext_name}' not installed and we lack privilege to install it. App may fail when it tries to use it.")
+                            conn.commit()
+                except Exception as e:
+                    conn.rollback()
+                    print(f"WARNING: Could not execute extension SQL: {e}")
+
+            PGVECTOR_AVAILABLE = _probe_pgvector(conn)
+            if not PGVECTOR_AVAILABLE:
+                print(
+                    "WARNING: pgvector extension unavailable — using BYTEA embeddings "
+                    "and in-app cosine similarity (suitable for managed Postgres without vector)."
+                )
+                sql_without_extensions = _sql_without_pgvector(sql)
+            
+            # Now run the rest of the schema (tables, indexes, etc.)
+            cur = conn.cursor()
+            cur.execute(sql_without_extensions)
+            conn.commit()
+            
+            if PGVECTOR_AVAILABLE:
+                try:
+                    register_vector(conn)
+                except Exception as e:
+                    print(f"WARNING: Could not register pgvector types: {e}")
 
         # Backfill schema changes for existing databases.
         for ddl in [
@@ -146,14 +212,19 @@ def init_db():
                 cur.execute(ddl[0] if is_sqlite else ddl[1])
                 conn.commit()
             except Exception:
-                pass
+                try:
+                    conn.rollback()
+                except:
+                    pass
             
         print(f"DEBUG: Database initialized successfully ({'SQLite' if is_sqlite else 'PostgreSQL'}).")
     except Exception as e:
         if not is_sqlite:
-            conn.rollback()
+            try:
+                conn.rollback()
+            except:
+                pass
         print(f"ERROR: Database initialization failed: {e}")
-        # Don't raise if it's just a table already exists error in sqlite
         if not is_sqlite:
             raise
     finally:

@@ -1,7 +1,9 @@
+.env
+.env.local
+.env.development
+.env*.local
 node_modules
 .next
+.git
 backend/venv
 backend/__pycache__
-.git
-.env.local
-npm-debug.log

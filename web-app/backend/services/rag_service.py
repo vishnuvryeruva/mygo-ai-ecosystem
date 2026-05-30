@@ -9,7 +9,7 @@ import psycopg2.extras
 from pgvector.psycopg2 import register_vector
 from docx import Document
 
-from db import get_conn
+from db import get_conn, pgvector_available
 from services.openai_service import OpenAIService
 
 # Supported file extensions for extraction from ZIP files
@@ -32,6 +32,10 @@ class RAGService:
         from db import SQLiteConnectionProxy
         import sqlite3
         return isinstance(conn, SQLiteConnectionProxy) or isinstance(conn, sqlite3.Connection)
+
+    def _use_app_side_vectors(self, conn):
+        """SQLite or PostgreSQL without pgvector — store/query embeddings in Python."""
+        return self._is_sqlite(conn) or not pgvector_available()
 
     # ── Embedding ─────────────────────────────────────────────────────────────
 
@@ -86,28 +90,23 @@ class RAGService:
                       embedding, metadata: dict):
         """Insert a single chunk row into the documents table."""
         is_sqlite = self._is_sqlite(conn)
+        app_side = self._use_app_side_vectors(conn)
         
-        # Convert embedding list to bytes/blob for SQLite if necessary
-        if is_sqlite and isinstance(embedding, list):
+        # Serialize embeddings when pgvector is not available (SQLite or managed Postgres)
+        if app_side and isinstance(embedding, list):
             import json
             embedding_val = json.dumps(embedding).encode('utf-8')
         else:
             embedding_val = embedding
 
-        with conn.cursor() as cur:
-            if is_sqlite:
-                # SQLite ON CONFLICT syntax
-                sql = """
+        insert_sql = """
                 INSERT INTO documents (
                     id, document_id, document_name, content, embedding,
                     source, doc_type, project, updated_by, updated_on,
                     web_url, is_placeholder, html_content,
                     uuid, display_id, project_id, scope_id
                 ) VALUES (
-                    ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?,
-                    ?, ?, ?,
-                    ?, ?, ?, ?
+                    {placeholders}
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     content = EXCLUDED.content,
@@ -126,67 +125,28 @@ class RAGService:
                     project_id = EXCLUDED.project_id,
                     scope_id = EXCLUDED.scope_id
                 """
-                # SQLite proxy handles %s to ? but we can use ? directly if we know it's sqlite
-                params = (
-                    chunk_id, doc_id, metadata.get('document_name', ''), content, embedding_val,
-                    metadata.get('source', 'File Upload'), metadata.get('type', 'Unknown'),
-                    metadata.get('project', 'N/A'), metadata.get('updatedBy', 'System'),
-                    metadata.get('updatedOn', 'N/A'), metadata.get('webUrl', ''),
-                    metadata.get('is_placeholder', False), metadata.get('html_content', ''),
-                    metadata.get('uuid', ''), metadata.get('displayId', ''),
-                    metadata.get('projectId', ''), metadata.get('scopeId', '')
-                )
-                cur.execute(sql.replace('%s', '?'), params)
-            else:
+        params = (
+            chunk_id, doc_id, metadata.get('document_name', ''), content, embedding_val,
+            metadata.get('source', 'File Upload'), metadata.get('type', 'Unknown'),
+            metadata.get('project', 'N/A'), metadata.get('updatedBy', 'System'),
+            metadata.get('updatedOn', 'N/A'), metadata.get('webUrl', ''),
+            metadata.get('is_placeholder', False), metadata.get('html_content', ''),
+            metadata.get('uuid', ''), metadata.get('displayId', ''),
+            metadata.get('projectId', ''), metadata.get('scopeId', '')
+        )
+
+        with conn.cursor() as cur:
+            if is_sqlite:
+                placeholders = ", ".join(["?"] * 17)
                 cur.execute(
-                    """
-                    INSERT INTO documents (
-                        id, document_id, document_name, content, embedding,
-                        source, doc_type, project, updated_by, updated_on,
-                        web_url, is_placeholder, html_content,
-                        uuid, display_id, project_id, scope_id
-                    ) VALUES (
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s,
-                        %s, %s, %s, %s
-                    )
-                    ON CONFLICT (id) DO UPDATE SET
-                        content = EXCLUDED.content,
-                        embedding = EXCLUDED.embedding,
-                        html_content = EXCLUDED.html_content,
-                        updated_on = EXCLUDED.updated_on,
-                        document_name = EXCLUDED.document_name,
-                        source = EXCLUDED.source,
-                        doc_type = EXCLUDED.doc_type,
-                        project = EXCLUDED.project,
-                        updated_by = EXCLUDED.updated_by,
-                        web_url = EXCLUDED.web_url,
-                        is_placeholder = EXCLUDED.is_placeholder,
-                        uuid = EXCLUDED.uuid,
-                        display_id = EXCLUDED.display_id,
-                        project_id = EXCLUDED.project_id,
-                        scope_id = EXCLUDED.scope_id
-                    """,
-                    (
-                        chunk_id,
-                        doc_id,
-                        metadata.get('document_name', ''),
-                        content,
-                        embedding,
-                        metadata.get('source', 'File Upload'),
-                        metadata.get('type', 'Unknown'),
-                        metadata.get('project', 'N/A'),
-                        metadata.get('updatedBy', 'System'),
-                        metadata.get('updatedOn', 'N/A'),
-                        metadata.get('webUrl', ''),
-                        metadata.get('is_placeholder', False),
-                        metadata.get('html_content', ''),
-                        metadata.get('uuid', ''),
-                        metadata.get('displayId', ''),
-                        metadata.get('projectId', ''),
-                        metadata.get('scopeId', ''),
-                    )
+                    insert_sql.format(placeholders=placeholders),
+                    params,
+                )
+            else:
+                placeholders = ", ".join(["%s"] * 17)
+                cur.execute(
+                    insert_sql.format(placeholders=placeholders),
+                    params,
                 )
 
     # ── Public API ─────────────────────────────────────────────────────────────
@@ -478,11 +438,11 @@ class RAGService:
         query_embedding = self._create_embedding(query_text)
 
         conn = get_conn()
-        is_sqlite = self._is_sqlite(conn)
+        app_side = self._use_app_side_vectors(conn)
         
         try:
-            if is_sqlite:
-                # Python-based cosine similarity for SQLite
+            if app_side:
+                # Python-based cosine similarity (SQLite or Postgres without pgvector)
                 import json
                 import math
                 
