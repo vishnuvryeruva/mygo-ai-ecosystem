@@ -1,7 +1,7 @@
 applications:
   - name: mygo-backend
     docker:
-      image: vishnuvryeruva98/mygo-backend:v202606182242
+      image: vishnuvryeruva98/mygo-backend:v3
     memory: 512M
     disk_quota: 2G
     instances: 1
@@ -10,7 +10,7 @@ applications:
 
   - name: mygo-frontend
     docker:
-      image: vishnuvryeruva98/mygo-frontend:v202606182242
+      image: vishnuvryeruva98/mygo-frontend:v3
     memory: 1G
     disk_quota: 2G
     instances: 1
