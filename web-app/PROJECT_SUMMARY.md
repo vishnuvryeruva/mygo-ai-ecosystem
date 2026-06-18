@@ -142,7 +142,7 @@ All endpoints are prefixed with `/api/`:
 ### Environment Variables
 - `OPENAI_API_KEY` - OpenAI API key (configured)
 - `OPENAI_MODEL` - Model to use (default: gpt-4o-mini)
-- `FLASK_PORT` - Backend port (default: 5000)
+- `PORT` - Backend port (default: 5000)
 - `VECTOR_DB_PATH` - Path for ChromaDB storage
 
 ## Integration with Eclipse Plugin

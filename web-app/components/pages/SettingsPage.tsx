@@ -1,7 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import axios from 'axios'
+import { authHeaders, clearAuth, getAuthToken } from '@/lib/auth'
 
 /* ─── Tab definitions ──────────────────────────────────── */
 const settingsTabs = [
@@ -123,13 +125,17 @@ const emptyConnection: ConnectionForm = {
 /* ═══════════════════════════════════════════════════════════
    COMPONENT
    ═══════════════════════════════════════════════════════════ */
+
+type LlmProvider = 'openai' | 'claude' | 'gemini' | 'ai_core'
+
 export default function SettingsPage() {
+    const router = useRouter()
     const [activeTab, setActiveTab] = useState('prompts')
 
     /* Auth state */
     const [currentUser, setCurrentUser] = useState<{ id: string; name: string; email: string; role: string; llm_provider?: string } | null>(null)
     const [isLoadingAuth, setIsLoadingAuth] = useState(true)
-    const [selectedLlmProvider, setSelectedLlmProvider] = useState<'openai' | 'claude' | 'gemini'>('openai')
+    const [selectedLlmProvider, setSelectedLlmProvider] = useState<LlmProvider>('openai')
     const [isSavingLlmProvider, setIsSavingLlmProvider] = useState(false)
 
     /* API key state — values are masked on load, real on edit */
@@ -192,25 +198,24 @@ export default function SettingsPage() {
     const fetchCurrentUser = async () => {
         setIsLoadingAuth(true)
         try {
-            const token = localStorage.getItem('mygo-token')
+            const token = getAuthToken()
             if (!token) {
-                console.log('No token found in localStorage')
-                setIsLoadingAuth(false)
+                clearAuth()
+                router.push('/login')
                 return
             }
 
-            console.log('Fetching current user with token:', token.substring(0, 20) + '...')
             const res = await axios.get('/api/auth/me', {
                 headers: { Authorization: `Bearer ${token}` }
             })
-            console.log('Current user fetched:', res.data)
             setCurrentUser(res.data)
-            setSelectedLlmProvider((res.data?.llm_provider || 'openai') as 'openai' | 'claude' | 'gemini')
+            setSelectedLlmProvider((res.data?.llm_provider || 'openai') as LlmProvider)
             setApiKeys({ openai: res.data?.api_keys?.openai || '', claude: res.data?.api_keys?.claude || '', gemini: res.data?.api_keys?.gemini || '' })
             setAgentProviders(res.data?.agent_providers || {})
         } catch (err) {
             console.error('Failed to fetch current user:', err)
-            localStorage.removeItem('mygo-token')
+            clearAuth()
+            router.push('/login')
         } finally {
             setIsLoadingAuth(false)
         }
@@ -231,9 +236,8 @@ export default function SettingsPage() {
     const refreshRoles = async () => {
         setIsLoadingRoles(true)
         try {
-            const token = localStorage.getItem('mygo-token')
             const res = await axios.get('/api/roles', {
-                headers: token ? { Authorization: `Bearer ${token}` } : {}
+                headers: authHeaders()
             })
             setRoles(res.data.roles || [])
         } catch (err) {
@@ -246,9 +250,8 @@ export default function SettingsPage() {
     const refreshUsers = async () => {
         setIsLoadingUsers(true)
         try {
-            const token = localStorage.getItem('mygo-token')
             const res = await axios.get('/api/users', {
-                headers: token ? { Authorization: `Bearer ${token}` } : {}
+                headers: authHeaders()
             })
             setUsers(res.data.users || [])
         } catch (err) {
@@ -338,12 +341,11 @@ export default function SettingsPage() {
     const handleAddRole = async () => {
         if (!newRoleName.trim()) return
         try {
-            const token = localStorage.getItem('mygo-token')
             await axios.post('/api/roles', {
                 name: newRoleName.trim(),
                 permissions: ['Read']
             }, {
-                headers: token ? { Authorization: `Bearer ${token}` } : {}
+                headers: authHeaders()
             })
             await refreshRoles()
             setNewRoleName('')
@@ -356,9 +358,8 @@ export default function SettingsPage() {
     const handleDeleteRole = async (id: string) => {
         if (!confirm('Are you sure you want to delete this role?')) return
         try {
-            const token = localStorage.getItem('mygo-token')
             await axios.delete(`/api/roles/${id}`, {
-                headers: token ? { Authorization: `Bearer ${token}` } : {}
+                headers: authHeaders()
             })
             await refreshRoles()
         } catch (err) {
@@ -377,12 +378,11 @@ export default function SettingsPage() {
             : [...role.permissions, permission]
 
         try {
-            const token = localStorage.getItem('mygo-token')
             await axios.put(`/api/roles/${roleId}`, {
                 name: role.name,
                 permissions: updatedPermissions
             }, {
-                headers: token ? { Authorization: `Bearer ${token}` } : {}
+                headers: authHeaders()
             })
             await refreshRoles()
         } catch (err) {
@@ -394,14 +394,13 @@ export default function SettingsPage() {
     const handleAddUser = async () => {
         if (!newUser.name.trim() || !newUser.email.trim() || !newUser.password.trim()) return
         try {
-            const token = localStorage.getItem('mygo-token')
             await axios.post('/api/users', {
                 name: newUser.name.trim(),
                 email: newUser.email.trim(),
                 password: newUser.password,
                 role: newUser.role
             }, {
-                headers: token ? { Authorization: `Bearer ${token}` } : {}
+                headers: authHeaders()
             })
             await refreshUsers()
             setNewUser({ name: '', email: '', password: '', role: 'Viewer' })
@@ -414,9 +413,8 @@ export default function SettingsPage() {
     const handleDeleteUser = async (id: string) => {
         if (!confirm('Are you sure you want to delete this user?')) return
         try {
-            const token = localStorage.getItem('mygo-token')
             await axios.delete(`/api/users/${id}`, {
-                headers: token ? { Authorization: `Bearer ${token}` } : {}
+                headers: authHeaders()
             })
             await refreshUsers()
         } catch (err: any) {
@@ -429,13 +427,20 @@ export default function SettingsPage() {
         setIsSavingLlmProvider(true)
         setSaveMessage('')
         try {
-            const token = localStorage.getItem('mygo-token')
+            const token = getAuthToken()
+            if (!token) {
+                setSaveMessage('Session expired. Please sign in again.')
+                clearAuth()
+                router.push('/login')
+                return
+            }
+
             await axios.put('/api/auth/preferences', {
                 llm_provider: selectedLlmProvider,
                 api_keys: apiKeys,
                 agent_providers: agentProviders,
             }, {
-                headers: token ? { Authorization: `Bearer ${token}` } : {}
+                headers: { Authorization: `Bearer ${token}` }
             })
             const stored = localStorage.getItem('mygo-user')
             if (stored) {
@@ -461,9 +466,10 @@ export default function SettingsPage() {
         switch (activeTab) {
             case 'ai-preferences': {
                 const providers = [
-                    { id: 'openai', label: 'OpenAI', logo: '🟢', hint: 'GPT-4.1 · Embeddings · Recommended' },
-                    { id: 'claude', label: 'Claude (Anthropic)', logo: '🟠', hint: 'claude-sonnet-4-6 · Long context' },
-                    { id: 'gemini', label: 'Gemini (Google)', logo: '🔵', hint: 'gemini-2.5-flash · Multimodal' },
+                    { id: 'openai', label: 'OpenAI', logo: '🟢', hint: 'GPT-4.1 · Embeddings · Recommended', serverConfigured: false },
+                    { id: 'claude', label: 'Claude (Anthropic)', logo: '🟠', hint: 'claude-sonnet-4-6 · Long context', serverConfigured: false },
+                    { id: 'gemini', label: 'Gemini (Google)', logo: '🔵', hint: 'gemini-2.5-flash · Multimodal', serverConfigured: false },
+                    { id: 'ai_core', label: 'SAP AI Core', logo: '🔷', hint: 'Generative AI Hub · Orchestration · Server env keys', serverConfigured: true },
                 ] as const
                 const agents = [
                     { id: 'ask-yoda', label: 'Ask Yoda' },
@@ -487,8 +493,8 @@ export default function SettingsPage() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 28 }}>
                             {providers.map(p => {
                                 const isDefault = selectedLlmProvider === p.id
-                                const keyVal = apiKeys[p.id] || ''
-                                const configured = !!keyVal
+                                const keyVal = p.serverConfigured ? '' : (apiKeys[p.id] || '')
+                                const configured = p.serverConfigured || !!keyVal
                                 return (
                                     <div
                                         key={p.id}
@@ -518,11 +524,17 @@ export default function SettingsPage() {
                                                     <span style={{ fontSize: 11, background: 'var(--primary)', color: '#fff', borderRadius: 4, padding: '1px 7px', fontWeight: 600 }}>Default</span>
                                                 )}
                                                 <span style={{ fontSize: 11, marginLeft: 'auto', color: configured ? '#16a34a' : '#9ca3af' }}>
-                                                    {configured ? '● Configured' : '○ No key set'}
+                                                    {p.serverConfigured
+                                                        ? '● Server env (AI_CORE_*)'
+                                                        : configured ? '● Configured' : '○ No key set'}
                                                 </span>
                                             </div>
                                             <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0, marginBottom: 8 }}>{p.hint}</p>
-                                            {/* API key input */}
+                                            {p.serverConfigured ? (
+                                                <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+                                                    Credentials are read from server environment variables. Check backend logs on Ask Yoda for connection diagnostics.
+                                                </p>
+                                            ) : (
                                             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                                                 <input
                                                     type={showKey[p.id] ? 'text' : 'password'}
@@ -540,6 +552,7 @@ export default function SettingsPage() {
                                                     {showKey[p.id] ? '🙈' : '👁️'}
                                                 </button>
                                             </div>
+                                            )}
                                         </div>
                                     </div>
                                 )
@@ -573,6 +586,7 @@ export default function SettingsPage() {
                                                     <option value="openai">OpenAI</option>
                                                     <option value="claude">Claude</option>
                                                     <option value="gemini">Gemini</option>
+                                                    <option value="ai_core">SAP AI Core</option>
                                                 </select>
                                             </td>
                                         </tr>

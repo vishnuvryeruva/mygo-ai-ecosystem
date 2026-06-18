@@ -150,7 +150,7 @@ The `.env` file in `web-app/` contains:
 ```
 OPENAI_API_KEY=<your-key>
 OPENAI_MODEL=gpt-4o-mini
-FLASK_PORT=5000
+PORT=5000
 VECTOR_DB_PATH=./vector_db
 ```
 

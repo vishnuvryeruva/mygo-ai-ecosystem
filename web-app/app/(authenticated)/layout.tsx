@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
+import { getAuthToken } from '@/lib/auth'
 import Sidebar from '@/components/Sidebar'
 import TopHeader from '@/components/TopHeader'
 import ChatbotWidget from '@/components/ChatbotWidget'
@@ -46,6 +47,11 @@ export default function AuthenticatedLayout({
         task?: string;
         autoGenerate?: boolean;
     } | null>(null)
+
+    // Sync auth token from cookie → localStorage (middleware uses cookie; APIs use Bearer token)
+    useEffect(() => {
+        getAuthToken()
+    }, [])
 
     // Read user name from localStorage
     useEffect(() => {

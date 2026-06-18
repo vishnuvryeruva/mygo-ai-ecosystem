@@ -5,16 +5,18 @@ from openai import OpenAI
 from anthropic import Anthropic
 import google.generativeai as genai
 
+from services.ai_core_service import AICoreService
+
 load_dotenv()
 
 
 class OpenAIService:
     """
     Backward-compatible AI service.
-    Despite the historical name, this service can route to OpenAI, Claude, or Gemini.
+    Despite the historical name, this service can route to OpenAI, Claude, Gemini, or SAP AI Core.
     """
 
-    VALID_PROVIDERS = {"openai", "claude", "gemini"}
+    VALID_PROVIDERS = {"openai", "claude", "gemini", "ai_core"}
 
     def __init__(self):
         self.openai_model = os.getenv("OPENAI_MODEL", "gpt-4.1")
@@ -36,6 +38,8 @@ class OpenAIService:
         if gemini_key:
             genai.configure(api_key=gemini_key)
         self._resolved_gemini_model = None
+
+        self.ai_core_service = AICoreService()
 
     def _normalize_provider(self, provider: Optional[str]) -> str:
         normalized = (provider or "openai").strip().lower()
@@ -162,6 +166,20 @@ class OpenAIService:
             except Exception as e:
                 self._log_provider_failure("gemini", model_name, e)
                 print("LLM_ROUTER_FALLBACK: from=gemini to=openai")
+                return self._get_openai_response(messages, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode)
+
+        if resolved_provider == "ai_core":
+            try:
+                self._log_model_selection("ai_core", self.ai_core_service.model_name)
+                return self.ai_core_service.chat_completion(
+                    messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    json_mode=json_mode,
+                )
+            except Exception as e:
+                self._log_provider_failure("ai_core", self.ai_core_service.model_name, e)
+                print("LLM_ROUTER_FALLBACK: from=ai_core to=openai")
                 return self._get_openai_response(messages, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode)
 
         # Default OpenAI path

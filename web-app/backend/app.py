@@ -230,7 +230,7 @@ def get_llm_provider_for_user(user_id: Optional[str], agent_id: Optional[str] = 
         try:
             agent_providers = json.loads(row.get('agent_providers') or '{}')
             agent_specific = agent_providers.get(agent_id, '').lower()
-            if agent_specific in ('openai', 'claude', 'gemini'):
+            if agent_specific in ('openai', 'claude', 'gemini', 'ai_core'):
                 print(f"LLM_PREF: user_id={user_id} agent={agent_id} provider={agent_specific} (agent-specific)")
                 return agent_specific
         except Exception:
@@ -291,7 +291,7 @@ def health():
             "DATABASE_URL_set": bool(os.getenv("DATABASE_URL")),
             "OPENAI_API_KEY_set": bool(os.getenv("OPENAI_API_KEY")),
             "NEXT_PUBLIC_BACKEND_URL": os.getenv("NEXT_PUBLIC_BACKEND_URL", "not set"),
-            "FLASK_PORT": os.getenv("FLASK_PORT", "5000 (default)"),
+            "PORT": os.getenv("PORT", "5000 (default)"),
         }
     })
 
@@ -410,11 +410,11 @@ def me():
 @token_required
 def update_user_preferences():
     data = request.get_json() or {}
-    allowed_providers = {'openai', 'claude', 'gemini'}
+    allowed_providers = {'openai', 'claude', 'gemini', 'ai_core'}
 
     llm_provider = (data.get('llm_provider') or '').strip().lower()
     if llm_provider not in allowed_providers:
-        return jsonify({'error': 'llm_provider must be one of: openai, claude, gemini'}), 400
+        return jsonify({'error': 'llm_provider must be one of: openai, claude, gemini, ai_core'}), 400
 
     # Validate and sanitise agent_providers map
     raw_agent_providers = data.get('agent_providers') or {}
@@ -456,11 +456,36 @@ def update_user_preferences():
 
     return jsonify({'message': 'Preferences updated successfully', 'llm_provider': llm_provider})
 
+def _log_ai_core_diagnostics(llm_provider: str, agent_id: str = 'ask-yoda'):
+    """Console diagnostics for SAP AI Core env credentials (ask-yoda and similar)."""
+    if llm_provider != 'ai_core':
+        return
+    try:
+        from services.ai_core_service import AICoreService
+        svc = AICoreService()
+        status = svc.config_status()
+        print(f"ASK_YODA_AI_CORE: agent={agent_id} provider=ai_core config={status}")
+        verify = svc.verify_connection()
+        if verify.get('ok'):
+            print(
+                f"ASK_YODA_AI_CORE: connection_ok deployment_id={verify.get('deployment_id')} "
+                f"model={status.get('model')}"
+            )
+        else:
+            print(f"ASK_YODA_AI_CORE: connection_failed error={verify.get('error')}")
+    except Exception as exc:
+        print(f"ASK_YODA_AI_CORE: diagnostic_error={exc}")
+
+
 # Ask Yoda - RAG-based Q&A
 @app.route('/api/ask-yoda', methods=['POST'])
 def ask_yoda():
     try:
-        llm_provider = get_llm_provider_for_user(get_optional_current_user_id())
+        user_id = get_optional_current_user_id()
+        llm_provider = get_llm_provider_for_user(user_id, agent_id='ask-yoda')
+        print(f"ASK_YODA: user_id={user_id or 'anonymous'} llm_provider={llm_provider}")
+        _log_ai_core_diagnostics(llm_provider, agent_id='ask-yoda')
+
         data = request.json
         query = data.get('query', '')
         
@@ -469,6 +494,8 @@ def ask_yoda():
         
         # Use RAG to get relevant context and generate answer
         result = rag_service.query(query, llm_provider=llm_provider)
+        if llm_provider == 'ai_core':
+            print(f"ASK_YODA_AI_CORE: query_completed answer_length={len(result.get('answer') or '')}")
         
         return jsonify({
             "answer": result["answer"],
