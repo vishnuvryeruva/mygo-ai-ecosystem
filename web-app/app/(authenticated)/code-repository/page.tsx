@@ -5,6 +5,7 @@ import axios from 'axios'
 import AIAgentsDropdown from '@/components/AIAgentsDropdown'
 import FetchCodeModal from '@/components/modals/FetchCodeModal'
 import RichTextResponse from '@/components/RichTextResponse'
+import { authHeaders } from '@/lib/auth'
 
 // SAP Object Type Icons mapping
 const TypeIcon = ({ type }: { type: string }) => {
@@ -396,7 +397,7 @@ export default function CodeHubPage() {
                 }
             }
 
-            const aiRes = await axios.post(endpoint, payload)
+            const aiRes = await axios.post(endpoint, payload, { headers: authHeaders() })
             
             // Format response if specialized
             let finalOutput = ''
