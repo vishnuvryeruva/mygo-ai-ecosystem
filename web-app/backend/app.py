@@ -538,6 +538,7 @@ def list_documents():
         project = request.args.get('project', '').strip()
         date_from = request.args.get('date_from', '').strip()
         date_to = request.args.get('date_to', '').strip()
+        latest_only = request.args.get('latest_only', 'true').lower() != 'false'
 
         result = rag_service.list_documents(
             page=page,
@@ -548,6 +549,7 @@ def list_documents():
             project=project,
             date_from=date_from,
             date_to=date_to,
+            latest_only=latest_only,
         )
         return jsonify(result)
     except Exception as e:
@@ -1406,6 +1408,7 @@ def calm_list_documents(source_id):
         project_id = request.args.get('projectId')
         scope_id = request.args.get('scopeId')
         include_test_cases = request.args.get('includeTestCases', 'false').lower() == 'true'
+        latest_only = request.args.get('latestOnly', 'true').lower() != 'false'
         
         source = source_config_service.get_source(source_id)
         if not source:
@@ -1417,7 +1420,8 @@ def calm_list_documents(source_id):
         result = service.list_documents(  # Returns {documents, isDemo, error?}
             process_id=process_id,
             document_type=doc_type,
-            project_id=project_id
+            project_id=project_id,
+            latest_only=latest_only,
         )
         
         # Fetch test cases if requested
@@ -1460,6 +1464,87 @@ def calm_list_documents(source_id):
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/calm/<source_id>/documents/<document_id>/versions', methods=['GET'])
+def calm_list_document_versions(source_id, document_id):
+    """List all versions of a Cloud ALM document."""
+    try:
+        source = source_config_service.get_source(source_id)
+        if not source:
+            return jsonify({"error": "Source not found"}), 404
+
+        service = get_calm_service(source.get('config'))
+        versions = service.list_document_versions(document_id)
+
+        normalized = []
+        for doc in versions:
+            item = _normalize_document_structure(doc)
+            normalized.append({
+                'documentId': item.get('id'),
+                'name': item.get('name'),
+                'version': doc.get('version', item.get('metadata', {}).get('version', 1)),
+                'isLatest': doc.get('isLatest', item.get('metadata', {}).get('isLatest', True)),
+                'displayId': doc.get('displayId', item.get('metadata', {}).get('displayId', '')),
+                'updatedBy': item.get('metadata', {}).get('updatedBy', 'System'),
+                'updatedOn': item.get('metadata', {}).get('updatedOn'),
+                'modifiedAt': doc.get('modifiedAt'),
+            })
+
+        return jsonify({'versions': normalized, 'sourceId': source_id})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/documents/<document_id>/versions', methods=['GET'])
+def list_document_versions(document_id):
+    """List synced document versions from local store, with optional live CALM fallback."""
+    try:
+        local_versions = rag_service.list_document_versions(document_id)
+        source_id = request.args.get('sourceId')
+        live_versions = []
+
+        if source_id or not local_versions:
+            try:
+                if not source_id:
+                    sources = source_config_service.list_sources()
+                    calm_source = next((s for s in sources if s['type'] == 'CALM'), None)
+                    if calm_source:
+                        source_id = calm_source['id']
+
+                if source_id:
+                    service = get_calm_service(
+                        source_config_service.get_source(source_id).get('config')
+                    )
+                    calm_versions = service.list_document_versions(document_id)
+                    live_versions = [{
+                        'documentId': doc.get('uuid') or doc.get('id'),
+                        'name': doc.get('title') or doc.get('name'),
+                        'version': doc.get('version', 1),
+                        'isLatest': doc.get('isLatest', True),
+                        'displayId': doc.get('displayId', ''),
+                        'updatedOn': doc.get('modifiedAt') or doc.get('createdAt'),
+                        'source': 'live',
+                    } for doc in calm_versions]
+            except Exception as live_err:
+                print(f"Could not fetch live versions for {document_id}: {live_err}")
+
+        versions = live_versions if live_versions and not local_versions else local_versions
+        if not versions and live_versions:
+            versions = live_versions
+
+        return jsonify({
+            'versions': versions,
+            'documentId': document_id,
+            'sourceId': source_id,
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/test-cases/<test_case_id>', methods=['GET'])
 def get_test_case(test_case_id):
@@ -1850,6 +1935,9 @@ def _normalize_document_structure(doc: dict) -> dict:
         'sourceCode': doc.get('sourceCode'),
         'createdAt': doc.get('createdAt'),
         'modifiedAt': doc.get('modifiedAt'),
+        'version': doc.get('version', 1),
+        'isLatest': doc.get('isLatest', True),
+        'displayId': doc.get('displayId'),
         'updatedOn': updated_on,
         'updatedBy': updated_by,
         'content': doc.get('content'),

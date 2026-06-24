@@ -33,7 +33,10 @@ CREATE TABLE IF NOT EXISTS documents (
     uuid            TEXT,
     display_id      TEXT,
     project_id      TEXT,
-    scope_id        TEXT
+    scope_id        TEXT,
+    version         INTEGER DEFAULT 1,
+    is_latest       BOOLEAN DEFAULT TRUE,
+    calm_display_id TEXT
 );
 
 -- Cosine similarity index for fast nearest-neighbour search

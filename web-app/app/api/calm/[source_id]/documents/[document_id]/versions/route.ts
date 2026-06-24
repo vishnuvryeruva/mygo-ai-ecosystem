@@ -1,0 +1,38 @@
+import { NextRequest, NextResponse } from 'next/server'
+
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001'
+
+export async function GET(
+  req: NextRequest,
+  { params }: { params: { source_id: string; document_id: string } }
+) {
+  try {
+    const { source_id, document_id } = params
+
+    const backendRes = await fetch(
+      `${BACKEND_URL}/api/calm/${source_id}/documents/${encodeURIComponent(document_id)}/versions`,
+      {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+      }
+    )
+
+    if (!backendRes.ok) {
+      const errorText = await backendRes.text()
+      return NextResponse.json(
+        { error: errorText || 'Failed to fetch document versions from CALM' },
+        { status: backendRes.status }
+      )
+    }
+
+    const data = await backendRes.json()
+    return NextResponse.json(data)
+  } catch (error) {
+    console.error('CALM document versions proxy error:', error)
+    return NextResponse.json(
+      { error: 'Failed to reach backend' },
+      { status: 500 }
+    )
+  }
+}

@@ -206,6 +206,12 @@ def init_db():
              "ALTER TABLE users ADD COLUMN IF NOT EXISTS api_keys TEXT NOT NULL DEFAULT '{}'"),
             ("ALTER TABLE users ADD COLUMN agent_providers TEXT NOT NULL DEFAULT '{}'",
              "ALTER TABLE users ADD COLUMN IF NOT EXISTS agent_providers TEXT NOT NULL DEFAULT '{}'"),
+            ("ALTER TABLE documents ADD COLUMN version INTEGER DEFAULT 1",
+             "ALTER TABLE documents ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1"),
+            ("ALTER TABLE documents ADD COLUMN is_latest BOOLEAN DEFAULT 1",
+             "ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_latest BOOLEAN DEFAULT TRUE"),
+            ("ALTER TABLE documents ADD COLUMN calm_display_id TEXT",
+             "ALTER TABLE documents ADD COLUMN IF NOT EXISTS calm_display_id TEXT"),
         ]:
             try:
                 cur = conn.cursor()

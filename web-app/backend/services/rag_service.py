@@ -104,7 +104,8 @@ class RAGService:
                     id, document_id, document_name, content, embedding,
                     source, doc_type, project, updated_by, updated_on,
                     web_url, is_placeholder, html_content,
-                    uuid, display_id, project_id, scope_id
+                    uuid, display_id, project_id, scope_id,
+                    version, is_latest, calm_display_id
                 ) VALUES (
                     {placeholders}
                 )
@@ -123,7 +124,10 @@ class RAGService:
                     uuid = EXCLUDED.uuid,
                     display_id = EXCLUDED.display_id,
                     project_id = EXCLUDED.project_id,
-                    scope_id = EXCLUDED.scope_id
+                    scope_id = EXCLUDED.scope_id,
+                    version = EXCLUDED.version,
+                    is_latest = EXCLUDED.is_latest,
+                    calm_display_id = EXCLUDED.calm_display_id
                 """
         params = (
             chunk_id, doc_id, metadata.get('document_name', ''), content, embedding_val,
@@ -132,18 +136,20 @@ class RAGService:
             metadata.get('updatedOn', 'N/A'), metadata.get('webUrl', ''),
             metadata.get('is_placeholder', False), metadata.get('html_content', ''),
             metadata.get('uuid', ''), metadata.get('displayId', ''),
-            metadata.get('projectId', ''), metadata.get('scopeId', '')
+            metadata.get('projectId', ''), metadata.get('scopeId', ''),
+            metadata.get('version', 1), metadata.get('isLatest', True),
+            metadata.get('calmDisplayId', metadata.get('displayId', ''))
         )
 
         with conn.cursor() as cur:
             if is_sqlite:
-                placeholders = ", ".join(["?"] * 17)
+                placeholders = ", ".join(["?"] * 20)
                 cur.execute(
                     insert_sql.format(placeholders=placeholders),
                     params,
                 )
             else:
-                placeholders = ", ".join(["%s"] * 17)
+                placeholders = ", ".join(["%s"] * 20)
                 cur.execute(
                     insert_sql.format(placeholders=placeholders),
                     params,
@@ -202,6 +208,10 @@ class RAGService:
         display_id = meta.get('displayId', '')
         project_id = meta.get('projectId', '')
         scope_id = meta.get('scopeId', '')
+        version = meta.get('version', 1)
+        is_latest = meta.get('isLatest', True)
+        if isinstance(is_latest, str):
+            is_latest = is_latest.lower() in ('true', '1', 'yes')
 
         # Strip HTML tags to get plain text for embeddings
         plain_text = re.sub(r'<[^>]+>', ' ', html_content)
@@ -226,6 +236,9 @@ class RAGService:
             'displayId': display_id,
             'projectId': project_id,
             'scopeId': scope_id,
+            'version': version,
+            'isLatest': is_latest,
+            'calmDisplayId': display_id,
         }
 
         chunks = self._chunk_text(plain_text, chunk_size=500, overlap=50)
@@ -279,6 +292,10 @@ class RAGService:
             display_id = meta.get('displayId', '')
             project_id = meta.get('projectId', '')
             scope_id = meta.get('scopeId', '')
+            version = meta.get('version', 1)
+            is_latest = meta.get('isLatest', True)
+            if isinstance(is_latest, str):
+                is_latest = is_latest.lower() in ('true', '1', 'yes')
 
             already_exists = self.check_document_exists(doc_id)
 
@@ -302,6 +319,9 @@ class RAGService:
                 'displayId': display_id,
                 'projectId': project_id,
                 'scopeId': scope_id,
+                'version': version,
+                'isLatest': is_latest,
+                'calmDisplayId': display_id,
                 'html_content': '',
             }
 
@@ -573,7 +593,7 @@ class RAGService:
 
     def list_documents(self, page: int = 1, page_size: int = 10, search: str = '',
                        source: str = '', doc_type: str = '', project: str = '',
-                       date_from: str = '', date_to: str = ''):
+                       date_from: str = '', date_to: str = '', latest_only: bool = True):
         """List unique documents with optional filtering and pagination.
 
         Returns a dict with keys: documents (list), total (int), page (int), page_size (int), total_pages (int).
@@ -609,6 +629,8 @@ class RAGService:
                 if date_to:
                     where_clauses.append("updated_on <= ?")
                     params.append(date_to + "T23:59:59")
+                if latest_only:
+                    where_clauses.append("(is_latest = 1 OR is_latest IS NULL)")
 
                 where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
@@ -628,6 +650,7 @@ class RAGService:
                         SELECT
                             document_id, document_name, source, doc_type, project,
                             updated_by, updated_on, web_url, uuid, display_id,
+                            version, is_latest, calm_display_id,
                             MAX(length(content)) AS content_len,
                             COUNT(*) AS chunk_count
                         FROM documents
@@ -663,6 +686,8 @@ class RAGService:
                 if date_to:
                     where_clauses.append("d.updated_on <= %s")
                     params.append(date_to + "T23:59:59")
+                if latest_only:
+                    where_clauses.append("(d.is_latest = TRUE OR d.is_latest IS NULL)")
 
                 where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
@@ -695,6 +720,9 @@ class RAGService:
                                 d.web_url,
                                 d.uuid,
                                 d.display_id,
+                                d.version,
+                                d.is_latest,
+                                d.calm_display_id,
                                 length(d.content) AS content_len,
                                 (SELECT COUNT(*)::int FROM documents d2
                                  WHERE d2.document_id IS NOT DISTINCT FROM d.document_id) AS chunk_count
@@ -740,6 +768,9 @@ class RAGService:
                     'webUrl': row.get('web_url'),
                     'documentId': row.get('document_id'),
                     'uuid': uid or '',
+                    'version': row.get('version') or 1,
+                    'isLatest': row.get('is_latest') if row.get('is_latest') is not None else True,
+                    'displayId': row.get('calm_display_id') or row.get('display_id') or '',
                     'size': f"{size_kb:.1f} KB" if size_kb >= 1 else f"{estimated_size} bytes",
                     'chunks': chunk_count,
                 })
@@ -757,6 +788,140 @@ class RAGService:
             'page_size': page_size,
             'total_pages': max(1, total_pages),
         }
+
+    def list_document_versions(self, document_id: str) -> list:
+        """List all synced versions that share the same CALM display ID and project."""
+        conn = get_conn()
+        try:
+            is_sqlite = self._is_sqlite(conn)
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor if not is_sqlite else None) as cur:
+                if is_sqlite:
+                    cur.execute(
+                        """
+                        SELECT calm_display_id, display_id, project_id, project
+                        FROM documents
+                        WHERE document_id = ?
+                        LIMIT 1
+                        """,
+                        (document_id,),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT calm_display_id, display_id, project_id, project
+                        FROM documents
+                        WHERE document_id = %s
+                        LIMIT 1
+                        """,
+                        (document_id,),
+                    )
+                anchor = cur.fetchone()
+                if not anchor:
+                    return []
+                if is_sqlite:
+                    anchor = dict(anchor)
+
+                display_id = anchor.get('calm_display_id') or anchor.get('display_id')
+                project_id = anchor.get('project_id')
+                project = anchor.get('project')
+
+                if display_id and project_id:
+                    if is_sqlite:
+                        cur.execute(
+                            """
+                            SELECT DISTINCT document_id, document_name, version, is_latest,
+                                   updated_by, updated_on, uuid, calm_display_id, display_id
+                            FROM documents
+                            WHERE calm_display_id = ? AND project_id = ?
+                            ORDER BY version ASC
+                            """,
+                            (display_id, project_id),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            SELECT DISTINCT ON (document_id)
+                                document_id, document_name, version, is_latest,
+                                updated_by, updated_on, uuid, calm_display_id, display_id
+                            FROM documents
+                            WHERE calm_display_id = %s AND project_id = %s
+                            ORDER BY document_id, version ASC
+                            """,
+                            (display_id, project_id),
+                        )
+                elif display_id and project:
+                    if is_sqlite:
+                        cur.execute(
+                            """
+                            SELECT DISTINCT document_id, document_name, version, is_latest,
+                                   updated_by, updated_on, uuid, calm_display_id, display_id
+                            FROM documents
+                            WHERE calm_display_id = ? AND project = ?
+                            ORDER BY version ASC
+                            """,
+                            (display_id, project),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            SELECT DISTINCT ON (document_id)
+                                document_id, document_name, version, is_latest,
+                                updated_by, updated_on, uuid, calm_display_id, display_id
+                            FROM documents
+                            WHERE calm_display_id = %s AND project = %s
+                            ORDER BY document_id, version ASC
+                            """,
+                            (display_id, project),
+                        )
+                else:
+                    if is_sqlite:
+                        cur.execute(
+                            """
+                            SELECT DISTINCT document_id, document_name, version, is_latest,
+                                   updated_by, updated_on, uuid, calm_display_id, display_id
+                            FROM documents
+                            WHERE document_id = ?
+                            """,
+                            (document_id,),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            SELECT document_id, document_name, version, is_latest,
+                                   updated_by, updated_on, uuid, calm_display_id, display_id
+                            FROM documents
+                            WHERE document_id = %s
+                            LIMIT 1
+                            """,
+                            (document_id,),
+                        )
+
+                rows = cur.fetchall()
+                if is_sqlite:
+                    rows = [dict(r) for r in rows]
+
+                versions = []
+                for row in rows:
+                    uid = row.get('uuid')
+                    if uid is not None and hasattr(uid, 'hex'):
+                        uid = str(uid)
+                    versions.append({
+                        'documentId': row.get('document_id'),
+                        'name': row.get('document_name'),
+                        'version': row.get('version') or 1,
+                        'isLatest': row.get('is_latest') if row.get('is_latest') is not None else True,
+                        'updatedBy': row.get('updated_by') or 'System',
+                        'updatedOn': str(row.get('updated_on')) if row.get('updated_on') else None,
+                        'uuid': uid or row.get('document_id'),
+                        'displayId': row.get('calm_display_id') or row.get('display_id') or '',
+                    })
+                versions.sort(key=lambda v: v.get('version') or 0)
+                return versions
+        except Exception as e:
+            print(f"Error listing document versions for {document_id}: {e}")
+            return []
+        finally:
+            conn.close()
 
     def delete_document(self, identifier: str) -> bool:
         """Delete all chunks for a document. Matches document_id (CALM id / upload filename) or legacy chunk id prefix."""

@@ -51,6 +51,7 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
     const [isLoadingProjects, setIsLoadingProjects] = useState(false)
     const [projectLoadError, setProjectLoadError] = useState<string | null>(null)
     const [syncResult, setSyncResult] = useState<{ message: string; count: number; updated: number; added: number } | null>(null)
+    const [latestOnly, setLatestOnly] = useState(true)
 
     useEffect(() => {
         if (isOpen) {
@@ -112,7 +113,7 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
             // Fetch potential docs and test cases to sync
             setIsSyncing(true)
             try {
-                const res = await axios.get(`/api/calm/${selectedSource}/documents?projectId=${selectedProject}&includeTestCases=true`)
+                const res = await axios.get(`/api/calm/${selectedSource}/documents?projectId=${selectedProject}&includeTestCases=true&latestOnly=${latestOnly}`)
                 const docs = res.data.documents || []
                 const testCases = res.data.testCases || []
 
@@ -175,6 +176,9 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                             statusCode: doc.statusCode,
                             createdAt: doc.createdAt,
                             modifiedAt: doc.modifiedAt,
+                            version: doc.version,
+                            isLatest: doc.isLatest,
+                            displayId: doc.displayId,
                             source: sources.find(s => s.id === selectedSource)?.type || 'CALM',
                             project: projects.find(p => p.id === selectedProject)?.name || 'Unknown Project'
                         }
@@ -214,6 +218,7 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
         setDocsToSync([])
         setSelectedDocIds(new Set())
         setSyncStatus({})
+        setLatestOnly(true)
     }
 
     const toggleDocSelection = (docId: string) => {
@@ -320,9 +325,39 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                                 </div>
                             ) : (
                                 <>
-                                    <div className="mb-4 flex justify-between items-center">
+                                    <div className="mb-4 flex justify-between items-center flex-wrap gap-3">
                                         <p>Found <strong>{docsToSync.length}</strong> documents in this project.</p>
-                                        <div className="flex items-center gap-3">
+                                        <div className="flex items-center gap-3 flex-wrap">
+                                            <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={latestOnly}
+                                                    onChange={async (e) => {
+                                                        const checked = e.target.checked
+                                                        setLatestOnly(checked)
+                                                        if (selectedSource && selectedProject) {
+                                                            setIsSyncing(true)
+                                                            try {
+                                                                const res = await axios.get(`/api/calm/${selectedSource}/documents?projectId=${selectedProject}&includeTestCases=true&latestOnly=${checked}`)
+                                                                const docs = res.data.documents || []
+                                                                const testCases = res.data.testCases || []
+                                                                const allItems = [...docs, ...testCases]
+                                                                setDocsToSync(allItems)
+                                                                const itemIds = allItems.map((item: any) => item.uuid || item.id)
+                                                                const statusRes = await axios.post('/api/sync/check', { documentIds: itemIds })
+                                                                setSyncStatus(statusRes.data.syncStatus || {})
+                                                                setSelectedDocIds(new Set(itemIds))
+                                                            } catch (err) {
+                                                                console.error('Failed to refresh documents:', err)
+                                                            } finally {
+                                                                setIsSyncing(false)
+                                                            }
+                                                        }
+                                                    }}
+                                                    className="cursor-pointer"
+                                                />
+                                                <span>Latest versions only</span>
+                                            </label>
                                             <label className="flex items-center gap-2 text-sm cursor-pointer">
                                                 <input
                                                     type="checkbox"
@@ -378,6 +413,11 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                                                     <div className="flex-1 flex justify-between items-center">
                                                         <span className="flex-1">{doc.title || doc.name}</span>
                                                         <div className="flex items-center gap-2">
+                                                            {!isTestCase && doc.version && (
+                                                                <span className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
+                                                                    v{doc.version}{doc.isLatest === false ? '' : ' · latest'}
+                                                                </span>
+                                                            )}
                                                             <span
                                                                 className={`text-xs px-2 py-1 rounded ${isTestCase
                                                                         ? 'bg-purple-100 text-purple-700'

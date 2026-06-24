@@ -17,6 +17,18 @@ interface Document {
     webUrl?: string
     documentId?: string
     documentTypeCode?: string
+    version?: number
+    isLatest?: boolean
+    displayId?: string
+}
+
+interface DocumentVersion {
+    documentId: string
+    name: string
+    version: number
+    isLatest: boolean
+    updatedBy?: string
+    updatedOn?: string
 }
 
 interface PaginationMeta {
@@ -63,6 +75,7 @@ export default function DocumentHubPage() {
     const [projectFilter, setProjectFilter] = useState('')
     const [dateFrom, setDateFrom] = useState('')
     const [dateTo, setDateTo] = useState('')
+    const [latestOnly, setLatestOnly] = useState(true)
     const [currentPage, setCurrentPage] = useState(1)
 
     // Filter option lists (populated from first unfiltered fetch)
@@ -77,8 +90,10 @@ export default function DocumentHubPage() {
     const [isDeleting, setIsDeleting] = useState(false)
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
-    const [viewerDoc, setViewerDoc] = useState<{ name: string; content: string } | null>(null)
+    const [viewerDoc, setViewerDoc] = useState<{ name: string; content: string; documentId?: string; version?: number } | null>(null)
     const [isLoadingContent, setIsLoadingContent] = useState(false)
+    const [documentVersions, setDocumentVersions] = useState<DocumentVersion[]>([])
+    const [isLoadingVersions, setIsLoadingVersions] = useState(false)
 
     // Debounce search input
     const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -95,6 +110,7 @@ export default function DocumentHubPage() {
             if (projectFilter) params.set('project', projectFilter)
             if (dateFrom) params.set('date_from', dateFrom)
             if (dateTo) params.set('date_to', dateTo)
+            if (!latestOnly) params.set('latest_only', 'false')
 
             const res = await axios.get(`/api/documents?${params.toString()}`)
             const { documents: rawDocs, total, total_pages, page: pg, page_size } = res.data
@@ -118,6 +134,9 @@ export default function DocumentHubPage() {
                     updatedAt: isNaN(parsedTs) ? 0 : parsedTs,
                     webUrl: doc.webUrl || doc.metadata?.webUrl,
                     documentId: docId,
+                    version: doc.version ?? doc.metadata?.version ?? 1,
+                    isLatest: doc.isLatest ?? doc.metadata?.isLatest ?? true,
+                    displayId: doc.displayId || doc.metadata?.displayId || '',
                 }
             })
 
@@ -129,7 +148,7 @@ export default function DocumentHubPage() {
         } finally {
             setIsLoading(false)
         }
-    }, [search, sourceFilter, typeFilter, projectFilter, dateFrom, dateTo])
+    }, [search, sourceFilter, typeFilter, projectFilter, dateFrom, dateTo, latestOnly])
 
     // Load filter options once on mount (unfiltered, large page)
     useEffect(() => {
@@ -148,7 +167,7 @@ export default function DocumentHubPage() {
         fetchDocuments(1)
         setSelectedDocumentIds(new Set())
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [sourceFilter, typeFilter, projectFilter, dateFrom, dateTo])
+    }, [sourceFilter, typeFilter, projectFilter, dateFrom, dateTo, latestOnly])
 
     // Debounced search
     useEffect(() => {
@@ -202,11 +221,23 @@ export default function DocumentHubPage() {
         fetchDocuments(page)
     }
 
+    const loadDocumentContent = async (docId: string, docName: string, version?: number) => {
+        const res = await axios.get(`/api/documents/${encodeURIComponent(docId)}/view`)
+        setViewerDoc({
+            name: docName,
+            content: res.data.content || '',
+            documentId: docId,
+            version,
+        })
+    }
+
     const openDocumentViewer = async (doc: Document) => {
         const docId = doc.documentId || doc.id
         if (!docId) return
         setIsLoadingContent(true)
-        setViewerDoc({ name: doc.name, content: '' })
+        setIsLoadingVersions(true)
+        setDocumentVersions([])
+        setViewerDoc({ name: doc.name, content: '', documentId: docId, version: doc.version })
         try {
             // Check if this is a test case
             const isTestCase = doc.type === 'Manual Test Case' || (doc as any).documentTypeCode === 'TEST_CASE'
@@ -331,15 +362,39 @@ export default function DocumentHubPage() {
 
                 html += '</div>'
 
-                setViewerDoc({ name: doc.name, content: html })
+                setViewerDoc({ name: doc.name, content: html, documentId: docId, version: doc.version })
             } else {
-                // Regular document (CALM or File Upload)
-                const res = await axios.get(`/api/documents/${encodeURIComponent(docId)}/view`)
-                setViewerDoc({ name: doc.name, content: res.data.content || '' })
+                await loadDocumentContent(docId, doc.name, doc.version)
+
+                if (doc.source === 'CALM') {
+                    try {
+                        const versionsRes = await axios.get(`/api/documents/${encodeURIComponent(docId)}/versions`)
+                        const versions = versionsRes.data.versions || []
+                        if (versions.length > 1) {
+                            setDocumentVersions(versions)
+                        }
+                    } catch {
+                        // Version history is optional
+                    }
+                }
             }
         } catch (err: any) {
             const errMsg = err?.response?.data?.error || 'Failed to load content.'
-            setViewerDoc({ name: doc.name, content: `<p style="color:red">${errMsg}</p>` })
+            setViewerDoc({ name: doc.name, content: `<p style="color:red">${errMsg}</p>`, documentId: docId, version: doc.version })
+        } finally {
+            setIsLoadingContent(false)
+            setIsLoadingVersions(false)
+        }
+    }
+
+    const switchDocumentVersion = async (version: DocumentVersion) => {
+        if (!version.documentId) return
+        setIsLoadingContent(true)
+        try {
+            await loadDocumentContent(version.documentId, version.name, version.version)
+        } catch (err: any) {
+            const errMsg = err?.response?.data?.error || 'Failed to load version.'
+            setViewerDoc(prev => prev ? { ...prev, content: `<p style="color:red">${errMsg}</p>`, version: version.version } : null)
         } finally {
             setIsLoadingContent(false)
         }
@@ -445,6 +500,15 @@ export default function DocumentHubPage() {
                             style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8', padding: '0 2px', fontSize: 14, lineHeight: 1 }}>✕</button>
                     )}
                 </div>
+                <label className="doc-hub-filter-select" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}>
+                    <input
+                        type="checkbox"
+                        checked={latestOnly}
+                        onChange={e => setLatestOnly(e.target.checked)}
+                        style={{ cursor: 'pointer' }}
+                    />
+                    <span style={{ fontSize: 13, color: '#475569' }}>Latest versions only</span>
+                </label>
             </div>
 
             {/* Document Count & Bulk Actions */}
@@ -495,6 +559,7 @@ export default function DocumentHubPage() {
                                 <th>SOURCE</th>
                                 <th>TYPE</th>
                                 <th>DOCUMENT NAME</th>
+                                <th>VERSION</th>
                                 <th>UPDATED BY</th>
                                 <th>UPDATED ON</th>
                                 <th>PROJECT</th>
@@ -544,6 +609,21 @@ export default function DocumentHubPage() {
                                             <span className="overflow-hidden text-ellipsis whitespace-nowrap" title={doc.name}>{doc.name}</span>
                                         )}
                                     </td>
+                                    <td>
+                                        <span style={{ fontSize: 13, color: '#475569' }}>
+                                            v{doc.version ?? 1}
+                                        </span>
+                                        {doc.isLatest === false && (
+                                            <span style={{ marginLeft: 6, fontSize: 11, padding: '2px 6px', borderRadius: 4, background: '#f1f5f9', color: '#64748b' }}>
+                                                archived
+                                            </span>
+                                        )}
+                                        {doc.isLatest !== false && doc.source === 'CALM' && (
+                                            <span style={{ marginLeft: 6, fontSize: 11, padding: '2px 6px', borderRadius: 4, background: '#dbeafe', color: '#1e40af' }}>
+                                                latest
+                                            </span>
+                                        )}
+                                    </td>
                                     <td>{doc.updatedBy}</td>
                                     <td>{doc.updatedOn}</td>
                                     <td>{doc.project}</td>
@@ -551,7 +631,7 @@ export default function DocumentHubPage() {
                             ))}
                             {documents.length === 0 && (
                                 <tr>
-                                    <td colSpan={7} className="text-center p-8 text-gray-400">
+                                    <td colSpan={8} className="text-center p-8 text-gray-400">
                                         No documents found. Try adjusting filters or syncing a source.
                                     </td>
                                 </tr>
@@ -631,11 +711,42 @@ export default function DocumentHubPage() {
                             <div style={{ flex: 1, minWidth: 0 }}>
                                 <h3 className="settings-modal-title" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {viewerDoc.name}
+                                    {viewerDoc.version ? ` (v${viewerDoc.version})` : ''}
                                 </h3>
                                 <p className="settings-modal-desc">Document content</p>
                             </div>
-                            <button className="settings-modal-close" onClick={() => setViewerDoc(null)}>×</button>
+                            <button className="settings-modal-close" onClick={() => { setViewerDoc(null); setDocumentVersions([]) }}>×</button>
                         </div>
+                        {documentVersions.length > 1 && (
+                            <div style={{ padding: '12px 1.5rem', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
+                                <div style={{ fontSize: 12, fontWeight: 600, color: '#64748b', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                    Version History
+                                </div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                    {documentVersions.map(v => (
+                                        <button
+                                            key={v.documentId}
+                                            onClick={() => switchDocumentVersion(v)}
+                                            disabled={isLoadingContent}
+                                            style={{
+                                                padding: '6px 12px',
+                                                borderRadius: 6,
+                                                border: viewerDoc.documentId === v.documentId ? '1px solid #034354' : '1px solid #e2e8f0',
+                                                background: viewerDoc.documentId === v.documentId ? '#034354' : 'white',
+                                                color: viewerDoc.documentId === v.documentId ? 'white' : '#475569',
+                                                fontSize: 13,
+                                                cursor: isLoadingContent ? 'not-allowed' : 'pointer',
+                                            }}
+                                        >
+                                            v{v.version}{v.isLatest ? ' (latest)' : ''}
+                                        </button>
+                                    ))}
+                                </div>
+                                {isLoadingVersions && (
+                                    <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 8, marginBottom: 0 }}>Loading version history...</p>
+                                )}
+                            </div>
+                        )}
                         <div
                             className="settings-modal-body"
                             style={{ flex: 1, overflowY: 'auto', padding: '1.5rem' }}
@@ -654,7 +765,7 @@ export default function DocumentHubPage() {
                             )}
                         </div>
                         <div className="settings-modal-footer">
-                            <button className="btn btn-secondary" onClick={() => setViewerDoc(null)}>Close</button>
+                            <button className="btn btn-secondary" onClick={() => { setViewerDoc(null); setDocumentVersions([]) }}>Close</button>
                         </div>
                     </div>
                 </div>
