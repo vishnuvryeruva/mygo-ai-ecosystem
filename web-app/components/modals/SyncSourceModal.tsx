@@ -178,7 +178,6 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                             modifiedAt: doc.modifiedAt,
                             version: doc.version,
                             isLatest: doc.isLatest,
-                            displayId: doc.displayId,
                             source: sources.find(s => s.id === selectedSource)?.type || 'CALM',
                             project: projects.find(p => p.id === selectedProject)?.name || 'Unknown Project'
                         }
