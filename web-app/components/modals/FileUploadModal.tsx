@@ -23,7 +23,7 @@ interface Project {
 export default function FileUploadModal({ onClose, onUploadComplete }: FileUploadModalProps) {
     const [selectedFiles, setSelectedFiles] = useState<File[]>([])
     const [uploading, setUploading] = useState(false)
-    const [uploadToCloudALM, setUploadToCloudALM] = useState(false)
+    const [uploadDestination, setUploadDestination] = useState<'dms' | 'alm' | 'both'>('dms')
     const [uploadProgress, setUploadProgress] = useState<string>('')
     
     // Cloud ALM configuration
@@ -36,12 +36,12 @@ export default function FileUploadModal({ onClose, onUploadComplete }: FileUploa
     const [showSuccessDialog, setShowSuccessDialog] = useState(false)
     const [successMessage, setSuccessMessage] = useState('')
 
-    // Fetch sources when Cloud ALM is enabled
+    // Fetch sources when Cloud ALM upload is selected
     useEffect(() => {
-        if (uploadToCloudALM) {
+        if (uploadDestination === 'alm' || uploadDestination === 'both') {
             fetchSources()
         }
-    }, [uploadToCloudALM])
+    }, [uploadDestination])
 
     // Fetch projects when source is selected
     useEffect(() => {
@@ -100,7 +100,7 @@ export default function FileUploadModal({ onClose, onUploadComplete }: FileUploa
             return
         }
 
-        if (uploadToCloudALM && (!selectedSourceId || !selectedProjectId)) {
+        if ((uploadDestination === 'alm' || uploadDestination === 'both') && (!selectedSourceId || !selectedProjectId)) {
             alert('Please select a source and project for Cloud ALM upload')
             return
         }
@@ -109,49 +109,56 @@ export default function FileUploadModal({ onClose, onUploadComplete }: FileUploa
         setUploadProgress('Preparing files...')
 
         try {
-            const formData = new FormData()
-            selectedFiles.forEach(file => {
-                formData.append('files', file)
-            })
+            const errors: string[] = []
 
-            setUploadProgress('Uploading to database...')
-            
-            // Upload to our database
-            const response = await axios.post('/api/upload-documents', formData, {
-                headers: { 'Content-Type': 'multipart/form-data' }
-            })
+            if (uploadDestination === 'dms' || uploadDestination === 'both') {
+                const formData = new FormData()
+                selectedFiles.forEach(file => {
+                    formData.append('files', file)
+                })
 
-            if (uploadToCloudALM && selectedSourceId && selectedProjectId) {
-                setUploadProgress('Syncing to Cloud ALM...')
-                
+                setUploadProgress('Uploading to DMS...')
                 try {
-                    // Push each file to Cloud ALM
+                    await axios.post('/api/upload-documents', formData, {
+                        headers: { 'Content-Type': 'multipart/form-data' }
+                    })
+                } catch (dmsError: any) {
+                    errors.push(dmsError?.response?.data?.error || 'Failed to upload to DMS.')
+                }
+            }
+
+            if (uploadDestination === 'alm' || uploadDestination === 'both') {
+                setUploadProgress('Syncing to Cloud ALM...')
+                try {
                     for (const file of selectedFiles) {
-                        // Read file content
                         const fileContent = await file.text()
-                        
                         await axios.post(`/api/calm/${selectedSourceId}/push-spec`, {
                             name: file.name,
                             content: fileContent,
                             projectId: selectedProjectId,
-                            documentType: 'SD', // Solution Document
-                            processId: '' // Optional, can be empty
+                            documentType: 'SD',
+                            processId: ''
                         })
                     }
-                    
-                    setUploadProgress('Synced to Cloud ALM successfully!')
                 } catch (almError: any) {
                     console.error('Error syncing to Cloud ALM:', almError)
-                    const almErrorMsg = almError?.response?.data?.error || 'Failed to sync to Cloud ALM'
-                    alert(`Documents uploaded to database, but Cloud ALM sync failed: ${almErrorMsg}`)
+                    errors.push(almError?.response?.data?.error || 'Failed to sync to Cloud ALM.')
                 }
             }
 
+            if (errors.length > 0) {
+                alert(errors.join(' '))
+            }
+
             setUploadProgress('')
-            setSuccessMessage(`Successfully uploaded ${selectedFiles.length} document(s). They will appear in Document Hub.`)
+            const destLabel =
+                uploadDestination === 'dms' ? 'DMS (Document Hub)' :
+                uploadDestination === 'alm' ? 'Cloud ALM' :
+                'DMS and Cloud ALM'
+            setSuccessMessage(`Successfully uploaded ${selectedFiles.length} document(s) to ${destLabel}.`)
             setShowSuccessDialog(true)
             setSelectedFiles([])
-            setUploadToCloudALM(false)
+            setUploadDestination('dms')
             setSelectedSourceId('')
             setSelectedProjectId('')
         } catch (error: any) {
@@ -250,27 +257,35 @@ export default function FileUploadModal({ onClose, onUploadComplete }: FileUploa
                         </div>
                     )}
 
-                    {/* Cloud ALM Option */}
+                    {/* Upload destination */}
                     <div className="glass-subtle p-4 mb-6">
-                        <label className="flex items-start gap-3 cursor-pointer mb-4">
-                            <input
-                                type="checkbox"
-                                checked={uploadToCloudALM}
-                                onChange={(e) => setUploadToCloudALM(e.target.checked)}
-                                disabled={uploading}
-                                className="mt-1"
-                            />
-                            <div>
-                                <p className="text-heading font-medium">Also upload to Cloud ALM</p>
-                                <p className="text-sm text-muted mt-1">
-                                    If enabled, documents will be synced to your connected Cloud ALM source after uploading to the database.
-                                </p>
-                            </div>
-                        </label>
+                        <p className="text-heading font-medium mb-3">Upload destination</p>
+                        <div className="space-y-2">
+                            {([
+                                { value: 'dms' as const, label: 'DMS (Document Hub)', description: 'Store in your knowledge base for AI search' },
+                                { value: 'alm' as const, label: 'Cloud ALM', description: 'Push documents to your connected Cloud ALM project' },
+                                { value: 'both' as const, label: 'Both', description: 'Upload to Document Hub and Cloud ALM' },
+                            ]).map(option => (
+                                <label key={option.value} className="flex items-start gap-3 cursor-pointer p-2 rounded-lg hover:bg-white/5">
+                                    <input
+                                        type="radio"
+                                        name="upload-destination"
+                                        value={option.value}
+                                        checked={uploadDestination === option.value}
+                                        onChange={() => setUploadDestination(option.value)}
+                                        disabled={uploading}
+                                        className="mt-1"
+                                    />
+                                    <div>
+                                        <p className="text-heading font-medium">{option.label}</p>
+                                        <p className="text-sm text-muted mt-0.5">{option.description}</p>
+                                    </div>
+                                </label>
+                            ))}
+                        </div>
 
-                        {/* Source and Project Selection */}
-                        {uploadToCloudALM && (
-                            <div className="ml-7 space-y-4 mt-4 pt-4 border-t border-[var(--glass-border)]">
+                        {(uploadDestination === 'alm' || uploadDestination === 'both') && (
+                            <div className="mt-4 pt-4 border-t border-[var(--glass-border)] space-y-4">
                                 {loadingSources ? (
                                     <div className="flex items-center gap-2 text-sm text-muted">
                                         <div className="spinner w-4 h-4" />
@@ -344,9 +359,9 @@ export default function FileUploadModal({ onClose, onUploadComplete }: FileUploa
                     <div className="glass-subtle p-4">
                         <h4 className="font-medium text-indigo-300 mb-2">ℹ️ How it works</h4>
                         <ul className="text-sm text-muted space-y-1">
-                            <li>• Documents are uploaded to your database and will appear in the Document Hub</li>
-                            <li>• Files are processed and added to the vector database for AI-powered search</li>
-                            <li>• Optionally sync to Cloud ALM to make them available in your external system</li>
+                            <li>• DMS uploads store documents in Document Hub for AI-powered search</li>
+                            <li>• Cloud ALM uploads push documents to your connected SAP Cloud ALM project</li>
+                            <li>• Choose &quot;Both&quot; to keep documents in Document Hub and sync them to Cloud ALM</li>
                         </ul>
                     </div>
                 </div>

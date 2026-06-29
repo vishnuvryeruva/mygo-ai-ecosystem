@@ -35,6 +35,7 @@ interface TestCase {
 }
 
 type AlmUploadStep = 'idle' | 'form' | 'uploading' | 'success' | 'error'
+type UploadTarget = 'dms' | 'alm' | 'both'
 
 export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorModalProps) {
   const [code, setCode] = useState('')
@@ -47,6 +48,8 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
 
   // Cloud ALM upload state
   const [almUploadStep, setAlmUploadStep] = useState<AlmUploadStep>('idle')
+  const [uploadTarget, setUploadTarget] = useState<UploadTarget>('alm')
+  const [dmsDocName, setDmsDocName] = useState('')
   const [almSources, setAlmSources] = useState<Source[]>([])
   const [almSelectedSource, setAlmSelectedSource] = useState('')
   const [almProjects, setAlmProjects] = useState<Project[]>([])
@@ -59,10 +62,16 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
   const [almError, setAlmError] = useState('')
   const [almSuccessDoc, setAlmSuccessDoc] = useState<any>(null)
 
-  const handleOpenAlmUpload = async () => {
+  const handleOpenUpload = async (target: UploadTarget) => {
+    setUploadTarget(target)
     setAlmUploadStep('form')
     setAlmError('')
-    setAlmNamePrefix(`Test Cases - ${new Date().toLocaleDateString()}`)
+    const defaultName = `Test Cases - ${new Date().toLocaleDateString()}`
+    setDmsDocName(defaultName)
+    setAlmNamePrefix(defaultName)
+
+    if (target === 'dms') return
+
     setAlmLoadingStep('sources')
     try {
       const res = await axios.get('/api/sources')
@@ -114,34 +123,82 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
     }
   }
 
-  const handleAlmUpload = async () => {
-    if (!almSelectedSource || !almSelectedProject || !almSelectedScope) return
-    if (!testCasesStructured || testCasesStructured.length === 0) {
-      setAlmError('No test cases available to upload. Please generate test cases first.')
-      return
+  const uploadToDms = async () => {
+    if (!testCases.trim()) {
+      throw new Error('No test cases available to upload. Please generate test cases first.')
     }
-    
+    await axios.post('/api/upload-text-document', {
+      name: dmsDocName.trim(),
+      content: testCases,
+      documentType: 'Test Cases',
+      source: 'Test Case Generator',
+    })
+  }
+
+  const uploadToAlm = async () => {
+    if (!almSelectedSource || !almSelectedProject || !almSelectedScope) {
+      throw new Error('Please select a Cloud ALM source, project, and scope.')
+    }
+    if (!testCasesStructured || testCasesStructured.length === 0) {
+      throw new Error('No test cases available to upload. Please generate test cases first.')
+    }
+    const res = await axios.post(`/api/calm/${almSelectedSource}/push-test-cases`, {
+      testCases: testCasesStructured,
+      projectId: almSelectedProject,
+      scopeId: almSelectedScope,
+      priorityCode: almPriorityCode,
+      namePrefix: almNamePrefix.trim()
+    })
+    return res.data
+  }
+
+  const handleUpload = async () => {
     setAlmUploadStep('uploading')
     setAlmError('')
+
+    const errors: string[] = []
+    let dmsOk = false
+    let almResult: any = null
+
     try {
-      const res = await axios.post(`/api/calm/${almSelectedSource}/push-test-cases`, {
-        testCases: testCasesStructured,
-        projectId: almSelectedProject,
-        scopeId: almSelectedScope,
-        priorityCode: almPriorityCode,
-        namePrefix: almNamePrefix.trim()
-      })
-      setAlmSuccessDoc(res.data)
-      setAlmUploadStep('success')
+      if (uploadTarget === 'dms' || uploadTarget === 'both') {
+        try {
+          await uploadToDms()
+          dmsOk = true
+        } catch (err: any) {
+          errors.push(err?.response?.data?.error || err.message || 'Failed to upload to DMS.')
+        }
+      }
+
+      if (uploadTarget === 'alm' || uploadTarget === 'both') {
+        try {
+          almResult = await uploadToAlm()
+        } catch (err: any) {
+          console.error('Upload error:', err)
+          errors.push(err?.response?.data?.error || err.message || 'Failed to upload to Cloud ALM.')
+        }
+      }
+
+      if (errors.length === 0) {
+        setAlmSuccessDoc(almResult || { message: `"${dmsDocName.trim()}" has been added to DMS (Document Hub).` })
+        setAlmUploadStep('success')
+      } else if (dmsOk || almResult) {
+        setAlmError(errors.join(' '))
+        setAlmUploadStep('error')
+      } else {
+        setAlmError(errors.join(' '))
+        setAlmUploadStep('error')
+      }
     } catch (err: any) {
-      console.error('Upload error:', err)
-      setAlmError(err?.response?.data?.error || 'Failed to upload to Cloud ALM.')
+      setAlmError(err?.response?.data?.error || 'Upload failed.')
       setAlmUploadStep('error')
     }
   }
 
   const resetAlmUpload = () => {
     setAlmUploadStep('idle')
+    setUploadTarget('alm')
+    setDmsDocName('')
     setAlmSources([])
     setAlmSelectedSource('')
     setAlmProjects([])
@@ -319,28 +376,38 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
                 />
               </div>
 
-              {/* Upload to Cloud ALM */}
+              {/* Upload destinations */}
               {almUploadStep === 'idle' && (
-                <button
-                  onClick={handleOpenAlmUpload}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition-colors text-sm font-medium"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
-                  </svg>
-                  Upload to Cloud ALM
-                </button>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <button
+                    onClick={() => handleOpenUpload('dms')}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-blue-500/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 transition-colors text-sm font-medium"
+                  >
+                    Upload to DMS
+                  </button>
+                  <button
+                    onClick={() => handleOpenUpload('alm')}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition-colors text-sm font-medium"
+                  >
+                    Upload to Cloud ALM
+                  </button>
+                  <button
+                    onClick={() => handleOpenUpload('both')}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-violet-500/30 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 transition-colors text-sm font-medium"
+                  >
+                    Upload to Both
+                  </button>
+                </div>
               )}
 
-              {/* ALM Upload Panel */}
+              {/* Upload Panel */}
               {almUploadStep !== 'idle' && (
                 <div className="glass-subtle rounded-xl border border-emerald-500/20 overflow-hidden mt-4">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
                     <h4 className="font-medium text-emerald-300 flex items-center gap-2 text-sm">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
-                      </svg>
-                      Upload to Cloud ALM
+                      {uploadTarget === 'dms' ? 'Upload to DMS' :
+                       uploadTarget === 'alm' ? 'Upload to Cloud ALM' :
+                       'Upload to DMS & Cloud ALM'}
                     </h4>
                     <button onClick={resetAlmUpload} className="text-muted hover:text-main text-lg leading-none">✕</button>
                   </div>
@@ -349,7 +416,11 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
                     {almUploadStep === 'uploading' && (
                       <div className="flex flex-col items-center justify-center py-6 gap-3 text-muted">
                         <div className="spinner w-6 h-6" />
-                        <span className="text-sm">Uploading to Cloud ALM...</span>
+                        <span className="text-sm">
+                          {uploadTarget === 'dms' ? 'Uploading to DMS...' :
+                           uploadTarget === 'alm' ? 'Uploading to Cloud ALM...' :
+                           'Uploading to DMS and Cloud ALM...'}
+                        </span>
                       </div>
                     )}
 
@@ -406,102 +477,125 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
                           </div>
                         )}
 
-                        <div className="input-group mb-0">
-                          <label className="input-label text-xs">Test Case Name Prefix (Optional)</label>
-                          <input
-                            type="text"
-                            value={almNamePrefix}
-                            onChange={e => setAlmNamePrefix(e.target.value)}
-                            className="input text-sm"
-                            placeholder="e.g., Sprint 1 - Login Module"
-                          />
-                          <p className="text-xs text-muted mt-1">
-                            This prefix will be added to all test case titles
-                          </p>
-                        </div>
-
-                        {almSources.length > 1 && (
+                        {(uploadTarget === 'dms' || uploadTarget === 'both') && (
                           <div className="input-group mb-0">
-                            <label className="input-label text-xs">Cloud ALM Source</label>
-                            <select
-                              value={almSelectedSource}
-                              onChange={e => {
-                                setAlmSelectedSource(e.target.value)
-                                if (e.target.value) loadAlmProjects(e.target.value)
-                              }}
-                              className="input select text-sm"
-                              disabled={almLoadingStep === 'projects'}
-                            >
-                              <option value="">Select source...</option>
-                              {almSources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                            </select>
+                            <label className="input-label text-xs">Document Name (DMS)</label>
+                            <input
+                              type="text"
+                              value={dmsDocName}
+                              onChange={e => setDmsDocName(e.target.value)}
+                              className="input text-sm"
+                              placeholder="Enter document name..."
+                            />
                           </div>
                         )}
 
-                        {almSources.length === 0 && almLoadingStep !== 'sources' && (
-                          <p className="text-sm text-red-400">No Cloud ALM sources configured. Please add one in Sources.</p>
-                        )}
+                        {(uploadTarget === 'alm' || uploadTarget === 'both') && (
+                          <>
+                            <div className="input-group mb-0">
+                              <label className="input-label text-xs">Test Case Name Prefix (Optional)</label>
+                              <input
+                                type="text"
+                                value={almNamePrefix}
+                                onChange={e => setAlmNamePrefix(e.target.value)}
+                                className="input text-sm"
+                                placeholder="e.g., Sprint 1 - Login Module"
+                              />
+                              <p className="text-xs text-muted mt-1">
+                                This prefix will be added to all test case titles in Cloud ALM
+                              </p>
+                            </div>
 
-                        {almSelectedSource && (
-                          <div className="input-group mb-0">
-                            <label className="input-label text-xs">
-                              Project
-                              {almLoadingStep === 'projects' && <span className="ml-2 text-muted">(loading...)</span>}
-                            </label>
-                            <select
-                              value={almSelectedProject}
-                              onChange={e => {
-                                setAlmSelectedProject(e.target.value)
-                                if (e.target.value) loadAlmScopes(almSelectedSource, e.target.value)
-                              }}
-                              className="input select text-sm"
-                              disabled={almLoadingStep === 'projects' || almProjects.length === 0}
-                            >
-                              <option value="">Select project...</option>
-                              {almProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                            </select>
-                          </div>
-                        )}
+                            {almSources.length > 1 && (
+                              <div className="input-group mb-0">
+                                <label className="input-label text-xs">Cloud ALM Source</label>
+                                <select
+                                  value={almSelectedSource}
+                                  onChange={e => {
+                                    setAlmSelectedSource(e.target.value)
+                                    if (e.target.value) loadAlmProjects(e.target.value)
+                                  }}
+                                  className="input select text-sm"
+                                  disabled={almLoadingStep === 'projects'}
+                                >
+                                  <option value="">Select source...</option>
+                                  {almSources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                </select>
+                              </div>
+                            )}
 
-                        {almSelectedProject && (
-                          <div className="input-group mb-0">
-                            <label className="input-label text-xs">
-                              Scope
-                              {almLoadingStep === 'scopes' && <span className="ml-2 text-muted">(loading...)</span>}
-                            </label>
-                            <select
-                              value={almSelectedScope}
-                              onChange={e => setAlmSelectedScope(e.target.value)}
-                              className="input select text-sm"
-                              disabled={almLoadingStep === 'scopes' || almScopes.length === 0}
-                            >
-                              <option value="">Select scope...</option>
-                              {almScopes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                            </select>
-                          </div>
-                        )}
+                            {almSources.length === 0 && almLoadingStep !== 'sources' && (
+                              <p className="text-sm text-red-400">No Cloud ALM sources configured. Please add one in Sources.</p>
+                            )}
 
-                        {almSelectedScope && (
-                          <div className="input-group mb-0">
-                            <label className="input-label text-xs">Priority</label>
-                            <select
-                              value={almPriorityCode}
-                              onChange={e => setAlmPriorityCode(Number(e.target.value))}
-                              className="input select text-sm"
-                            >
-                              <option value={10}>Low</option>
-                              <option value={20}>Medium</option>
-                              <option value={30}>High</option>
-                            </select>
-                          </div>
+                            {almSelectedSource && (
+                              <div className="input-group mb-0">
+                                <label className="input-label text-xs">
+                                  Project
+                                  {almLoadingStep === 'projects' && <span className="ml-2 text-muted">(loading...)</span>}
+                                </label>
+                                <select
+                                  value={almSelectedProject}
+                                  onChange={e => {
+                                    setAlmSelectedProject(e.target.value)
+                                    if (e.target.value) loadAlmScopes(almSelectedSource, e.target.value)
+                                  }}
+                                  className="input select text-sm"
+                                  disabled={almLoadingStep === 'projects' || almProjects.length === 0}
+                                >
+                                  <option value="">Select project...</option>
+                                  {almProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                </select>
+                              </div>
+                            )}
+
+                            {almSelectedProject && (
+                              <div className="input-group mb-0">
+                                <label className="input-label text-xs">
+                                  Scope
+                                  {almLoadingStep === 'scopes' && <span className="ml-2 text-muted">(loading...)</span>}
+                                </label>
+                                <select
+                                  value={almSelectedScope}
+                                  onChange={e => setAlmSelectedScope(e.target.value)}
+                                  className="input select text-sm"
+                                  disabled={almLoadingStep === 'scopes' || almScopes.length === 0}
+                                >
+                                  <option value="">Select scope...</option>
+                                  {almScopes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                </select>
+                              </div>
+                            )}
+
+                            {almSelectedScope && (
+                              <div className="input-group mb-0">
+                                <label className="input-label text-xs">Priority</label>
+                                <select
+                                  value={almPriorityCode}
+                                  onChange={e => setAlmPriorityCode(Number(e.target.value))}
+                                  className="input select text-sm"
+                                >
+                                  <option value={10}>Low</option>
+                                  <option value={20}>Medium</option>
+                                  <option value={30}>High</option>
+                                </select>
+                              </div>
+                            )}
+                          </>
                         )}
 
                         <button
-                          onClick={handleAlmUpload}
-                          disabled={!almSelectedProject || !almSelectedScope || !!almLoadingStep}
+                          onClick={handleUpload}
+                          disabled={
+                            !!almLoadingStep ||
+                            ((uploadTarget === 'dms' || uploadTarget === 'both') && !dmsDocName.trim()) ||
+                            ((uploadTarget === 'alm' || uploadTarget === 'both') && (!almSelectedProject || !almSelectedScope))
+                          }
                           className="w-full btn btn-primary text-sm mt-1"
                         >
-                          Upload as Manual Test Cases
+                          {uploadTarget === 'dms' ? 'Upload to DMS' :
+                           uploadTarget === 'alm' ? 'Upload as Manual Test Cases' :
+                           'Upload to Both'}
                         </button>
                       </>
                     )}

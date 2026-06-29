@@ -526,6 +526,39 @@ def upload_documents():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/upload-text-document', methods=['POST'])
+def upload_text_document():
+    """Upload text content to Document Hub (DMS / knowledge base)."""
+    try:
+        data = request.json or {}
+        name = data.get('name')
+        content = data.get('content')
+        doc_type = data.get('documentType', 'Document')
+        source = data.get('source', 'DMS Upload')
+        project = data.get('project', 'N/A')
+
+        if not name or not content:
+            return jsonify({'error': 'name and content are required'}), 400
+
+        result = rag_service.ingest_text_document(
+            name=name,
+            content=content,
+            doc_type=doc_type,
+            source=source,
+            project=project,
+        )
+
+        return jsonify({
+            'message': 'Document uploaded to DMS successfully',
+            'document': result,
+        })
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 # List documents
 @app.route('/api/documents', methods=['GET'])
 def list_documents():

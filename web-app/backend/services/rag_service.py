@@ -2,6 +2,7 @@ import os
 import io
 import zipfile
 import re
+from datetime import datetime
 
 import PyPDF2
 import psycopg2
@@ -448,6 +449,61 @@ class RAGService:
                 })
 
         return results
+
+    def ingest_text_document(
+        self,
+        name: str,
+        content: str,
+        doc_type: str = 'Document',
+        source: str = 'DMS Upload',
+        project: str = 'N/A',
+        updated_by: str = 'System',
+    ):
+        """Ingest text/markdown content into Document Hub (DMS / knowledge base)."""
+        if not content or not str(content).strip():
+            raise ValueError('No content provided')
+
+        doc_name = name.strip()
+        if not doc_name:
+            raise ValueError('Document name is required')
+        if not doc_name.lower().endswith(('.md', '.txt')):
+            doc_name = f'{doc_name}.md'
+
+        is_duplicate = self.check_duplicate(doc_name)
+        chunks = self._chunk_text(content, chunk_size=500, overlap=50)
+        doc_id = doc_name
+
+        conn = get_conn()
+        try:
+            if is_duplicate:
+                self._delete_chunks_for_doc(doc_id, conn)
+
+            for i, chunk in enumerate(chunks):
+                embedding = self._create_embedding(chunk)
+                metadata = {
+                    'source': source,
+                    'type': doc_type,
+                    'project': project,
+                    'updatedBy': updated_by,
+                    'updatedOn': datetime.now().isoformat(),
+                    'document_name': doc_name,
+                    'is_placeholder': False,
+                    'html_content': '',
+                }
+                self._insert_chunk(conn, f'{doc_id}_{i}', doc_id, chunk, embedding, metadata)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+        return {
+            'filename': doc_name,
+            'chunks': len(chunks),
+            'status': 'success',
+            'was_duplicate': is_duplicate,
+        }
 
     def query(self, query_text, top_k=5, custom_prompt=None, llm_provider='openai'):
         """Query the RAG system using cosine similarity search.

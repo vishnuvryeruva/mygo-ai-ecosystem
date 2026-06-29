@@ -5,6 +5,7 @@ import axios from 'axios'
 import AIAgentsDropdown from '@/components/AIAgentsDropdown'
 import FetchCodeModal from '@/components/modals/FetchCodeModal'
 import RichTextResponse from '@/components/RichTextResponse'
+import DocumentDestinationUpload from '@/components/DocumentDestinationUpload'
 import { authHeaders } from '@/lib/auth'
 
 // SAP Object Type Icons mapping
@@ -87,17 +88,6 @@ export default function CodeHubPage() {
     // Toast State
     const [toastMessage, setToastMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null)
 
-    // Cloud ALM push state
-    const [almUploadStep, setAlmUploadStep] = useState<'idle' | 'form' | 'uploading' | 'success' | 'error'>('idle')
-    const [almSources, setAlmSources] = useState<any[]>([])
-    const [almSelectedSource, setAlmSelectedSource] = useState('')
-    const [almProjects, setAlmProjects] = useState<any[]>([])
-    const [almSelectedProject, setAlmSelectedProject] = useState('')
-    const [almDocName, setAlmDocName] = useState('')
-    const [almLoadingStep, setAlmLoadingStep] = useState('')
-    const [almError, setAlmError] = useState('')
-    const [almSuccessDoc, setAlmSuccessDoc] = useState<any>(null)
-
     // --- Helper Functions ---
 
     const getServiceRoot = (url: string) => {
@@ -111,32 +101,6 @@ export default function CodeHubPage() {
         }
         return root.endsWith('/') ? root : root + '/'
     }
-
-    const resetAlmUpload = React.useCallback(() => {
-        setAlmUploadStep('idle')
-        setAlmSources([])
-        setAlmSelectedSource('')
-        setAlmProjects([])
-        setAlmSelectedProject('')
-        setAlmDocName('')
-        setAlmError('')
-        setAlmSuccessDoc(null)
-        setAlmLoadingStep('')
-    }, [])
-
-    const loadAlmProjects = React.useCallback(async (sourceId: string) => {
-        setAlmLoadingStep('projects')
-        setAlmProjects([])
-        setAlmSelectedProject('')
-        try {
-            const res = await axios.get(`/api/calm/${sourceId}/projects`)
-            setAlmProjects(res.data.projects || [])
-        } catch (err: any) {
-            setAlmError(err?.response?.data?.error || 'Failed to load projects.')
-        } finally {
-            setAlmLoadingStep('')
-        }
-    }, [])
 
     const fetchSources = async () => {
         try {
@@ -244,7 +208,6 @@ export default function CodeHubPage() {
         setFetchedRawCode('')
         setRequestedUrl('')
         setActiveAgentId(agentId)
-        resetAlmUpload() // Reset CALM state when starting a new action
 
         try {
             const selectedItems = selectedRecordId ? fetchedRecords.filter(r => r.id === selectedRecordId) : []
@@ -446,7 +409,7 @@ export default function CodeHubPage() {
         } finally {
             setIsAdvising(false)
         }
-    }, [selectedRecordId, fetchedRecords, sources, selectedSourceId, getServiceRoot, resetAlmUpload])
+    }, [selectedRecordId, fetchedRecords, sources, selectedSourceId, getServiceRoot])
 
     // Code Hub AI Agents menu: run agents in-page only. Do not dispatch `agent-select` — the authenticated
     // layout listens for that and opens global agent modals (second dialog on top of this page's popup).
@@ -606,47 +569,6 @@ export default function CodeHubPage() {
     const selectRecord = (id: string) => {
         setSelectedRecordId(id)
     }
-
-    // Cloud ALM Integration Functions
-    const handleOpenAlmUpload = async () => {
-        setAlmUploadStep('form')
-        setAlmError('')
-        setAlmDocName(`${activeAgentId === 'spec-assistant' ? 'Technical' : 'AI'} Specification - ${new Date().toLocaleDateString()}`)
-        setAlmLoadingStep('sources')
-        try {
-            const res = await axios.get('/api/sources')
-            const calmSources = (res.data.sources || []).filter((s: any) => s.type === 'CALM')
-            setAlmSources(calmSources)
-            if (calmSources.length === 1) {
-                setAlmSelectedSource(calmSources[0].id)
-                await loadAlmProjects(calmSources[0].id)
-            }
-        } catch {
-            setAlmError('Failed to load Cloud ALM sources.')
-        } finally {
-            setAlmLoadingStep('')
-        }
-    }
-
-    const handleAlmUpload = async () => {
-        if (!almSelectedSource || !almSelectedProject || !almDocName.trim()) return
-        setAlmUploadStep('uploading')
-        setAlmError('')
-        try {
-            await axios.post(`/api/calm/${almSelectedSource}/push-spec`, {
-                name: almDocName.trim(),
-                content: explainResponse,
-                projectId: almSelectedProject,
-                documentType: 'technical_spec'
-            })
-            setAlmSuccessDoc({ name: almDocName.trim() })
-            setAlmUploadStep('success')
-        } catch (err: any) {
-            setAlmError(err?.response?.data?.error || 'Failed to upload to Cloud ALM.')
-            setAlmUploadStep('error')
-        }
-    }
-
 
     return (
         <div className="doc-hub-page scrollbar-hide">
@@ -911,101 +833,15 @@ export default function CodeHubPage() {
                             {/* Push to Cloud ALM Panel (Only for Spec Assistant) */}
                             {activeAgentId === 'spec-assistant' && !isAdvising && explainResponse && (
                                 <div className="max-w-4xl mx-auto w-full">
-                                    {almUploadStep === 'idle' ? (
-                                        <button
-                                            onClick={handleOpenAlmUpload}
-                                            className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-2xl border-2 border-emerald-500/20 bg-emerald-50 hov:bg-emerald-100 text-emerald-700 transition-all text-sm font-bold shadow-sm"
-                                        >
-                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                                <polyline points="17 8 12 3 7 8" />
-                                                <line x1="12" y1="3" x2="12" y2="15" />
-                                            </svg>
-                                            PUSH SPEC TO SAP CLOUD ALM
-                                        </button>
-                                    ) : (
-                                        <div className="bg-white border-2 border-emerald-100 rounded-2xl shadow-lg overflow-hidden animate-in slide-in-from-top-4 duration-300">
-                                            <div className="bg-emerald-50 px-6 py-3 border-b border-emerald-100 flex justify-between items-center">
-                                                <h4 className="font-bold text-emerald-800 text-xs uppercase tracking-widest flex items-center gap-2">
-                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                                                    Push to Cloud ALM
-                                                </h4>
-                                                <button onClick={resetAlmUpload} className="text-emerald-400 hover:text-emerald-600 font-bold p-1">✕</button>
-                                            </div>
-                                            
-                                            <div className="p-6">
-                                                {almUploadStep === 'uploading' ? (
-                                                    <div className="flex flex-col items-center justify-center py-6 gap-3">
-                                                        <div className="animate-spin h-8 w-8 border-4 border-emerald-500 rounded-full border-t-transparent"></div>
-                                                        <span className="text-sm font-medium text-slate-600">Pushing specification to CALM...</span>
-                                                    </div>
-                                                ) : almUploadStep === 'success' ? (
-                                                    <div className="flex flex-col items-center justify-center py-4 gap-3 text-center">
-                                                        <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 text-2xl shadow-inner">✓</div>
-                                                        <p className="text-emerald-800 font-bold">Success!</p>
-                                                        <p className="text-slate-500 text-sm">Specification has been successfully pushed to Cloud ALM.</p>
-                                                        <button onClick={resetAlmUpload} className="mt-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-600 text-xs font-bold transition-all">CLOSE PANEL</button>
-                                                    </div>
-                                                ) : (
-                                                    <div className="space-y-4">
-                                                        {almError && (
-                                                            <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-red-600 text-xs font-medium">
-                                                                {almError}
-                                                            </div>
-                                                        )}
-                                                        
-                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                            <div>
-                                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Document Name</label>
-                                                                <input 
-                                                                    className="w-full bg-slate-50 border border-slate-100 rounded-xl py-2 px-3 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                                                                    value={almDocName}
-                                                                    onChange={e => setAlmDocName(e.target.value)}
-                                                                />
-                                                            </div>
-                                                            <div>
-                                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Target Project</label>
-                                                                <select 
-                                                                    className="w-full bg-slate-50 border border-slate-100 rounded-xl py-2 px-3 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all cursor-pointer"
-                                                                    value={almSelectedProject}
-                                                                    onChange={e => setAlmSelectedProject(e.target.value)}
-                                                                    disabled={almLoadingStep === 'projects'}
-                                                                >
-                                                                    <option value="">Select CALM Project...</option>
-                                                                    {almProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                                                                </select>
-                                                            </div>
-                                                        </div>
-
-                                                        {almSources.length > 1 && (
-                                                            <div>
-                                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">CALM Instance</label>
-                                                                <select 
-                                                                    className="w-full bg-slate-50 border border-slate-100 rounded-xl py-2 px-3 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all cursor-pointer"
-                                                                    value={almSelectedSource}
-                                                                    onChange={e => {
-                                                                        setAlmSelectedSource(e.target.value)
-                                                                        if (e.target.value) loadAlmProjects(e.target.value)
-                                                                    }}
-                                                                >
-                                                                    <option value="">Select Instance...</option>
-                                                                    {almSources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                                                                </select>
-                                                            </div>
-                                                        )}
-
-                                                        <button 
-                                                            onClick={handleAlmUpload}
-                                                            disabled={!almSelectedProject || !almDocName.trim() || !!almLoadingStep}
-                                                            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold tracking-widest transition-all shadow-lg shadow-emerald-200 disabled:opacity-50 mt-2"
-                                                        >
-                                                            PUSH TO CLOUD ALM
-                                                        </button>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    )}
+                                    <DocumentDestinationUpload
+                                        key={`${selectedRecordId}-${explainResponse.length}`}
+                                        content={explainResponse}
+                                        defaultDocName={`Technical Specification - ${new Date().toLocaleDateString()}`}
+                                        documentType="Technical Spec"
+                                        sourceLabel="Code Hub Spec Assistant"
+                                        almDocumentType="technical_spec"
+                                        variant="light"
+                                    />
                                 </div>
                             )}
 
