@@ -21,6 +21,7 @@ interface SyncSourceModalProps {
     onClose: () => void
     onSyncComplete?: () => void
     preSelectedSourceId?: string | null
+    syncType?: 'documents' | 'requirements'
 }
 
 const isCloudAlmSource = (source: Source) => {
@@ -38,7 +39,7 @@ const documentTypeNames: Record<string, string> = {
     DP: 'Decision Paper',
 }
 
-export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSelectedSourceId }: SyncSourceModalProps) {
+export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSelectedSourceId, syncType = 'documents' }: SyncSourceModalProps) {
     const [syncStep, setSyncStep] = useState(1) // 1: Source, 2: Project, 3: Fetching/Confirm, 4: Result
     const [sources, setSources] = useState<Source[]>([])
     const [selectedSource, setSelectedSource] = useState('')
@@ -105,6 +106,19 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
         }
     }
 
+    const isRequirementsSync = syncType === 'requirements'
+
+    const fetchItemsFromSource = async (sourceId: string, projectId: string, latestOnlyFilter: boolean) => {
+        if (isRequirementsSync) {
+            const res = await axios.get(`/api/calm/${sourceId}/requirements?projectId=${projectId}`)
+            return res.data.requirements || []
+        }
+        const res = await axios.get(`/api/calm/${sourceId}/documents?projectId=${projectId}&includeTestCases=true&latestOnly=${latestOnlyFilter}`)
+        const docs = res.data.documents || []
+        const testCases = res.data.testCases || []
+        return [...docs, ...testCases]
+    }
+
     const handleSyncNext = async () => {
         if (syncStep === 1 && selectedSource) {
             setSyncStep(2)
@@ -113,12 +127,7 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
             // Fetch potential docs and test cases to sync
             setIsSyncing(true)
             try {
-                const res = await axios.get(`/api/calm/${selectedSource}/documents?projectId=${selectedProject}&includeTestCases=true&latestOnly=${latestOnly}`)
-                const docs = res.data.documents || []
-                const testCases = res.data.testCases || []
-
-                // Combine documents and test cases
-                const allItems = [...docs, ...testCases]
+                const allItems = await fetchItemsFromSource(selectedSource, selectedProject, latestOnly)
                 setDocsToSync(allItems)
 
                 // Check sync status for all items
@@ -131,7 +140,7 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                 // Select all items by default
                 setSelectedDocIds(new Set(itemIds))
             } catch (err) {
-                console.error('Failed to fetch docs from source:', err)
+                console.error('Failed to fetch items from source:', err)
             } finally {
                 setIsSyncing(false)
             }
@@ -167,6 +176,7 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                         type: doc.documentTypeCode || doc.documentType || doc.type,
                         metadata: {
                             ...doc,
+                            itemType: doc.itemType,
                             uuid: doc.uuid,
                             title: doc.title,
                             displayId: doc.displayId,
@@ -174,8 +184,10 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                             projectId: doc.projectId,
                             scopeId: doc.scopeId,
                             statusCode: doc.statusCode,
+                            subStatus: doc.subStatus,
+                            approvalState: doc.approvalState,
                             createdAt: doc.createdAt,
-                            modifiedAt: doc.modifiedAt,
+                            modifiedAt: doc.modifiedAt || doc.lastChangedDate,
                             version: doc.version,
                             isLatest: doc.isLatest,
                             source: sources.find(s => s.id === selectedSource)?.type || 'CALM',
@@ -258,7 +270,7 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
             <div>
                 <div className="modal-header">
                     <div>
-                        <h3 className="modal-title">Sync From Source</h3>
+                        <h3 className="modal-title">{isRequirementsSync ? 'Sync Requirements' : 'Sync From Source'}</h3>
                         <p className="text-sm text-muted mt-1">Step {syncStep} of 3: {
                             syncStep === 1 ? 'Select Source' :
                                 syncStep === 2 ? 'Select Project' :
@@ -320,13 +332,14 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                             {isSyncing ? (
                                 <div className="text-center p-4">
                                     <div className="animate-spin h-8 w-8 border-4 border-blue-500 rounded-full border-t-transparent mx-auto mb-4"></div>
-                                    <p>Fetching documents...</p>
+                                    <p>Fetching {isRequirementsSync ? 'requirements' : 'documents'}...</p>
                                 </div>
                             ) : (
                                 <>
                                     <div className="mb-4 flex justify-between items-center flex-wrap gap-3">
-                                        <p>Found <strong>{docsToSync.length}</strong> documents in this project.</p>
+                                        <p>Found <strong>{docsToSync.length}</strong> {isRequirementsSync ? 'requirement(s)' : 'document(s)'} in this project.</p>
                                         <div className="flex items-center gap-3 flex-wrap">
+                                            {!isRequirementsSync && (
                                             <label className="flex items-center gap-2 text-sm cursor-pointer">
                                                 <input
                                                     type="checkbox"
@@ -337,10 +350,7 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                                                         if (selectedSource && selectedProject) {
                                                             setIsSyncing(true)
                                                             try {
-                                                                const res = await axios.get(`/api/calm/${selectedSource}/documents?projectId=${selectedProject}&includeTestCases=true&latestOnly=${checked}`)
-                                                                const docs = res.data.documents || []
-                                                                const testCases = res.data.testCases || []
-                                                                const allItems = [...docs, ...testCases]
+                                                                const allItems = await fetchItemsFromSource(selectedSource, selectedProject, checked)
                                                                 setDocsToSync(allItems)
                                                                 const itemIds = allItems.map((item: any) => item.uuid || item.id)
                                                                 const statusRes = await axios.post('/api/sync/check', { documentIds: itemIds })
@@ -357,6 +367,7 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                                                 />
                                                 <span>Latest versions only</span>
                                             </label>
+                                            )}
                                             <label className="flex items-center gap-2 text-sm cursor-pointer">
                                                 <input
                                                     type="checkbox"
@@ -386,8 +397,9 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                                         }).map(doc => {
                                             const docId = doc.uuid || doc.id
                                             const isTestCase = doc.itemType === 'test_case'
+                                            const isRequirement = doc.itemType === 'requirement'
                                             const typeCode = doc.documentTypeCode || doc.documentType || doc.type
-                                            const typeName = isTestCase ? 'Test Case' : (documentTypeNames[typeCode] || typeCode || 'Document')
+                                            const typeName = isRequirement ? 'Requirement' : isTestCase ? 'Test Case' : (documentTypeNames[typeCode] || typeCode || 'Document')
                                             const isSelected = selectedDocIds.has(docId)
                                             const isSynced = syncStatus[docId]
 
@@ -404,7 +416,9 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                                                         className="cursor-pointer"
                                                         onClick={(e) => e.stopPropagation()}
                                                     />
-                                                    {isTestCase ? (
+                                                    {isRequirement ? (
+                                                        <span className="text-lg" title="Requirement">📋</span>
+                                                    ) : isTestCase ? (
                                                         <span className="text-lg" title="Test Case">🧪</span>
                                                     ) : (
                                                         <span className="text-lg" title="Document">📄</span>
@@ -418,13 +432,20 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                                                                 </span>
                                                             )}
                                                             <span
-                                                                className={`text-xs px-2 py-1 rounded ${isTestCase
+                                                                className={`text-xs px-2 py-1 rounded ${isRequirement
+                                                                        ? 'bg-amber-100 text-amber-700'
+                                                                        : isTestCase
                                                                         ? 'bg-purple-100 text-purple-700'
                                                                         : 'bg-blue-100 text-blue-700'
                                                                     }`}
                                                             >
                                                                 {typeName}
                                                             </span>
+                                                            {isRequirement && doc.subStatus && (
+                                                                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
+                                                                    {doc.subStatus.replace(/_/g, ' ')}
+                                                                </span>
+                                                            )}
                                                             {isSynced && (
                                                                 <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
                                                                     Synced
@@ -438,8 +459,14 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                                     </div>
                                     <p className="mt-4 text-sm text-gray-600">
                                         Selected <strong>{selectedDocIds.size}</strong> item(s)
-                                        ({docsToSync.filter(d => selectedDocIds.has(d.uuid || d.id) && d.itemType === 'document').length} document(s),
-                                        {docsToSync.filter(d => selectedDocIds.has(d.uuid || d.id) && d.itemType === 'test_case').length} test case(s)).
+                                        {isRequirementsSync ? (
+                                            <> — all requirements will be synced with their descriptions.</>
+                                        ) : (
+                                            <>
+                                                ({docsToSync.filter(d => selectedDocIds.has(d.uuid || d.id) && d.itemType === 'document').length} document(s),
+                                                {docsToSync.filter(d => selectedDocIds.has(d.uuid || d.id) && d.itemType === 'test_case').length} test case(s)).
+                                            </>
+                                        )}
                                         {selectedDocIds.size > 0 && Object.values(syncStatus).filter(Boolean).length > 0 && (
                                             <span className="ml-2 text-blue-600">
                                                 Existing items will be updated.

@@ -1499,6 +1499,40 @@ def calm_list_documents(source_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/calm/<source_id>/requirements', methods=['GET'])
+def calm_list_requirements(source_id):
+    """List requirements (CALMREQU tasks) from Cloud ALM"""
+    try:
+        project_id = request.args.get('projectId')
+        if not project_id:
+            return jsonify({"error": "projectId is required"}), 400
+
+        source = source_config_service.get_source(source_id)
+        if not source:
+            return jsonify({"error": "Source not found"}), 404
+
+        service = get_calm_service(source.get('config'))
+        requirements = service.list_requirements(project_id)
+
+        for req in requirements:
+            req['itemType'] = 'requirement'
+            req['name'] = req.get('title', 'Untitled Requirement')
+            req['id'] = req.get('id')
+            req['type'] = 'Requirement'
+            req['documentTypeCode'] = 'REQUIREMENT'
+            if not req.get('modifiedAt'):
+                req['modifiedAt'] = req.get('lastChangedDate')
+
+        return jsonify({
+            'requirements': requirements,
+            'totalRequirements': len(requirements),
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/calm/<source_id>/documents/<document_id>/versions', methods=['GET'])
 def calm_list_document_versions(source_id, document_id):
     """List all versions of a Cloud ALM document."""
@@ -1653,7 +1687,7 @@ def download_calm_document(document_id):
 @app.route('/api/documents/<document_id>/view', methods=['GET'])
 def view_calm_document(document_id):
     """
-    Return the stored HTML content for a CALM document.
+    Return the stored HTML content for a CALM document or requirement.
     First checks the local vector store (saved during sync).
     If not found locally, falls back to fetching live from CALM.
     """
@@ -1689,8 +1723,48 @@ def view_calm_document(document_id):
             return jsonify({"error": "Source not found"}), 404
 
         service = get_calm_service(source.get('config'))
-        calm_doc = service.get_document(document_id)
-        html_content = calm_doc.get('content') or calm_doc.get('htmlContent') or calm_doc.get('text') or ''
+        stored_meta = rag_service.get_document_meta(document_id)
+        doc_type = (stored_meta.get('doc_type') or '').lower()
+        is_requirement = doc_type == 'requirement'
+
+        if is_requirement:
+            task = service.get_task(document_id)
+            description = task.get('description') or ''
+            if not description:
+                return jsonify({"error": "Requirement has no description content"}), 404
+            return jsonify({
+                "documentId": document_id,
+                "content": _normalize_document_html_for_view(description),
+                "source": "live",
+                "itemType": "requirement",
+                "title": task.get('title'),
+                "status": task.get('status'),
+                "subStatus": task.get('subStatus'),
+                "approvalState": task.get('approvalState'),
+            })
+
+        try:
+            calm_doc = service.get_document(document_id)
+            html_content = calm_doc.get('content') or calm_doc.get('htmlContent') or calm_doc.get('text') or ''
+        except Exception as doc_err:
+            # Requirements synced before type metadata was stored — try tasks API
+            try:
+                task = service.get_task(document_id)
+                description = task.get('description') or ''
+                if description:
+                    return jsonify({
+                        "documentId": document_id,
+                        "content": _normalize_document_html_for_view(description),
+                        "source": "live",
+                        "itemType": "requirement",
+                        "title": task.get('title'),
+                        "status": task.get('status'),
+                        "subStatus": task.get('subStatus'),
+                        "approvalState": task.get('approvalState'),
+                    })
+            except Exception:
+                pass
+            raise doc_err
 
         if not html_content:
             return jsonify({"error": "Document has no displayable content"}), 404
@@ -1701,6 +1775,50 @@ def view_calm_document(document_id):
             "source": "live"
         })
 
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/requirements/<requirement_id>', methods=['GET'])
+def get_requirement(requirement_id):
+    """Get requirement details from CALM Tasks API or local store."""
+    try:
+        import re
+        is_uuid = bool(re.match(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$', str(requirement_id)))
+        if not is_uuid:
+            return jsonify({"error": "Invalid requirement ID"}), 400
+
+        html_content = rag_service.get_document_html(requirement_id)
+        stored_meta = rag_service.get_document_meta(requirement_id)
+
+        source_id = request.args.get('sourceId')
+        if not source_id:
+            sources = source_config_service.list_sources()
+            calm_source = next((s for s in sources if s['type'] == 'CALM'), None)
+            if not calm_source:
+                return jsonify({"error": "No CALM source found"}), 404
+            source_id = calm_source['id']
+
+        source = source_config_service.get_source(source_id)
+        if not source:
+            return jsonify({"error": "Source not found"}), 404
+
+        service = get_calm_service(source.get('config'))
+        task = service.get_task(requirement_id)
+
+        if not html_content:
+            description = task.get('description') or ''
+            html_content = _normalize_document_html_for_view(description) if description else ''
+
+        return jsonify({
+            **task,
+            "content": html_content,
+            "itemType": "requirement",
+            "name": task.get('title'),
+            "project": stored_meta.get('project') or 'N/A',
+        })
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1847,14 +1965,26 @@ def sync_documents():
                     if synced_by and not normalized_doc['metadata'].get('updatedBy'):
                         normalized_doc['metadata']['updatedBy'] = synced_by
                     doc_id = normalized_doc.get('id')
+                    item_type = doc.get('itemType') or doc.get('metadata', {}).get('itemType')
 
-                    # Try to fetch real document content from CALM
+                    # Try to fetch real content from CALM
                     html_content = None
                     try:
-                        calm_doc = calm_service_instance.get_document(doc_id)
-                        html_content = calm_doc.get('content') or calm_doc.get('htmlContent') or calm_doc.get('text')
+                        if item_type == 'requirement' or doc.get('type') == 'CALMREQU' or doc.get('documentTypeCode') == 'REQUIREMENT':
+                            calm_task = calm_service_instance.get_task(doc_id)
+                            description = calm_task.get('description') or ''
+                            if description:
+                                html_content = _normalize_document_html_for_view(description)
+                            # Enrich metadata from full task response
+                            normalized_doc['metadata'].update({
+                                k: v for k, v in calm_task.items()
+                                if v is not None and k not in ('description',)
+                            })
+                        else:
+                            calm_doc = calm_service_instance.get_document(doc_id)
+                            html_content = calm_doc.get('content') or calm_doc.get('htmlContent') or calm_doc.get('text')
                     except Exception as fetch_err:
-                        print(f"Could not fetch content for document {doc_id}: {fetch_err}")
+                        print(f"Could not fetch content for item {doc_id}: {fetch_err}")
 
                     if html_content:
                         result = rag_service.ingest_calm_document(normalized_doc, html_content)
@@ -1918,12 +2048,17 @@ def _normalize_document_structure(doc: dict) -> dict:
         'SD': 'Solution Document',
         'CD': 'Change Document',
         'DP': 'Decision Paper',
+        'REQUIREMENT': 'Requirement',
+        'TEST_CASE': 'Manual Test Case',
     }
     
     # Extract and normalize fields
     doc_id = doc.get('uuid') or doc.get('id')
     doc_name = doc.get('title') or doc.get('name')
+    item_type = doc.get('itemType') or doc.get('metadata', {}).get('itemType')
     doc_type_code = doc.get('documentTypeCode') or doc.get('type')
+    if item_type == 'requirement' or doc_type_code == 'CALMREQU':
+        doc_type_code = 'REQUIREMENT'
     doc_type = doc_type_names.get(doc_type_code, doc_type_code) if doc_type_code else 'Document'
     
     # Build normalized document
@@ -1938,6 +2073,7 @@ def _normalize_document_structure(doc: dict) -> dict:
     updated_on = (
         doc.get('updatedOn')
         or doc.get('modifiedAt')
+        or doc.get('lastChangedDate')
         or doc.get('changedAt')
         or doc.get('lastModified')
         or doc.get('metadata', {}).get('updatedOn')
@@ -1960,14 +2096,14 @@ def _normalize_document_structure(doc: dict) -> dict:
         'uuid': doc.get('uuid'),
         'title': doc.get('title'),
         'displayId': doc.get('displayId'),
-        'documentTypeCode': doc.get('documentTypeCode'),
+        'documentTypeCode': doc_type_code,
         'projectId': doc.get('projectId'),
         'scopeId': doc.get('scopeId'),
         'statusCode': doc.get('statusCode'),
         'priorityCode': doc.get('priorityCode'),
         'sourceCode': doc.get('sourceCode'),
         'createdAt': doc.get('createdAt'),
-        'modifiedAt': doc.get('modifiedAt'),
+        'modifiedAt': doc.get('modifiedAt') or doc.get('lastChangedDate'),
         'version': doc.get('version', 1),
         'isLatest': doc.get('isLatest', True),
         'displayId': doc.get('displayId'),
@@ -1975,6 +2111,10 @@ def _normalize_document_structure(doc: dict) -> dict:
         'updatedBy': updated_by,
         'content': doc.get('content'),
         'tags': doc.get('tags', []),
+        'itemType': item_type or doc.get('itemType'),
+        'subStatus': doc.get('subStatus'),
+        'approvalState': doc.get('approvalState'),
+        'status': doc.get('status'),
         'source': doc.get('metadata', {}).get('source') if 'metadata' in doc else doc.get('source'),
         'project': doc.get('metadata', {}).get('project') if 'metadata' in doc else doc.get('project')
     })

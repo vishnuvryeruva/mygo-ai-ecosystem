@@ -187,7 +187,12 @@ class RAGService:
         doc_id = doc_metadata.get('id', 'unknown')
         meta = doc_metadata.get('metadata', doc_metadata)
         filename = meta.get('name', doc_metadata.get('name', 'unknown'))
-        doc_type = meta.get('type') or meta.get('documentType') or 'Document'
+        doc_type = (
+            doc_metadata.get('type')
+            or meta.get('type')
+            or meta.get('documentType')
+            or 'Document'
+        )
         source = meta.get('source', 'CALM')
         project = meta.get('project', 'N/A')
         updated_by = (
@@ -271,7 +276,12 @@ class RAGService:
             meta = doc_metadata.get('metadata', doc_metadata)
             doc_id = doc_metadata.get('id', 'unknown')
             filename = meta.get('name', doc_metadata.get('name', 'unknown'))
-            doc_type = meta.get('type') or meta.get('documentType') or 'Document'
+            doc_type = (
+                doc_metadata.get('type')
+                or meta.get('type')
+                or meta.get('documentType')
+                or 'Document'
+            )
             source = meta.get('source', 'CALM')
             project = meta.get('project', 'N/A')
             updated_by = (
@@ -339,6 +349,28 @@ class RAGService:
         except Exception as e:
             print(f"Error adding/updating placeholder: {e}")
             return {"status": "error", "error": str(e)}
+
+    def get_document_meta(self, doc_id: str) -> dict:
+        """Return stored metadata for a document from any of its chunks."""
+        conn = get_conn()
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT document_name, source, doc_type, project, updated_by, updated_on
+                    FROM documents
+                    WHERE document_id = %s
+                    LIMIT 1
+                    """,
+                    (doc_id,),
+                )
+                row = cur.fetchone()
+                return dict(row) if row else {}
+        except Exception as e:
+            print(f"Error retrieving document meta for {doc_id}: {e}")
+            return {}
+        finally:
+            conn.close()
 
     def get_document_html(self, doc_id: str) -> str:
         """Retrieve the stored HTML content for a CALM document by its document_id.

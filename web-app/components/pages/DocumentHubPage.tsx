@@ -54,6 +54,7 @@ const documentTypeNames: Record<string, string> = {
     SD: 'Solution Document',
     CD: 'Change Document',
     DP: 'Decision Paper',
+    REQUIREMENT: 'Requirement',
 }
 
 const formatDate = (dateStr: string | null | undefined): string => {
@@ -61,6 +62,18 @@ const formatDate = (dateStr: string | null | undefined): string => {
     const d = new Date(dateStr)
     if (isNaN(d.getTime())) return dateStr
     return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+const isCalmSource = (source: string) => {
+    const normalized = source.trim().toUpperCase()
+    return normalized === 'CALM' || normalized === 'SAP CLOUD ALM'
+}
+
+const isViewableDocument = (doc: Document) => {
+    const docId = doc.documentId || doc.id
+    if (!docId) return false
+    if (doc.type === 'Requirement' || doc.type === 'Manual Test Case') return true
+    return isCalmSource(doc.source) || doc.source === 'File Upload'
 }
 
 export default function DocumentHubPage() {
@@ -85,6 +98,7 @@ export default function DocumentHubPage() {
     const optionsLoaded = useRef(false)
 
     const [showSyncModal, setShowSyncModal] = useState(false)
+    const [syncModalType, setSyncModalType] = useState<'documents' | 'requirements'>('documents')
 
     const [selectedDocumentIds, setSelectedDocumentIds] = useState<Set<string>>(new Set())
     const [isDeleting, setIsDeleting] = useState(false)
@@ -239,8 +253,8 @@ export default function DocumentHubPage() {
         setDocumentVersions([])
         setViewerDoc({ name: doc.name, content: '', documentId: docId, version: doc.version })
         try {
-            // Check if this is a test case
             const isTestCase = doc.type === 'Manual Test Case' || (doc as any).documentTypeCode === 'TEST_CASE'
+            const isRequirement = doc.type === 'Requirement' || (doc as any).documentTypeCode === 'REQUIREMENT'
 
             if (isTestCase) {
                 // Fetch test case details
@@ -363,10 +377,56 @@ export default function DocumentHubPage() {
                 html += '</div>'
 
                 setViewerDoc({ name: doc.name, content: html, documentId: docId, version: doc.version })
+            } else if (isRequirement) {
+                const res = await axios.get(`/api/requirements/${encodeURIComponent(docId)}`)
+                const requirement = res.data
+
+                let html = `
+                    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; line-height: 1.6;">
+                        <h1 style="color: #1f2937; margin-bottom: 20px; font-size: 24px; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px;">
+                            ${requirement.title || doc.name || 'Requirement'}
+                        </h1>
+                        <div style="background: #f9fafb; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 12px;">
+                `
+
+                if (requirement.subStatus) {
+                    html += `
+                        <span style="padding: 4px 12px; border-radius: 4px; font-size: 14px; font-weight: 500; background: #fef3c7; color: #92400e;">
+                            Status: ${String(requirement.subStatus).replace(/_/g, ' ')}
+                        </span>
+                    `
+                }
+                if (requirement.approvalState) {
+                    html += `
+                        <span style="padding: 4px 12px; border-radius: 4px; font-size: 14px; font-weight: 500; background: #dbeafe; color: #1e40af;">
+                            Approval: ${String(requirement.approvalState).replace(/_/g, ' ')}
+                        </span>
+                    `
+                }
+                if (requirement.assigneeName || requirement.assigneeId) {
+                    html += `
+                        <span style="padding: 4px 12px; border-radius: 4px; font-size: 14px; font-weight: 500; background: #f1f5f9; color: #475569;">
+                            Assignee: ${requirement.assigneeName || requirement.assigneeId}
+                        </span>
+                    `
+                }
+
+                html += `</div>`
+
+                const bodyContent = requirement.content || ''
+                if (bodyContent) {
+                    html += `<div class="requirement-body">${bodyContent}</div>`
+                } else {
+                    html += `<p style="color: #94a3b8; font-style: italic;">No description content available for this requirement.</p>`
+                }
+
+                html += '</div>'
+
+                setViewerDoc({ name: doc.name, content: html, documentId: docId, version: doc.version })
             } else {
                 await loadDocumentContent(docId, doc.name, doc.version)
 
-                if (doc.source === 'CALM') {
+                if (isCalmSource(doc.source)) {
                     try {
                         const versionsRes = await axios.get(`/api/documents/${encodeURIComponent(docId)}/versions`)
                         const versions = versionsRes.data.versions || []
@@ -420,14 +480,23 @@ export default function DocumentHubPage() {
                     </div>
                 </div>
                 <div className="flex gap-3">
-                    <button className="btn btn-primary" onClick={() => setShowSyncModal(true)}>
+                    <button className="btn btn-primary" onClick={() => { setSyncModalType('documents'); setShowSyncModal(true) }}>
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 8 }}>
                             <path d="M21 2v6h-6" />
                             <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
                             <path d="M3 22v-6h6" />
                             <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
                         </svg>
-                        Sync Source
+                        Sync Documents
+                    </button>
+                    <button className="btn btn-secondary" onClick={() => { setSyncModalType('requirements'); setShowSyncModal(true) }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 8 }}>
+                            <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" />
+                            <rect x="9" y="3" width="6" height="4" rx="1" />
+                            <line x1="9" y1="12" x2="15" y2="12" />
+                            <line x1="9" y1="16" x2="15" y2="16" />
+                        </svg>
+                        Sync Requirements
                     </button>
                     <GlobalAIAgentsDropdown />
                 </div>
@@ -593,7 +662,7 @@ export default function DocumentHubPage() {
                                             <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
                                             <polyline points="14 2 14 8 20 8" />
                                         </svg>
-                                        {(doc.source === 'CALM' || doc.source === 'File Upload') && (doc.documentId || doc.id) ? (
+                                        {isViewableDocument(doc) ? (
                                             <button
                                                 onClick={() => openDocumentViewer(doc)}
                                                 className="hover:underline text-left text-blue-600 font-medium"
@@ -618,7 +687,7 @@ export default function DocumentHubPage() {
                                                 archived
                                             </span>
                                         )}
-                                        {doc.isLatest !== false && doc.source === 'CALM' && (
+                                        {doc.isLatest !== false && isCalmSource(doc.source) && (
                                             <span style={{ marginLeft: 6, fontSize: 11, padding: '2px 6px', borderRadius: 4, background: '#dbeafe', color: '#1e40af' }}>
                                                 latest
                                             </span>
@@ -804,6 +873,7 @@ export default function DocumentHubPage() {
                 isOpen={showSyncModal}
                 onClose={() => setShowSyncModal(false)}
                 onSyncComplete={fetchDocuments}
+                syncType={syncModalType}
             />
         </div>
     )

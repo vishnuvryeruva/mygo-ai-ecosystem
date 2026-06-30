@@ -649,6 +649,96 @@ class CALMService:
             raise
     
     # =========================================================================
+    # Tasks API (Requirements, User Stories, etc.)
+    # =========================================================================
+
+    def list_tasks(
+        self,
+        project_id: str,
+        task_type: Optional[str] = None,
+    ) -> List[Dict]:
+        """
+        List tasks from Cloud ALM via the calm-tasks API.
+
+        Args:
+            project_id: Project ID (UUID) - required
+            task_type: Optional filter, e.g. CALMREQU for requirements
+
+        Returns:
+            List of task objects
+        """
+        try:
+            token = self._get_access_token()
+
+            query_parts = [f"projectId={project_id}"]
+            if task_type:
+                query_parts.append(f"type={task_type}")
+
+            url = f"{self.api_endpoint}/api/calm-tasks/v1/tasks?{'&'.join(query_parts)}"
+            print(f"DEBUG list_tasks url: {url}")
+
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json',
+            }
+
+            response = requests.get(url, headers=headers, timeout=60)
+            print(f"DEBUG list_tasks response status: {response.status_code}")
+            print(f"DEBUG list_tasks response body (first 500 chars): {response.text[:500]}")
+
+            response.raise_for_status()
+
+            data = response.json()
+            if isinstance(data, list):
+                return data
+            return data.get('value', data.get('tasks', []))
+
+        except Exception as e:
+            print(f"Error listing tasks: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"Response status: {e.response.status_code}")
+                print(f"Response body: {e.response.text}")
+            raise
+
+    def list_requirements(self, project_id: str) -> List[Dict]:
+        """List requirements (CALMREQU tasks) for a project."""
+        return self.list_tasks(project_id, task_type='CALMREQU')
+
+    def get_task(self, task_id: str) -> Dict:
+        """
+        Get a single task by ID, including description and requirement-specific fields.
+
+        Args:
+            task_id: Task UUID
+
+        Returns:
+            Task object with full details
+        """
+        try:
+            token = self._get_access_token()
+            url = f"{self.api_endpoint}/api/calm-tasks/v1/tasks/{task_id}"
+            print(f"DEBUG get_task url: {url}")
+
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json',
+            }
+
+            response = requests.get(url, headers=headers, timeout=60)
+            print(f"DEBUG get_task response status: {response.status_code}")
+            print(f"DEBUG get_task response body (first 1000 chars): {response.text[:1000]}")
+
+            response.raise_for_status()
+            return response.json()
+
+        except Exception as e:
+            print(f"Error getting task {task_id}: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"Response status: {e.response.status_code}")
+                print(f"Response: {e.response.text}")
+            raise
+
+    # =========================================================================
     # Demo Data (for development/testing)
     # =========================================================================
     
