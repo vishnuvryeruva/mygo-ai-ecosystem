@@ -188,6 +188,7 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                             approvalState: doc.approvalState,
                             createdAt: doc.createdAt,
                             modifiedAt: doc.modifiedAt || doc.lastChangedDate,
+                            updatedOn: doc.modifiedAt || doc.lastChangedDate,
                             version: doc.version,
                             isLatest: doc.isLatest,
                             source: sources.find(s => s.id === selectedSource)?.type || 'CALM',

@@ -205,6 +205,7 @@ class RAGService:
         updated_on = str(
             meta.get('updatedOn')
             or meta.get('modifiedAt')
+            or meta.get('lastChangedDate')
             or meta.get('changedAt')
             or meta.get('lastModified')
             or 'N/A'
@@ -294,6 +295,7 @@ class RAGService:
             updated_on = (
                 meta.get('updatedOn')
                 or meta.get('modifiedAt')
+                or meta.get('lastChangedDate')
                 or meta.get('changedAt')
                 or meta.get('lastModified')
                 or 'N/A'

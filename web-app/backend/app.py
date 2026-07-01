@@ -1520,8 +1520,11 @@ def calm_list_requirements(source_id):
             req['id'] = req.get('id')
             req['type'] = 'Requirement'
             req['documentTypeCode'] = 'REQUIREMENT'
+            if req.get('source'):
+                req['requirementSource'] = req.get('source')
             if not req.get('modifiedAt'):
                 req['modifiedAt'] = req.get('lastChangedDate')
+            req['updatedOn'] = req.get('modifiedAt') or req.get('lastChangedDate')
 
         return jsonify({
             'requirements': requirements,
@@ -1957,6 +1960,7 @@ def sync_documents():
         # Process full document objects
         if documents:
             calm_service_instance = get_calm_service(source.get('config'))
+            sync_source_type = source.get('type') or 'CALM'
             for doc in documents:
                 try:
                     # Normalize document structure to handle both old and new API formats
@@ -1975,11 +1979,7 @@ def sync_documents():
                             description = calm_task.get('description') or ''
                             if description:
                                 html_content = _normalize_document_html_for_view(description)
-                            # Enrich metadata from full task response
-                            normalized_doc['metadata'].update({
-                                k: v for k, v in calm_task.items()
-                                if v is not None and k not in ('description',)
-                            })
+                            _apply_calm_task_metadata(normalized_doc, calm_task, sync_source_type)
                         else:
                             calm_doc = calm_service_instance.get_document(doc_id)
                             html_content = calm_doc.get('content') or calm_doc.get('htmlContent') or calm_doc.get('text')
@@ -2027,6 +2027,43 @@ def sync_documents():
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+
+def _apply_calm_task_metadata(normalized_doc: dict, calm_task: dict, sync_source_type: str = 'CALM') -> None:
+    """
+    Merge CALM task fields into document metadata.
+    CALM tasks expose a `source` field for requirement origin (e.g. Manual, AI)
+    which must not overwrite the DMS source label (CALM).
+    """
+    preserved_source = normalized_doc['metadata'].get('source') or sync_source_type
+    preserved_project = normalized_doc['metadata'].get('project')
+    calm_origin = calm_task.get('source')
+
+    normalized_doc['metadata'].update({
+        k: v for k, v in calm_task.items()
+        if v is not None and k not in ('description', 'source')
+    })
+
+    normalized_doc['metadata']['source'] = preserved_source
+    if preserved_project:
+        normalized_doc['metadata']['project'] = preserved_project
+    if calm_origin:
+        normalized_doc['metadata']['requirementSource'] = calm_origin
+
+    last_changed = calm_task.get('lastChangedDate')
+    if last_changed:
+        normalized_doc['metadata']['lastChangedDate'] = last_changed
+        normalized_doc['metadata']['modifiedAt'] = last_changed
+        normalized_doc['metadata']['updatedOn'] = last_changed
+
+    last_changed_by = (
+        calm_task.get('lastChangedBy')
+        or calm_task.get('changedBy')
+        or calm_task.get('assigneeName')
+        or calm_task.get('assigneeId')
+    )
+    if last_changed_by:
+        normalized_doc['metadata']['updatedBy'] = last_changed_by
 
 
 def _normalize_document_structure(doc: dict) -> dict:
@@ -2087,8 +2124,16 @@ def _normalize_document_structure(doc: dict) -> dict:
         or doc.get('lastChangedBy')
         or doc.get('modifiedBy')
         or doc.get('lastChangedByUser')
+        or doc.get('assigneeName')
+        or doc.get('assigneeId')
         or doc.get('metadata', {}).get('updatedBy')
         or doc.get('metadata', {}).get('changedBy')
+    )
+
+    dms_source = (
+        doc.get('metadata', {}).get('source')
+        if isinstance(doc.get('metadata'), dict) and doc.get('metadata', {}).get('source')
+        else ('CALM' if item_type == 'requirement' else doc.get('source'))
     )
 
     # Merge all original fields into metadata for preservation
@@ -2115,7 +2160,8 @@ def _normalize_document_structure(doc: dict) -> dict:
         'subStatus': doc.get('subStatus'),
         'approvalState': doc.get('approvalState'),
         'status': doc.get('status'),
-        'source': doc.get('metadata', {}).get('source') if 'metadata' in doc else doc.get('source'),
+        'source': dms_source,
+        'requirementSource': doc.get('requirementSource') or (doc.get('source') if item_type == 'requirement' else None),
         'project': doc.get('metadata', {}).get('project') if 'metadata' in doc else doc.get('project')
     })
     
