@@ -11,6 +11,7 @@ interface SolutionAdvisorModalProps {
     onClose: () => void
     onCreateSpec?: (solutionContext: string) => void
     initialRequirements?: string
+    prefilledInput?: string
 }
 
 type Step = 'requirements' | 'solution' | 'search' | 'improvise' | 'complete'
@@ -26,7 +27,7 @@ interface SimilarSolution {
     relevance: number
 }
 
-export default function SolutionAdvisorModal({ onClose, onCreateSpec, initialRequirements }: SolutionAdvisorModalProps) {
+export default function SolutionAdvisorModal({ onClose, onCreateSpec, initialRequirements, prefilledInput }: SolutionAdvisorModalProps) {
     const [currentStep, setCurrentStep] = useState<Step>('requirements')
     const [stepHistory, setStepHistory] = useState<Step[]>([])
     const [requirements, setRequirements] = useState('')
@@ -151,6 +152,13 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec, initialReq
             setLoading(false)
         }
     }
+
+    // Prefill the input without auto-submitting (e.g. from Document Hub)
+    useEffect(() => {
+        if (prefilledInput?.trim()) {
+            setInputValue(prefilledInput)
+        }
+    }, [prefilledInput])
 
     // Automatically trigger requirements discovery if initialRequirements is provided
     useEffect(() => {

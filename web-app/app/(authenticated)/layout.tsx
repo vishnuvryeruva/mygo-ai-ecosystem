@@ -47,6 +47,13 @@ export default function AuthenticatedLayout({
         task?: string;
         autoGenerate?: boolean;
     } | null>(null)
+    // Agent prefill from Document Hub (content only, no auto-submit)
+    const [agentPrefillData, setAgentPrefillData] = useState<{
+        agentId: string
+        content: string
+        codeType?: string
+    } | null>(null)
+    const [chatPrefillInput, setChatPrefillInput] = useState<string | null>(null)
 
     // Sync auth token from cookie → localStorage (middleware uses cookie; APIs use Bearer token)
     useEffect(() => {
@@ -176,6 +183,51 @@ export default function AuthenticatedLayout({
         return () => window.removeEventListener('prompt-studio-open', handler)
     }, [])
 
+    // Listen for agent-open-with-prefill events (e.g. from Document Hub)
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent).detail
+            if (!detail?.agentId || detail?.content === undefined) return
+
+            setAgentPrefillData({
+                agentId: detail.agentId,
+                content: detail.content,
+                codeType: detail.codeType,
+            })
+
+            if (detail.agentId === 'ask-yoda') {
+                setChatPrefillInput(detail.content)
+                setMinimizedChats(prev => prev.filter(id => id !== 'ask-yoda'))
+                setExpandedAgent('ask-yoda')
+                return
+            }
+
+            if (detail.agentId === 'solution-advisor') {
+                setSolutionAdvisorData(null)
+            } else if (detail.agentId === 'prompt-generator') {
+                setPromptStudioData({
+                    prompt: '',
+                    language: 'ABAP',
+                    task: detail.content,
+                })
+            } else if (detail.agentId === 'explain-code') {
+                setExplainCodeData({
+                    code: detail.content,
+                    codeType: detail.codeType || 'ABAP',
+                })
+            } else if (detail.agentId === 'code-advisor') {
+                setCodeAdvisorData({
+                    code: detail.content,
+                    codeType: detail.codeType || 'ABAP',
+                })
+            }
+
+            setActiveModal(detail.agentId)
+        }
+        window.addEventListener('agent-open-with-prefill', handler)
+        return () => window.removeEventListener('agent-open-with-prefill', handler)
+    }, [])
+
     const handleQuickAction = (actionId: string) => {
         // Ask Yoda opens the chatbot widget
         if (actionId === 'ask-yoda') {
@@ -196,6 +248,7 @@ export default function AuthenticatedLayout({
         setPromptStudioData(null)
         setSolutionAdvisorData(null)
         setExplainCodeData(null)
+        setAgentPrefillData(null)
     }
 
     const closeSyncSourceModal = () => {
@@ -258,6 +311,11 @@ export default function AuthenticatedLayout({
                 <SolutionAdvisorModal
                     onClose={closeModal}
                     initialRequirements={solutionAdvisorData?.requirements}
+                    prefilledInput={
+                        agentPrefillData?.agentId === 'solution-advisor'
+                            ? agentPrefillData.content
+                            : undefined
+                    }
                     onCreateSpec={(solutionContext) => {
                         setActiveModal('spec-assistant')
                         sessionStorage.setItem('solutionAdvisorContext', solutionContext)
@@ -265,7 +323,16 @@ export default function AuthenticatedLayout({
                     }}
                 />
             )}
-            {activeModal === 'spec-assistant' && <SpecAssistantModal onClose={closeModal} />}
+            {activeModal === 'spec-assistant' && (
+                <SpecAssistantModal
+                    onClose={closeModal}
+                    initialRequirements={
+                        agentPrefillData?.agentId === 'spec-assistant'
+                            ? agentPrefillData.content
+                            : undefined
+                    }
+                />
+            )}
             {activeModal === 'prompt-generator' && (
                 <PromptGeneratorModal 
                     onClose={closeModal} 
@@ -281,15 +348,26 @@ export default function AuthenticatedLayout({
                     initialCode={explainCodeData?.code}
                     initialCodeType={explainCodeData?.codeType}
                     initialProgramName={explainCodeData?.programName}
+                    autoExplain={agentPrefillData?.agentId === 'explain-code' ? false : true}
                 />
             )}
-            {activeModal === 'test-case-generator' && <TestCaseGeneratorModal onClose={closeModal} />}
+            {activeModal === 'test-case-generator' && (
+                <TestCaseGeneratorModal
+                    onClose={closeModal}
+                    initialCode={
+                        agentPrefillData?.agentId === 'test-case-generator'
+                            ? agentPrefillData.content
+                            : undefined
+                    }
+                />
+            )}
             {activeModal === 'document-upload' && <FileUploadModal onClose={closeModal} />}
             {activeModal === 'code-advisor' && (
                 <CodeAdvisorModal 
                     onClose={closeModal} 
                     initialCode={codeAdvisorData?.code}
                     initialCodeType={codeAdvisorData?.codeType}
+                    autoAnalyze={agentPrefillData?.agentId === 'code-advisor' ? false : true}
                 />
             )}
             {activeModal === 'settings' && <SettingsModal onClose={closeModal} />}
@@ -317,6 +395,8 @@ export default function AuthenticatedLayout({
                 onClose={handleClose}
                 onRestoreChat={handleRestoreChat}
                 onDismissBubble={handleDismissBubble}
+                prefillInput={chatPrefillInput}
+                onPrefillConsumed={() => setChatPrefillInput(null)}
             />
         </div>
     )

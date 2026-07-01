@@ -8,6 +8,7 @@ import { useAutoResize } from '@/hooks/useAutoResize'
 
 interface TestCaseGeneratorModalProps {
   onClose: () => void
+  initialCode?: string
 }
 
 interface Source { id: string; name: string; type: string }
@@ -37,8 +38,8 @@ interface TestCase {
 type AlmUploadStep = 'idle' | 'form' | 'uploading' | 'success' | 'error'
 type UploadTarget = 'dms' | 'alm' | 'both'
 
-export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorModalProps) {
-  const [code, setCode] = useState('')
+export default function TestCaseGeneratorModal({ onClose, initialCode }: TestCaseGeneratorModalProps) {
+  const [code, setCode] = useState(initialCode || '')
   const [testType, setTestType] = useState('manual')
   const codeRef = useAutoResize(code, 8)
   const [loading, setLoading] = useState(false)
@@ -61,6 +62,12 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
   const [almLoadingStep, setAlmLoadingStep] = useState('')
   const [almError, setAlmError] = useState('')
   const [almSuccessDoc, setAlmSuccessDoc] = useState<any>(null)
+
+  useEffect(() => {
+    if (initialCode?.trim()) {
+      setCode(initialCode)
+    }
+  }, [initialCode])
 
   const handleOpenUpload = async (target: UploadTarget) => {
     setUploadTarget(target)

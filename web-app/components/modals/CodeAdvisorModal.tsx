@@ -9,6 +9,7 @@ interface CodeAdvisorModalProps {
   onClose: () => void
   initialCode?: string
   initialCodeType?: string
+  autoAnalyze?: boolean
 }
 
 interface Suggestion {
@@ -27,7 +28,7 @@ interface AntiPattern {
   suggestion: string
 }
 
-export default function CodeAdvisorModal({ onClose, initialCode = '', initialCodeType = 'ABAP' }: CodeAdvisorModalProps) {
+export default function CodeAdvisorModal({ onClose, initialCode = '', initialCodeType = 'ABAP', autoAnalyze = true }: CodeAdvisorModalProps) {
   const [code, setCode] = useState(initialCode)
   const [codeType, setCodeType] = useState(initialCodeType)
   const codeRef = useAutoResize(code, 12)
@@ -45,7 +46,7 @@ export default function CodeAdvisorModal({ onClose, initialCode = '', initialCod
 
   // Automatically trigger code analysis on mount if initialCode is provided
   useEffect(() => {
-    if (initialCode && initialCode.trim()) {
+    if (autoAnalyze && initialCode && initialCode.trim()) {
       const triggerAnalyze = async () => {
         setLoading(true)
         setPushed(false)
@@ -64,7 +65,7 @@ export default function CodeAdvisorModal({ onClose, initialCode = '', initialCod
       }
       triggerAnalyze()
     }
-  }, [initialCode, initialCodeType])
+  }, [initialCode, initialCodeType, autoAnalyze])
 
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault()

@@ -369,6 +369,8 @@ interface ChatbotWidgetProps {
     onClose: () => void
     onRestoreChat: (agentId: string) => void
     onDismissBubble: (agentId: string) => void
+    prefillInput?: string | null
+    onPrefillConsumed?: () => void
 }
 
 export default function ChatbotWidget({
@@ -378,6 +380,8 @@ export default function ChatbotWidget({
     onClose,
     onRestoreChat,
     onDismissBubble,
+    prefillInput,
+    onPrefillConsumed,
 }: ChatbotWidgetProps) {
     // Per-agent message storage (persists across minimize/restore)
     const messagesStore = useRef<Record<string, ChatMessage[]>>({})
@@ -413,6 +417,13 @@ export default function ChatbotWidget({
     useEffect(() => {
         scrollToBottom()
     }, [messages, scrollToBottom])
+
+    useEffect(() => {
+        if (prefillInput?.trim() && expandedAgent === 'ask-yoda') {
+            setInput(prefillInput)
+            onPrefillConsumed?.()
+        }
+    }, [prefillInput, expandedAgent, onPrefillConsumed])
 
     // ── Handle action button clicks ──────────────
     const handleAction = async (action: ChatAction) => {

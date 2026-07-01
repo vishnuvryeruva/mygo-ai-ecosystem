@@ -10,9 +10,10 @@ import { useAutoResize } from '@/hooks/useAutoResize'
 
 interface SpecAssistantModalProps {
   onClose: () => void
+  initialRequirements?: string
 }
 
-export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps) {
+export default function SpecAssistantModal({ onClose, initialRequirements }: SpecAssistantModalProps) {
   const [requirements, setRequirements] = useState('')
   const [specType, setSpecType] = useState('functional')
   const [loading, setLoading] = useState(false)
@@ -24,6 +25,12 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
   const [refinementMode, setRefinementMode] = useState(false)
   const [refinementInput, setRefinementInput] = useState('')
   const [refinementHistory, setRefinementHistory] = useState<{ role: 'user' | 'assistant', content: string }[]>([])
+
+  useEffect(() => {
+    if (initialRequirements?.trim()) {
+      setRequirements(initialRequirements)
+    }
+  }, [initialRequirements])
 
   // Check for context and prefilled spec from Solution Advisor (Create Functional Spec flow)
   useEffect(() => {

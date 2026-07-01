@@ -10,13 +10,15 @@ interface ExplainCodeModalProps {
   initialCode?: string
   initialCodeType?: string
   initialProgramName?: string
+  autoExplain?: boolean
 }
 
 export default function ExplainCodeModal({ 
   onClose, 
   initialCode = '', 
   initialCodeType = 'ABAP', 
-  initialProgramName = '' 
+  initialProgramName = '',
+  autoExplain = true,
 }: ExplainCodeModalProps) {
   const [code, setCode] = useState(initialCode)
   const [codeType, setCodeType] = useState(initialCodeType)
@@ -158,10 +160,10 @@ export default function ExplainCodeModal({
 
   // Automatically trigger code explanation if initialCode is provided
   useEffect(() => {
-    if (initialCode && initialCode.trim()) {
+    if (autoExplain && initialCode && initialCode.trim()) {
       handleExplain()
     }
-  }, [initialCode])
+  }, [initialCode, autoExplain])
 
   const handleCopyExplanation = () => {
     navigator.clipboard.writeText(explanation)
@@ -281,8 +283,8 @@ export default function ExplainCodeModal({
         </div>
 
         <div className="modal-body" style={{ padding: '20px 0' }}>
-          {/* Only show the manual code entry form if no initialCode context was supplied */}
-          {!initialCode && (
+          {/* Show the code entry form unless auto-explaining with prefilled code */}
+          {(!initialCode || !autoExplain) && (
             <form onSubmit={handleExplain} style={{ marginBottom: '24px' }}>
               <div className="input-group">
                 <label className="input-label" style={{ fontWeight: 700, color: '#334155' }}>Program/Class/Function Name (Optional)</label>

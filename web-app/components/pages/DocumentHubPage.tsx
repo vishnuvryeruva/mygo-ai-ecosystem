@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import axios from 'axios'
-import GlobalAIAgentsDropdown from '@/components/GlobalAIAgentsDropdown'
+import AIAgentsDropdown from '@/components/AIAgentsDropdown'
+import { fetchSelectedDocumentsPlainText } from '@/lib/documentContent'
 import SyncSourceModal from '@/components/modals/SyncSourceModal'
 
 interface Document {
@@ -108,6 +109,7 @@ export default function DocumentHubPage() {
     const [isLoadingContent, setIsLoadingContent] = useState(false)
     const [documentVersions, setDocumentVersions] = useState<DocumentVersion[]>([])
     const [isLoadingVersions, setIsLoadingVersions] = useState(false)
+    const [isLoadingAgentContext, setIsLoadingAgentContext] = useState(false)
 
     // Debounce search input
     const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -460,6 +462,42 @@ export default function DocumentHubPage() {
         }
     }
 
+    const handleAgentSelect = async (agentId: string) => {
+        if (agentId === 'sync-sources') {
+            window.dispatchEvent(new CustomEvent('sync-source-open', { detail: { sourceId: null } }))
+            return
+        }
+
+        const openModal = agentId !== 'ask-yoda'
+
+        if (selectedDocumentIds.size === 0) {
+            window.dispatchEvent(new CustomEvent('agent-select', { detail: { agentId, openModal } }))
+            return
+        }
+
+        setIsLoadingAgentContext(true)
+        try {
+            const content = await fetchSelectedDocumentsPlainText(
+                Array.from(selectedDocumentIds),
+                documents
+            )
+
+            if (!content.trim()) {
+                window.dispatchEvent(new CustomEvent('agent-select', { detail: { agentId, openModal } }))
+                return
+            }
+
+            window.dispatchEvent(new CustomEvent('agent-open-with-prefill', {
+                detail: { agentId, content, codeType: 'ABAP' },
+            }))
+        } catch (err) {
+            console.error('Failed to load document content for AI agent:', err)
+            window.dispatchEvent(new CustomEvent('agent-select', { detail: { agentId, openModal } }))
+        } finally {
+            setIsLoadingAgentContext(false)
+        }
+    }
+
     return (
         <div className="doc-hub-page">
             {/* Page Header */}
@@ -498,7 +536,12 @@ export default function DocumentHubPage() {
                         </svg>
                         Sync Requirements
                     </button>
-                    <GlobalAIAgentsDropdown />
+                    <AIAgentsDropdown onAgentSelect={handleAgentSelect} />
+                    {isLoadingAgentContext && (
+                        <span style={{ fontSize: 13, color: '#64748b', alignSelf: 'center' }}>
+                            Loading document content...
+                        </span>
+                    )}
                 </div>
             </div>
 
