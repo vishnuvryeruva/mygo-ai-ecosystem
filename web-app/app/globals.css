@@ -1836,6 +1836,18 @@ body {
   color: white;
 }
 
+.chatbot-messages-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.chatbot-panel-modal .chatbot-messages-wrap {
+  flex: 1;
+  min-height: 0;
+}
+
 .chatbot-messages {
   height: 360px;
   overflow-y: auto;
@@ -1846,6 +1858,58 @@ body {
   height: auto;
   flex: 1;
   min-height: 0;
+}
+
+.scroll-to-latest-wrap {
+  position: relative;
+  min-height: 0;
+}
+
+.scroll-to-latest-btn,
+.chatbot-scroll-latest {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+  background: var(--bg-card);
+  color: #034354;
+  box-shadow: 0 4px 14px rgba(3, 67, 84, 0.18);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  animation: scrollToLatestIn 0.2s ease;
+}
+
+.scroll-to-latest-btn:hover,
+.chatbot-scroll-latest:hover {
+  background: #034354;
+  color: white;
+  box-shadow: 0 6px 18px rgba(3, 67, 84, 0.28);
+  transform: translateX(-50%) translateY(-1px);
+}
+
+.scroll-to-latest-btn:active,
+.chatbot-scroll-latest:active {
+  transform: translateX(-50%) translateY(0);
+}
+
+@keyframes scrollToLatestIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 }
 
 .chatbot-welcome {

@@ -4,9 +4,11 @@ import { useState, useEffect } from 'react'
 import axios from 'axios'
 import LoadingSpinner from '../LoadingSpinner'
 import RichTextResponse from '../RichTextResponse'
+import ScrollToLatestButton from '../ScrollToLatestButton'
 import AppModal from './AppModal'
 import DocumentDestinationUpload from '../DocumentDestinationUpload'
 import { useAutoResize } from '@/hooks/useAutoResize'
+import { useScrollToLatest } from '@/hooks/useScrollToLatest'
 
 interface SpecAssistantModalProps {
   onClose: () => void
@@ -25,6 +27,16 @@ export default function SpecAssistantModal({ onClose, initialRequirements }: Spe
   const [refinementMode, setRefinementMode] = useState(false)
   const [refinementInput, setRefinementInput] = useState('')
   const [refinementHistory, setRefinementHistory] = useState<{ role: 'user' | 'assistant', content: string }[]>([])
+
+  const {
+    containerRef: refinementContainerRef,
+    showScrollToLatest,
+    handleScroll: handleRefinementScroll,
+    scrollToBottom,
+  } = useScrollToLatest([refinementHistory, loading], {
+    itemCount: refinementHistory.length,
+    enabled: refinementMode,
+  })
 
   useEffect(() => {
     if (initialRequirements?.trim()) {
@@ -370,19 +382,30 @@ export default function SpecAssistantModal({ onClose, initialRequirements }: Spe
             <div className="space-y-4">
               {/* Refinement History */}
               {refinementHistory.length > 0 && (
-                <div className="mb-4 space-y-2">
-                  {refinementHistory.map((msg, index) => (
-                    <div
-                      key={index}
-                      className={`p-3 rounded-xl text-sm ${msg.role === 'user'
-                        ? 'bg-gradient-to-r from-indigo-500/20 to-purple-500/20 border border-indigo-500/30 text-indigo-200 ml-8'
-                        : 'glass-subtle text-muted mr-8'
-                        }`}
-                    >
-                      <strong>{msg.role === 'user' ? 'You: ' : 'Assistant: '}</strong>
-                      {msg.content}
-                    </div>
-                  ))}
+                <div className="scroll-to-latest-wrap mb-4">
+                  <div
+                    ref={refinementContainerRef}
+                    className="space-y-2"
+                    style={{ maxHeight: '280px', overflowY: 'auto' }}
+                    onScroll={handleRefinementScroll}
+                  >
+                    {refinementHistory.map((msg, index) => (
+                      <div
+                        key={index}
+                        className={`p-3 rounded-xl text-sm ${msg.role === 'user'
+                          ? 'bg-gradient-to-r from-indigo-500/20 to-purple-500/20 border border-indigo-500/30 text-indigo-200 ml-8'
+                          : 'glass-subtle text-muted mr-8'
+                          }`}
+                      >
+                        <strong>{msg.role === 'user' ? 'You: ' : 'Assistant: '}</strong>
+                        {msg.content}
+                      </div>
+                    ))}
+                  </div>
+                  <ScrollToLatestButton
+                    visible={showScrollToLatest}
+                    onClick={() => scrollToBottom('smooth')}
+                  />
                 </div>
               )}
 

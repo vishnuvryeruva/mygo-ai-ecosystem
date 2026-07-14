@@ -1,9 +1,11 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import axios from 'axios'
 import AppModal from './AppModal'
+import ScrollToLatestButton from '../ScrollToLatestButton'
 import { useAutoResize } from '@/hooks/useAutoResize'
+import { useScrollToLatest } from '@/hooks/useScrollToLatest'
 
 interface ExplainCodeModalProps {
   onClose: () => void
@@ -38,6 +40,16 @@ export default function ExplainCodeModal({
   const [moderniseRefinementInput, setModerniseRefinementInput] = useState('')
   const [moderniseChatHistory, setModerniseChatHistory] = useState<Array<{ role: 'user' | 'assistant', content: string }>>([])
   const [codeCopied, setCodeCopied] = useState(false)
+
+  const {
+    containerRef: moderniseChatRef,
+    showScrollToLatest,
+    handleScroll: handleModerniseChatScroll,
+    scrollToBottom,
+  } = useScrollToLatest([moderniseChatHistory, moderniseLoading], {
+    itemCount: moderniseChatHistory.length,
+    enabled: moderniseStep === 'refine',
+  })
 
   const promptRef = useAutoResize(modernisePrompt, 6)
 
@@ -430,14 +442,25 @@ export default function ExplainCodeModal({
                       </div>
 
                       {/* Prompt refinement Chat log */}
-                      <div className="space-y-2" style={{ maxHeight: '180px', overflowY: 'auto', padding: '12px', backgroundColor: '#fffbf7', borderRadius: '10px', border: '1px solid #ffe8cc' }}>
-                        <p style={{ fontSize: '0.75rem', fontWeight: 800, color: '#ea580c', marginBottom: '6px' }}>Prompt Generation History</p>
-                        {moderniseChatHistory.map((chat, idx) => (
-                          <div key={idx} style={{ fontSize: '0.75rem', padding: '8px 12px', borderRadius: '8px', backgroundColor: chat.role === 'user' ? '#fff2e6' : '#ffffff', color: chat.role === 'user' ? '#c2410c' : '#475569', border: chat.role === 'user' ? '1px solid #ffd8a8' : '1px solid #f1f5f9' }}>
-                            <strong>{chat.role === 'user' ? 'You: ' : 'AI Engine: '}</strong>
-                            <span className="whitespace-pre-wrap">{chat.role === 'assistant' && chat.content.length > 200 ? chat.content.substring(0, 200) + '...' : chat.content}</span>
-                          </div>
-                        ))}
+                      <div className="scroll-to-latest-wrap">
+                        <div
+                          ref={moderniseChatRef}
+                          className="space-y-2"
+                          style={{ maxHeight: '180px', overflowY: 'auto', padding: '12px', backgroundColor: '#fffbf7', borderRadius: '10px', border: '1px solid #ffe8cc' }}
+                          onScroll={handleModerniseChatScroll}
+                        >
+                          <p style={{ fontSize: '0.75rem', fontWeight: 800, color: '#ea580c', marginBottom: '6px' }}>Prompt Generation History</p>
+                          {moderniseChatHistory.map((chat, idx) => (
+                            <div key={idx} style={{ fontSize: '0.75rem', padding: '8px 12px', borderRadius: '8px', backgroundColor: chat.role === 'user' ? '#fff2e6' : '#ffffff', color: chat.role === 'user' ? '#c2410c' : '#475569', border: chat.role === 'user' ? '1px solid #ffd8a8' : '1px solid #f1f5f9' }}>
+                              <strong>{chat.role === 'user' ? 'You: ' : 'AI Engine: '}</strong>
+                              <span className="whitespace-pre-wrap">{chat.role === 'assistant' && chat.content.length > 200 ? chat.content.substring(0, 200) + '...' : chat.content}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <ScrollToLatestButton
+                          visible={showScrollToLatest}
+                          onClick={() => scrollToBottom('smooth')}
+                        />
                       </div>
 
                       {/* Refinement input */}

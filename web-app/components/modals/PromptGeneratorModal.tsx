@@ -1,10 +1,12 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import axios from 'axios'
 import RichTextResponse from '../RichTextResponse'
+import ScrollToLatestButton from '../ScrollToLatestButton'
 import AppModal from './AppModal'
 import { useAutoResize } from '@/hooks/useAutoResize'
+import { useScrollToLatest } from '@/hooks/useScrollToLatest'
 
 interface PromptGeneratorModalProps {
   onClose: () => void
@@ -30,12 +32,16 @@ export default function PromptGeneratorModal({ onClose, initialPrompt, initialLa
   const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'assistant', content: string }[]>(
     initialPrompt ? [{ role: 'assistant', content: initialPrompt }] : []
   )
-  const chatEndRef = useRef<HTMLDivElement>(null)
 
-  // Auto-scroll to bottom when chat history updates
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [chatHistory])
+  const {
+    containerRef: chatContainerRef,
+    showScrollToLatest,
+    handleScroll: handleChatScroll,
+    scrollToBottom,
+  } = useScrollToLatest([chatHistory, loading], {
+    itemCount: chatHistory.length,
+    enabled: currentStep === 'refine',
+  })
 
   // Code generation state
   const [generatedCode, setGeneratedCode] = useState('')
@@ -400,60 +406,68 @@ export default function PromptGeneratorModal({ onClose, initialPrompt, initialLa
           {currentStep === 'refine' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               {/* Chat History */}
-              <div style={{ 
-                display: 'flex', 
-                flexDirection: 'column', 
-                gap: '12px',
-                maxHeight: '400px',
-                overflowY: 'auto',
-                padding: '4px'
-              }}>
-                {chatHistory.map((msg, index) => (
-                  <div
-                    key={index}
-                    style={{
-                      ...(msg.role === 'user'
-                        ? { 
-                            padding: '10px 14px', 
-                            borderRadius: '12px', 
-                            fontSize: '0.85rem',
-                            background: '#fff7ed', 
-                            border: '1px solid #fed7aa', 
-                            color: '#9a3412', 
-                            marginLeft: '32px',
-                            alignSelf: 'flex-end',
-                            maxWidth: '85%'
-                          }
-                        : { 
-                            padding: '16px',
-                            borderRadius: '12px',
-                            background: '#f8fafc',
-                            border: '1px solid #e2e8f0',
-                            marginRight: '32px',
-                            alignSelf: 'flex-start',
-                            maxWidth: '85%'
-                          }
-                        )
-                    }}
-                  >
-                    {msg.role === 'user' ? (
-                      <>
-                        <strong style={{ display: 'block', marginBottom: '4px' }}>You:</strong>
-                        {msg.content}
-                      </>
-                    ) : (
-                      <RichTextResponse
-                        content={msg.content}
-                        title={index === 0 ? "Generated Prompt" : "Refined Prompt"}
-                        showCopy={true}
-                        showDownload={false}
-                        collapsible={false}
-                      />
-                    )}
-                  </div>
-                ))}
-                {/* Auto-scroll anchor */}
-                <div ref={chatEndRef} />
+              <div className="scroll-to-latest-wrap">
+                <div
+                  ref={chatContainerRef}
+                  style={{ 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    gap: '12px',
+                    maxHeight: '400px',
+                    overflowY: 'auto',
+                    padding: '4px'
+                  }}
+                  onScroll={handleChatScroll}
+                >
+                  {chatHistory.map((msg, index) => (
+                    <div
+                      key={index}
+                      style={{
+                        ...(msg.role === 'user'
+                          ? { 
+                              padding: '10px 14px', 
+                              borderRadius: '12px', 
+                              fontSize: '0.85rem',
+                              background: '#fff7ed', 
+                              border: '1px solid #fed7aa', 
+                              color: '#9a3412', 
+                              marginLeft: '32px',
+                              alignSelf: 'flex-end',
+                              maxWidth: '85%'
+                            }
+                          : { 
+                              padding: '16px',
+                              borderRadius: '12px',
+                              background: '#f8fafc',
+                              border: '1px solid #e2e8f0',
+                              marginRight: '32px',
+                              alignSelf: 'flex-start',
+                              maxWidth: '85%'
+                            }
+                          )
+                      }}
+                    >
+                      {msg.role === 'user' ? (
+                        <>
+                          <strong style={{ display: 'block', marginBottom: '4px' }}>You:</strong>
+                          {msg.content}
+                        </>
+                      ) : (
+                        <RichTextResponse
+                          content={msg.content}
+                          title={index === 0 ? "Generated Prompt" : "Refined Prompt"}
+                          showCopy={true}
+                          showDownload={false}
+                          collapsible={false}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <ScrollToLatestButton
+                  visible={showScrollToLatest}
+                  onClick={() => scrollToBottom('smooth')}
+                />
               </div>
 
               {/* Refinement suggestions */}

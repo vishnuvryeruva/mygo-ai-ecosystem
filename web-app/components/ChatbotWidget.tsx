@@ -1,11 +1,13 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import axios from 'axios'
 import RichTextResponse from '@/components/RichTextResponse'
 import SourceReferences, { Reference } from '@/components/SourceReferences'
+import ScrollToLatestButton from '@/components/ScrollToLatestButton'
 import AppModal from '@/components/modals/AppModal'
 import { useAutoResize } from '@/hooks/useAutoResize'
+import { useScrollToLatest } from '@/hooks/useScrollToLatest'
 
 // ═══════════════════════════════════════════════════════════
 //  SVG Icon Components (replacing emoji)
@@ -388,8 +390,14 @@ export default function ChatbotWidget({
     const [messages, setMessages] = useState<ChatMessage[]>([])
     const [input, setInput] = useState('')
     const [loading, setLoading] = useState(false)
-    const messagesEndRef = useRef<HTMLDivElement>(null)
     const inputRef = useAutoResize(input, 1)
+
+    const {
+        containerRef: messagesContainerRef,
+        showScrollToLatest,
+        handleScroll: handleMessagesScroll,
+        scrollToBottom,
+    } = useScrollToLatest([messages, loading, expandedAgent], { itemCount: messages.length })
 
     const agentId = expandedAgent || 'ask-yoda'
     const agent = agentConfigs[agentId] || agentConfigs['ask-yoda']
@@ -409,14 +417,6 @@ export default function ChatbotWidget({
             messagesStore.current[expandedAgent] = messages
         }
     }, [messages, expandedAgent])
-
-    const scrollToBottom = useCallback(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }, [])
-
-    useEffect(() => {
-        scrollToBottom()
-    }, [messages, scrollToBottom])
 
     useEffect(() => {
         if (prefillInput?.trim() && expandedAgent === 'ask-yoda') {
@@ -663,78 +663,87 @@ export default function ChatbotWidget({
                         </div>
 
                         {/* Messages */}
-                        <div className="chatbot-messages">
-                            {messages.length === 0 ? (
-                                <div className="chatbot-welcome">
-                                    <div className="chatbot-welcome-icon" style={{ color: '#034354' }}>{agent.icon}</div>
-                                    <h4>Welcome to {agent.name}!</h4>
-                                    <p style={{ fontSize: '0.83rem', color: '#64748b', lineHeight: 1.5, marginBottom: '16px' }}>
-                                        {agent.welcomeMessage}
-                                    </p>
-                                    {agent.welcomeActions && (
-                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center' }}>
-                                            {agent.welcomeActions.map(action => (
-                                                <ActionButton key={action.id} action={action} onClick={() => handleAction(action)} />
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            ) : (
-                                <>
-                                    {messages.map((message) => (
-                                        <div
-                                            key={message.id}
-                                            className={`chatbot-msg ${message.type === 'user' ? 'chatbot-msg-user' : 'chatbot-msg-assistant'}`}
-                                        >
-                                            <div className={`chatbot-msg-bubble ${message.type === 'user' ? 'chatbot-msg-bubble-user' : 'chatbot-msg-bubble-assistant'}`}>
-                                                {/* Status indicator */}
-                                                {message.status && (
-                                                    <StatusBubble status={message.status} content={message.content} />
-                                                )}
-
-                                                {/* Text content */}
-                                                {!message.status && (
-                                                    message.isRichText ? (
-                                                        <RichTextResponse content={message.content} />
-                                                    ) : (
-                                                        <p>{message.content}</p>
-                                                    )
-                                                )}
-
-                                                {/* Source references */}
-                                                {message.references && message.references.length > 0 && (
-                                                    <SourceReferences references={message.references} />
-                                                )}
-
-                                                {/* Action buttons */}
-                                                {message.actions && message.actions.length > 0 && (
-                                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
-                                                        {message.actions.map(action => (
-                                                            <ActionButton key={action.id} action={action} onClick={() => handleAction(action)} />
-                                                        ))}
-                                                    </div>
-                                                )}
-
-                                                <span className="chatbot-msg-time">
-                                                    {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                                </span>
+                        <div className="chatbot-messages-wrap">
+                            <div
+                                ref={messagesContainerRef}
+                                className="chatbot-messages"
+                                onScroll={handleMessagesScroll}
+                            >
+                                {messages.length === 0 ? (
+                                    <div className="chatbot-welcome">
+                                        <div className="chatbot-welcome-icon" style={{ color: '#034354' }}>{agent.icon}</div>
+                                        <h4>Welcome to {agent.name}!</h4>
+                                        <p style={{ fontSize: '0.83rem', color: '#64748b', lineHeight: 1.5, marginBottom: '16px' }}>
+                                            {agent.welcomeMessage}
+                                        </p>
+                                        {agent.welcomeActions && (
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center' }}>
+                                                {agent.welcomeActions.map(action => (
+                                                    <ActionButton key={action.id} action={action} onClick={() => handleAction(action)} />
+                                                ))}
                                             </div>
-                                        </div>
-                                    ))}
-                                    {loading && (
-                                        <div className="chatbot-msg chatbot-msg-assistant">
-                                            <div className="chatbot-msg-bubble chatbot-msg-bubble-assistant">
-                                                <div className="chatbot-typing">
-                                                    <div className="chatbot-typing-dot" style={{ animationDelay: '0ms' }} />
-                                                    <div className="chatbot-typing-dot" style={{ animationDelay: '150ms' }} />
-                                                    <div className="chatbot-typing-dot" style={{ animationDelay: '300ms' }} />
+                                        )}
+                                    </div>
+                                ) : (
+                                    <>
+                                        {messages.map((message) => (
+                                            <div
+                                                key={message.id}
+                                                className={`chatbot-msg ${message.type === 'user' ? 'chatbot-msg-user' : 'chatbot-msg-assistant'}`}
+                                            >
+                                                <div className={`chatbot-msg-bubble ${message.type === 'user' ? 'chatbot-msg-bubble-user' : 'chatbot-msg-bubble-assistant'}`}>
+                                                    {/* Status indicator */}
+                                                    {message.status && (
+                                                        <StatusBubble status={message.status} content={message.content} />
+                                                    )}
+
+                                                    {/* Text content */}
+                                                    {!message.status && (
+                                                        message.isRichText ? (
+                                                            <RichTextResponse content={message.content} />
+                                                        ) : (
+                                                            <p>{message.content}</p>
+                                                        )
+                                                    )}
+
+                                                    {/* Source references */}
+                                                    {message.references && message.references.length > 0 && (
+                                                        <SourceReferences references={message.references} />
+                                                    )}
+
+                                                    {/* Action buttons */}
+                                                    {message.actions && message.actions.length > 0 && (
+                                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
+                                                            {message.actions.map(action => (
+                                                                <ActionButton key={action.id} action={action} onClick={() => handleAction(action)} />
+                                                            ))}
+                                                        </div>
+                                                    )}
+
+                                                    <span className="chatbot-msg-time">
+                                                        {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                    </span>
                                                 </div>
                                             </div>
-                                        </div>
-                                    )}
-                                    <div ref={messagesEndRef} />
-                                </>
-                            )}
+                                        ))}
+                                        {loading && (
+                                            <div className="chatbot-msg chatbot-msg-assistant">
+                                                <div className="chatbot-msg-bubble chatbot-msg-bubble-assistant">
+                                                    <div className="chatbot-typing">
+                                                        <div className="chatbot-typing-dot" style={{ animationDelay: '0ms' }} />
+                                                        <div className="chatbot-typing-dot" style={{ animationDelay: '150ms' }} />
+                                                        <div className="chatbot-typing-dot" style={{ animationDelay: '300ms' }} />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                            </div>
+                            <ScrollToLatestButton
+                                visible={showScrollToLatest}
+                                onClick={() => scrollToBottom('smooth')}
+                            />
                         </div>
 
                         {/* Input */}

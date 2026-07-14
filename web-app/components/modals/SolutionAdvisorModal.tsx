@@ -4,8 +4,10 @@ import { useState, useEffect } from 'react'
 import axios from 'axios'
 import LoadingSpinner from '../LoadingSpinner'
 import RichTextResponse from '../RichTextResponse'
+import ScrollToLatestButton from '../ScrollToLatestButton'
 import AppModal from './AppModal'
 import { useAutoResize } from '@/hooks/useAutoResize'
+import { useScrollToLatest } from '@/hooks/useScrollToLatest'
 
 interface SolutionAdvisorModalProps {
     onClose: () => void
@@ -43,6 +45,13 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec, initialReq
     const [generatedSolution, setGeneratedSolution] = useState('')
     const [similarSolutions, setSimilarSolutions] = useState<SimilarSolution[]>([])
     const [finalSolution, setFinalSolution] = useState('')
+
+    const {
+        containerRef: messagesContainerRef,
+        showScrollToLatest,
+        handleScroll: handleMessagesScroll,
+        scrollToBottom,
+    } = useScrollToLatest([messages, loading], { itemCount: messages.length })
 
     const stepLabels: Record<Step, string> = {
         requirements: 'Gather Requirements',
@@ -365,33 +374,44 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec, initialReq
                 })()}
 
                 {/* Chat Messages */}
-                <div className="modal-body space-y-4" style={{ maxHeight: '400px' }}>
-                    {messages.map((message, index) => (
-                        <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`max-w-[80%] rounded-2xl p-4 ${message.role === 'user'
-                                ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white'
-                                : 'glass-subtle text-heading'
-                                }`}>
-                                {message.role === 'assistant' ? (
-                                    <div className="text-sm">
-                                        <RichTextResponse content={message.content} />
-                                    </div>
-                                ) : (
-                                    <div className="whitespace-pre-wrap text-sm">{message.content}</div>
-                                )}
-                            </div>
-                        </div>
-                    ))}
-                    {loading && (
-                        <div className="flex justify-start">
-                            <div className="glass-subtle rounded-2xl p-4">
-                                <div className="flex items-center gap-2 text-muted">
-                                    <div className="spinner w-4 h-4" />
-                                    <span className="text-sm">Thinking...</span>
+                <div className="scroll-to-latest-wrap">
+                    <div
+                        ref={messagesContainerRef}
+                        className="modal-body space-y-4"
+                        style={{ maxHeight: '400px' }}
+                        onScroll={handleMessagesScroll}
+                    >
+                        {messages.map((message, index) => (
+                            <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-[80%] rounded-2xl p-4 ${message.role === 'user'
+                                    ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white'
+                                    : 'glass-subtle text-heading'
+                                    }`}>
+                                    {message.role === 'assistant' ? (
+                                        <div className="text-sm">
+                                            <RichTextResponse content={message.content} />
+                                        </div>
+                                    ) : (
+                                        <div className="whitespace-pre-wrap text-sm">{message.content}</div>
+                                    )}
                                 </div>
                             </div>
-                        </div>
-                    )}
+                        ))}
+                        {loading && (
+                            <div className="flex justify-start">
+                                <div className="glass-subtle rounded-2xl p-4">
+                                    <div className="flex items-center gap-2 text-muted">
+                                        <div className="spinner w-4 h-4" />
+                                        <span className="text-sm">Thinking...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    <ScrollToLatestButton
+                        visible={showScrollToLatest}
+                        onClick={() => scrollToBottom('smooth')}
+                    />
                 </div>
 
                 {/* Generated Solution Preview (if available) */}
