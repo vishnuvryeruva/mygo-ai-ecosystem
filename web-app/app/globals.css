@@ -369,11 +369,30 @@ body {
   padding: 28px;
 }
 
+.dashboard-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
 .dashboard-chart-title {
   font-size: 1.1rem;
   font-weight: 600;
   color: var(--text-heading);
   margin: 0 0 20px 0;
+}
+
+.dashboard-chart-header .dashboard-chart-title {
+  margin: 0;
+}
+
+.dashboard-chart-empty {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
 }
 
 .dashboard-chart-bars {

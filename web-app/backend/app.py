@@ -590,6 +590,19 @@ def list_documents():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/dashboard/stats', methods=['GET'])
+def dashboard_stats():
+    """Document analytics for the dashboard (optionally filtered by project)."""
+    try:
+        project = request.args.get('project', '').strip()
+        latest_only = request.args.get('latest_only', 'true').lower() != 'false'
+        result = rag_service.get_document_stats(project=project, latest_only=latest_only)
+        return jsonify(result)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 # Delete document
 @app.route('/api/documents/<path:filename>', methods=['DELETE'])
 def delete_document(filename):

@@ -879,6 +879,116 @@ class RAGService:
             'total_pages': max(1, total_pages),
         }
 
+    def get_document_stats(self, project: str = '', latest_only: bool = True) -> dict:
+        """Aggregate document counts by type, optionally filtered by project name.
+
+        Returns:
+            documents_by_type: [{type, count}, ...]
+            projects: distinct project names for the filter dropdown
+            total_documents: total distinct documents matching the filter
+            project: active project filter (or empty string)
+        """
+        conn = None
+        try:
+            conn = get_conn()
+            is_sqlite = self._is_sqlite(conn)
+            placeholder = '?' if is_sqlite else '%s'
+
+            where_clauses = []
+            params: list = []
+
+            if project:
+                where_clauses.append(f"project = {placeholder}")
+                params.append(project)
+            if latest_only:
+                if is_sqlite:
+                    where_clauses.append("(is_latest = 1 OR is_latest IS NULL)")
+                else:
+                    where_clauses.append("(is_latest = TRUE OR is_latest IS NULL)")
+
+            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+            cursor_factory = None if is_sqlite else psycopg2.extras.RealDictCursor
+            with conn.cursor(cursor_factory=cursor_factory) as cur:
+                cur.execute(
+                    f"""
+                    SELECT doc_type, COUNT(DISTINCT document_id) AS count
+                    FROM documents
+                    {where_sql}
+                    GROUP BY doc_type
+                    ORDER BY count DESC
+                    """,
+                    params,
+                )
+                rows = cur.fetchall()
+
+                cur.execute(
+                    f"""
+                    SELECT COUNT(DISTINCT document_id) AS total
+                    FROM documents
+                    {where_sql}
+                    """,
+                    params,
+                )
+                total_row = cur.fetchone()
+                if is_sqlite:
+                    total_documents = (total_row[0] if total_row else 0) or 0
+                else:
+                    total_documents = (total_row or {}).get('total') or 0
+
+                # Always return full project list for the filter dropdown
+                cur.execute(
+                    """
+                    SELECT DISTINCT project
+                    FROM documents
+                    WHERE project IS NOT NULL
+                      AND TRIM(project) <> ''
+                      AND project <> 'N/A'
+                    ORDER BY project
+                    """
+                )
+                project_rows = cur.fetchall()
+
+        except Exception as e:
+            print(f"Error computing document stats: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'documents_by_type': [],
+                'projects': [],
+                'total_documents': 0,
+                'project': project or '',
+            }
+        finally:
+            if conn:
+                conn.close()
+
+        documents_by_type = []
+        for row in rows:
+            if is_sqlite:
+                doc_type = row[0]
+                count = row[1]
+            else:
+                doc_type = row.get('doc_type')
+                count = row.get('count')
+            documents_by_type.append({
+                'type': doc_type or 'Unknown',
+                'count': int(count or 0),
+            })
+
+        projects = []
+        for row in project_rows:
+            name = row[0] if is_sqlite else row.get('project')
+            if name:
+                projects.append(name)
+
+        return {
+            'documents_by_type': documents_by_type,
+            'projects': projects,
+            'total_documents': int(total_documents),
+            'project': project or '',
+        }
+
     def list_document_versions(self, document_id: str) -> list:
         """List all synced versions that share the same CALM display ID and project."""
         conn = get_conn()

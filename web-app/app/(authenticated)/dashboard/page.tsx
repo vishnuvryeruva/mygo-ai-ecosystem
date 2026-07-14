@@ -1,8 +1,26 @@
 'use client'
 
-import { Metadata } from 'next'
+import { useCallback, useEffect, useState } from 'react'
+import axios from 'axios'
 
-// Stats data
+const documentTypeNames: Record<string, string> = {
+    NT: 'Note',
+    FS: 'Functional Spec',
+    TS: 'Technical Spec',
+    SD: 'Solution Document',
+    CD: 'Change Document',
+    DP: 'Decision Paper',
+    REQUIREMENT: 'Requirement',
+}
+
+const resolveTypeLabel = (rawType: string) => documentTypeNames[rawType] || rawType || 'Unknown'
+
+type DocTypeStat = {
+    label: string
+    count: number
+    maxCount: number
+}
+
 const stats = [
     {
         title: 'Total Sources', value: '4', subtitle: 'CALM, SharePoint, Jira, Solman', icon: (
@@ -37,14 +55,6 @@ const stats = [
     },
 ]
 
-const docsByType = [
-    { label: 'Solution Document', count: 3, maxCount: 5 },
-    { label: 'Decision Paper', count: 2, maxCount: 5 },
-    { label: 'Functional Spec', count: 2, maxCount: 5 },
-    { label: 'Technical Spec', count: 3, maxCount: 5 },
-    { label: 'Change document', count: 2, maxCount: 5 },
-]
-
 const abapByType = [
     { label: 'Classes', count: 142, maxCount: 150 },
     { label: 'Function Modules', count: 87, maxCount: 150 },
@@ -53,6 +63,45 @@ const abapByType = [
 ]
 
 export default function DashboardPage() {
+    const [projectFilter, setProjectFilter] = useState('')
+    const [projectOptions, setProjectOptions] = useState<string[]>([])
+    const [docsByType, setDocsByType] = useState<DocTypeStat[]>([])
+    const [isLoadingDocsByType, setIsLoadingDocsByType] = useState(true)
+    const [docsByTypeError, setDocsByTypeError] = useState('')
+
+    const fetchDocumentStats = useCallback(async (project: string) => {
+        setIsLoadingDocsByType(true)
+        setDocsByTypeError('')
+        try {
+            const params = new URLSearchParams()
+            if (project) params.set('project', project)
+            const query = params.toString()
+            const res = await axios.get(`/api/dashboard/stats${query ? `?${query}` : ''}`)
+            const byType: { type?: string; count?: number }[] = res.data.documents_by_type ?? []
+            const projects: string[] = res.data.projects ?? []
+            const maxCount = Math.max(1, ...byType.map((item) => Number(item.count) || 0))
+
+            setProjectOptions(projects)
+            setDocsByType(
+                byType.map((item) => ({
+                    label: resolveTypeLabel(item.type || 'Unknown'),
+                    count: Number(item.count) || 0,
+                    maxCount,
+                }))
+            )
+        } catch (err) {
+            console.error('Failed to fetch document stats:', err)
+            setDocsByType([])
+            setDocsByTypeError('Unable to load document stats.')
+        } finally {
+            setIsLoadingDocsByType(false)
+        }
+    }, [])
+
+    useEffect(() => {
+        fetchDocumentStats(projectFilter)
+    }, [projectFilter, fetchDocumentStats])
+
     return (
         <div className="page-content-area">
             <h1 className="page-main-title">Dashboard</h1>
@@ -75,20 +124,45 @@ export default function DashboardPage() {
             {/* Charts Section */}
             <div className="dashboard-charts-grid">
                 <div className="dashboard-chart-card">
-                    <h3 className="dashboard-chart-title">Documents by Type</h3>
+                    <div className="dashboard-chart-header">
+                        <h3 className="dashboard-chart-title">Documents by Type</h3>
+                        <select
+                            className="doc-hub-filter-select"
+                            value={projectFilter}
+                            onChange={(e) => setProjectFilter(e.target.value)}
+                            aria-label="Filter documents by project"
+                        >
+                            <option value="">All Projects</option>
+                            {projectOptions.map((project) => (
+                                <option key={project} value={project}>{project}</option>
+                            ))}
+                        </select>
+                    </div>
                     <div className="dashboard-chart-bars">
-                        {docsByType.map((item, i) => (
-                            <div key={i} className="dashboard-bar-row">
-                                <span className="dashboard-bar-label">{item.label}</span>
-                                <div className="dashboard-bar-track">
-                                    <div
-                                        className="dashboard-bar-fill"
-                                        style={{ width: `${(item.count / item.maxCount) * 100}%` }}
-                                    />
+                        {isLoadingDocsByType ? (
+                            <p className="dashboard-chart-empty">Loading document stats…</p>
+                        ) : docsByTypeError ? (
+                            <p className="dashboard-chart-empty">{docsByTypeError}</p>
+                        ) : docsByType.length === 0 ? (
+                            <p className="dashboard-chart-empty">
+                                {projectFilter
+                                    ? 'No documents found for this project.'
+                                    : 'No documents available yet.'}
+                            </p>
+                        ) : (
+                            docsByType.map((item, i) => (
+                                <div key={`${item.label}-${i}`} className="dashboard-bar-row">
+                                    <span className="dashboard-bar-label">{item.label}</span>
+                                    <div className="dashboard-bar-track">
+                                        <div
+                                            className="dashboard-bar-fill"
+                                            style={{ width: `${(item.count / item.maxCount) * 100}%` }}
+                                        />
+                                    </div>
+                                    <span className="dashboard-bar-count">{item.count}</span>
                                 </div>
-                                <span className="dashboard-bar-count">{item.count}</span>
-                            </div>
-                        ))}
+                            ))
+                        )}
                     </div>
                 </div>
 
