@@ -619,20 +619,36 @@ def dashboard_stats():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/api/matrix', methods=['POST'])
-def matrix_agent():
-    """Natural-language document analytics and project-vs-project comparison."""
+@app.route('/api/fit-gap', methods=['POST'])
+def fit_gap_analysis():
+    """Fit-gap analysis: compare two projects' documents on solution design.
+
+    Takes the project ids from the CALM projects dropdown. Names are accepted as
+    a fallback and for display, but the id is the join key — CALM projects get
+    renamed, and a rename must not silently return an empty report.
+    """
     try:
-        from agents import matrix_agent as matrix_agent_mod
+        from agents import fitgap_agent
 
         data = request.json or {}
-        query = (data.get('query') or '').strip()
-        if not query:
-            return jsonify({"error": "Query is required"}), 400
+        project_a = (data.get('projectA') or '').strip()
+        project_b = (data.get('projectB') or '').strip()
+        project_a_id = (data.get('projectAId') or '').strip()
+        project_b_id = (data.get('projectBId') or '').strip()
+        module = (data.get('module') or '').strip()
+
+        if not (project_a or project_a_id) or not (project_b or project_b_id):
+            return jsonify({"error": "Two projects are required"}), 400
+        if project_a_id and project_a_id == project_b_id:
+            return jsonify({"error": "Pick two different projects"}), 400
 
         user_id = get_optional_current_user_id()
-        llm_provider = get_llm_provider_for_user(user_id, agent_id='matrix')
-        result = matrix_agent_mod.handle_query(query, rag_service, llm_provider=llm_provider)
+        llm_provider = get_llm_provider_for_user(user_id, agent_id='fit-gap')
+        result = fitgap_agent.run_fit_gap(
+            project_a or project_a_id, project_b or project_b_id, rag_service,
+            project_a_id=project_a_id, project_b_id=project_b_id,
+            module=module, llm_provider=llm_provider,
+        )
         return jsonify(result)
     except Exception as e:
         import traceback

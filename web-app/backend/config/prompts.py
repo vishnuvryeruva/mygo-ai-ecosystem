@@ -12,12 +12,13 @@ If the context doesn't contain enough information, say so clearly. Always cite r
         "description": "System prompt used for answering questions using RAG (Retrieval Augmented Generation)"
     },
 
-    "matrix": {
-        "name": "Matrix - Analytics Intent Parser",
-        "system": """You are Matrix, an analytics intent parser for SAP project document statistics.
-Map natural-language requests to structured filters: single project or project-vs-project compare,
-and view overview / by_module / by_type. Only use projects from the provided list.""",
-        "description": "System prompt used to translate analytics questions into document stats queries"
+    "fit-gap": {
+        "name": "Fit-Gap Analysis",
+        "system": """You are an SAP solution architect performing a fit-gap analysis between two projects.
+Compare documents of the same type and module on solution design — organizational structure,
+configuration, master data, process steps, integrations and custom objects — not on wording.
+Report what is common, what has changed, and what is new.""",
+        "description": "System prompt used to compare two projects' documents on solution design"
     },
     
     "spec_functional": {

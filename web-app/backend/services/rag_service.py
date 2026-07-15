@@ -1,5 +1,6 @@
 import os
 import io
+import json
 import zipfile
 import re
 from datetime import datetime
@@ -29,6 +30,38 @@ SUPPORTED_EXTENSIONS = {
     # Code files
     '.py', '.js', '.ts', '.java', '.abap', '.json', '.yaml', '.yml', '.xml'
 }
+
+
+def _deserialize_embedding(raw):
+    """Normalize a stored embedding to a plain list of floats.
+
+    Four shapes reach this, depending on how the row was written and read:
+      - bytes  — BYTEA/BLOB holding JSON, when vectors are handled app-side
+      - str    — JSON text, via SQLite
+      - Vector — pgvector's own type, once register_vector() is on the connection
+      - list/ndarray — anything already sequence-like
+
+    pgvector's Vector is the trap: it is not iterable, so list(raw) raises and an
+    over-broad except turns every embedding into None — which reads downstream as
+    "similarity 0" and silently pairs nothing at all. It exposes to_list() instead.
+
+    Returns None only when there is genuinely no usable vector.
+    """
+    if raw is None:
+        return None
+    try:
+        if isinstance(raw, bytes):
+            return json.loads(raw.decode('utf-8'))
+        if isinstance(raw, str):
+            return json.loads(raw)
+        if hasattr(raw, 'to_list'):     # pgvector.vector.Vector
+            return list(raw.to_list())
+        if hasattr(raw, 'tolist'):      # numpy.ndarray
+            return list(raw.tolist())
+        return list(raw)
+    except (json.JSONDecodeError, TypeError, ValueError) as e:
+        print(f"WARNING: could not deserialize embedding ({type(raw).__name__}): {e}")
+        return None
 
 
 class RAGService:
@@ -1196,6 +1229,90 @@ class RAGService:
             'project': project or '',
             'module': module or '',
         }
+
+    def get_documents_for_comparison(self, project_id: str = '', project: str = '',
+                                     module: str = '', max_chars: int = 6000) -> list:
+        """One entry per document — identity, module, type, text, embedding.
+
+        Feeds the fit-gap comparison. Chunks are reassembled in Python rather than
+        with string_agg/DISTINCT ON so the same code path works on SQLite and
+        Postgres; the corpus is a few hundred rows per project, not millions.
+
+        Placeholders are excluded: their stored text is a synced-from-CALM stub, so
+        they carry no content to compare and would only pollute the pairing.
+        """
+        conn = None
+        try:
+            conn = get_conn()
+            is_sqlite = self._is_sqlite(conn)
+            placeholder = '?' if is_sqlite else '%s'
+
+            clauses = ["(is_placeholder = %s OR is_placeholder IS NULL)" % placeholder]
+            params: list = [False]
+            if project_id:
+                clauses.append(f"project_id = {placeholder}")
+                params.append(project_id)
+            if project:
+                clauses.append(f"project = {placeholder}")
+                params.append(project)
+            if module:
+                clauses.append(f"sap_module = {placeholder}")
+                params.append(module)
+            if is_sqlite:
+                clauses.append("(is_latest = 1 OR is_latest IS NULL)")
+            else:
+                clauses.append("(is_latest = TRUE OR is_latest IS NULL)")
+
+            cursor_factory = None if is_sqlite else psycopg2.extras.RealDictCursor
+            with conn.cursor(cursor_factory=cursor_factory) as cur:
+                cur.execute(
+                    f"""
+                    SELECT id, document_id, document_name, doc_type, sap_module,
+                           content, embedding
+                    FROM documents
+                    WHERE {" AND ".join(clauses)}
+                    ORDER BY document_id, id
+                    """,
+                    params,
+                )
+                rows = cur.fetchall()
+        except Exception as e:
+            print(f"Error loading documents for comparison: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+        docs = {}
+        for row in rows:
+            r = dict(row) if not isinstance(row, tuple) else {
+                'id': row[0], 'document_id': row[1], 'document_name': row[2],
+                'doc_type': row[3], 'sap_module': row[4], 'content': row[5],
+                'embedding': row[6],
+            }
+            doc_id = r.get('document_id')
+            if not doc_id:
+                continue
+            entry = docs.get(doc_id)
+            if entry is None:
+                entry = {
+                    'documentId': doc_id,
+                    'name': r.get('document_name') or doc_id,
+                    'type': r.get('doc_type') or 'Unknown',
+                    'module': r.get('sap_module') or UNCLASSIFIED,
+                    'text': '',
+                    # Ordered by chunk id, so this is the document's opening chunk.
+                    'embedding': _deserialize_embedding(r.get('embedding')),
+                }
+                docs[doc_id] = entry
+            if len(entry['text']) < max_chars:
+                entry['text'] = (entry['text'] + ' ' + (r.get('content') or '')).strip()
+
+        for entry in docs.values():
+            entry['text'] = entry['text'][:max_chars]
+        return list(docs.values())
 
     def list_document_versions(self, document_id: str) -> list:
         """List all synced versions that share the same CALM display ID and project."""

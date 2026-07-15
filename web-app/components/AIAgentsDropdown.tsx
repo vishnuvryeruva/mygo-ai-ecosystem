@@ -20,14 +20,14 @@ const agents = [
         ),
     },
     {
-        id: 'matrix',
-        title: 'Matrix',
-        description: 'Ask for stats or compare projects',
+        id: 'fit-gap',
+        title: 'Fit-Gap Analysis',
+        description: 'Compare two projects — common, changed, new',
         icon: (
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0d9488" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="20" x2="18" y2="10" />
-                <line x1="12" y1="20" x2="12" y2="4" />
-                <line x1="6" y1="20" x2="6" y2="14" />
+                <path d="M12 3v18" />
+                <path d="M5 7h5M5 12h5M5 17h5" />
+                <path d="M14 7h5M14 12h5M14 17h5" />
             </svg>
         ),
     },

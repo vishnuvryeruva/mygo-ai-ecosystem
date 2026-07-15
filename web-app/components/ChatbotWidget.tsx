@@ -52,12 +52,6 @@ const SyncIcon = () => (
         <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
     </svg>
 )
-const MatrixIcon = () => (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" />
-    </svg>
-)
-
 // ═══════════════════════════════════════════════════════════
 //  Message Types
 // ═══════════════════════════════════════════════════════════
@@ -119,20 +113,6 @@ const agentConfigs: Record<string, AgentConfig> = {
             { id: 'example-3', label: 'Find technical specs', variant: 'outline' },
         ],
         placeholder: 'Ask Yoda anything...',
-    },
-    'matrix': {
-        id: 'matrix',
-        name: 'Matrix',
-        description: 'Project Analytics Assistant',
-        icon: <MatrixIcon />,
-        gradient: 'linear-gradient(135deg, #0d9488, #14b8a6)',
-        welcomeMessage: 'Ask for document statistics by project, or compare two projects. I\'ll show simple bar charts like the dashboard.',
-        welcomeActions: [
-            { id: 'example-1', label: 'Show document stats for all projects', variant: 'outline' },
-            { id: 'example-2', label: 'Documents by module', variant: 'outline' },
-            { id: 'example-3', label: 'Compare two projects', variant: 'outline' },
-        ],
-        placeholder: 'e.g. Compare Project A vs Project B...',
     },
     'solution-advisor': {
         id: 'solution-advisor',
@@ -246,17 +226,6 @@ async function handleAgentMessage(agentId: string, query: string): Promise<{
         case 'ask-yoda': {
             const res = await axios.post('/api/ask-yoda', { query }, axiosConfig)
             return { content: res.data.answer, isRichText: true, references: res.data.references }
-        }
-        case 'matrix': {
-            const res = await axios.post('/api/matrix', { query }, axiosConfig)
-            if (res.data.error) {
-                return { content: res.data.error, status: 'error' }
-            }
-            return {
-                content: res.data.answer || 'Here are the statistics.',
-                isRichText: true,
-                charts: Array.isArray(res.data.charts) ? res.data.charts : [],
-            }
         }
         case 'solution-advisor': {
             const res = await axios.post('/api/solution-advisor/requirements', { user_input: query }, axiosConfig)

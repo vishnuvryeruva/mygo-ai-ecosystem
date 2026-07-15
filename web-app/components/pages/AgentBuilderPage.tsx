@@ -61,9 +61,9 @@ const agentIcons: Record<string, (color: string) => React.ReactNode> = {
             <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
         </svg>
     ),
-    'matrix': (c) => (
+    'fit-gap': (c) => (
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" />
+            <path d="M12 3v18" /><path d="M5 7h5M5 12h5M5 17h5" /><path d="M14 7h5M14 12h5M14 17h5" />
         </svg>
     ),
 }
@@ -133,10 +133,10 @@ const agents: Agent[] = [
         status: 'active',
     },
     {
-        id: 'matrix',
-        name: 'Matrix',
-        description: 'Ask in natural language for project document statistics, or compare two projects side by side with dashboard-style charts.',
-        icon: agentIcons['matrix']('#0d9488'),
+        id: 'fit-gap',
+        name: 'Fit-Gap Analysis',
+        description: 'Compare two projects\' documents on solution design — configuration, process and architecture — and see what is common, what has changed, and what is new.',
+        icon: agentIcons['fit-gap']('#0d9488'),
         color: '#0d9488',
         category: 'analysis',
         status: 'active',
