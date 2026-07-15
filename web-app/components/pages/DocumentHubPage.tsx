@@ -21,6 +21,10 @@ interface Document {
     version?: number
     isLatest?: boolean
     displayId?: string
+    sapModule?: string
+    sapModuleLabel?: string
+    sapModuleMethod?: string | null
+    needsModuleReview?: boolean
 }
 
 interface DocumentVersion {
@@ -30,6 +34,11 @@ interface DocumentVersion {
     isLatest: boolean
     updatedBy?: string
     updatedOn?: string
+}
+
+interface SapModule {
+    code: string
+    label: string
 }
 
 interface PaginationMeta {
@@ -87,6 +96,7 @@ export default function DocumentHubPage() {
     const [sourceFilter, setSourceFilter] = useState('')
     const [typeFilter, setTypeFilter] = useState('')
     const [projectFilter, setProjectFilter] = useState('')
+    const [moduleFilter, setModuleFilter] = useState('')
     const [dateFrom, setDateFrom] = useState('')
     const [dateTo, setDateTo] = useState('')
     const [latestOnly, setLatestOnly] = useState(true)
@@ -96,6 +106,9 @@ export default function DocumentHubPage() {
     const [sourceOptions, setSourceOptions] = useState<string[]>([])
     const [typeOptions, setTypeOptions] = useState<string[]>([])
     const [projectOptions, setProjectOptions] = useState<string[]>([])
+    // Taxonomy comes from the backend so the enum lives in exactly one place.
+    const [moduleOptions, setModuleOptions] = useState<SapModule[]>([])
+    const [savingModuleFor, setSavingModuleFor] = useState<string | null>(null)
     const optionsLoaded = useRef(false)
 
     const [showSyncModal, setShowSyncModal] = useState(false)
@@ -124,6 +137,7 @@ export default function DocumentHubPage() {
             if (sourceFilter) params.set('source', sourceFilter)
             if (typeFilter) params.set('type', typeFilter)
             if (projectFilter) params.set('project', projectFilter)
+            if (moduleFilter) params.set('module', moduleFilter)
             if (dateFrom) params.set('date_from', dateFrom)
             if (dateTo) params.set('date_to', dateTo)
             if (!latestOnly) params.set('latest_only', 'false')
@@ -153,6 +167,10 @@ export default function DocumentHubPage() {
                     version: doc.version ?? doc.metadata?.version ?? 1,
                     isLatest: doc.isLatest ?? doc.metadata?.isLatest ?? true,
                     displayId: doc.displayId || doc.metadata?.displayId || '',
+                    sapModule: doc.sapModule || 'UNCLASSIFIED',
+                    sapModuleLabel: doc.sapModuleLabel || 'Unclassified',
+                    sapModuleMethod: doc.sapModuleMethod ?? null,
+                    needsModuleReview: Boolean(doc.needsModuleReview),
                 }
             })
 
@@ -164,7 +182,38 @@ export default function DocumentHubPage() {
         } finally {
             setIsLoading(false)
         }
-    }, [search, sourceFilter, typeFilter, projectFilter, dateFrom, dateTo, latestOnly])
+    }, [search, sourceFilter, typeFilter, projectFilter, moduleFilter, dateFrom, dateTo, latestOnly])
+
+    // Update a document's module. Optimistic: the row reflects the choice while
+    // the request is in flight, and reverts if the server rejects it.
+    const handleModuleChange = useCallback(async (doc: Document, module: string) => {
+        const docId = doc.documentId || doc.id
+        if (!docId || module === doc.sapModule) return
+
+        const previous = documents
+        setSavingModuleFor(docId)
+        setDocuments(docs => docs.map(d => (
+            (d.documentId || d.id) === docId
+                ? {
+                    ...d,
+                    sapModule: module,
+                    sapModuleLabel: moduleOptions.find(m => m.code === module)?.label || module,
+                    sapModuleMethod: 'manual',
+                    needsModuleReview: false,
+                }
+                : d
+        )))
+
+        try {
+            await axios.put(`/api/documents/${encodeURIComponent(docId)}/module`, { module })
+        } catch (err) {
+            console.error('Failed to update module:', err)
+            setDocuments(previous)
+            alert('Could not update the module. Please try again.')
+        } finally {
+            setSavingModuleFor(null)
+        }
+    }, [documents, moduleOptions])
 
     // Load filter options once on mount (unfiltered, large page)
     useEffect(() => {
@@ -176,6 +225,10 @@ export default function DocumentHubPage() {
             setTypeOptions(Array.from(new Set<string>(docs.map(d => d.type || d.doc_type).filter(Boolean))).sort())
             setProjectOptions(Array.from(new Set<string>(docs.map(d => d.project).filter(p => p && p !== 'N/A'))).sort())
         }).catch(() => {})
+
+        axios.get('/api/sap-modules').then(res => {
+            setModuleOptions(res.data.modules ?? [])
+        }).catch(() => {})
     }, [])
 
     // Re-fetch when filters change (reset to page 1)
@@ -183,7 +236,7 @@ export default function DocumentHubPage() {
         fetchDocuments(1)
         setSelectedDocumentIds(new Set())
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [sourceFilter, typeFilter, projectFilter, dateFrom, dateTo, latestOnly])
+    }, [sourceFilter, typeFilter, projectFilter, moduleFilter, dateFrom, dateTo, latestOnly])
 
     // Debounced search
     useEffect(() => {
@@ -584,6 +637,15 @@ export default function DocumentHubPage() {
                     <option value="">All Projects</option>
                     {projectOptions.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
+                <select
+                    className="doc-hub-filter-select"
+                    value={moduleFilter}
+                    onChange={(e) => setModuleFilter(e.target.value)}
+                    aria-label="Filter documents by SAP module"
+                >
+                    <option value="">All Modules</option>
+                    {moduleOptions.map(m => <option key={m.code} value={m.code}>{m.label}</option>)}
+                </select>
                 <div className="doc-hub-date-filter">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                         <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
@@ -671,6 +733,7 @@ export default function DocumentHubPage() {
                                 <th>SOURCE</th>
                                 <th>TYPE</th>
                                 <th>DOCUMENT NAME</th>
+                                <th>MODULE</th>
                                 <th>VERSION</th>
                                 <th>UPDATED BY</th>
                                 <th>UPDATED ON</th>
@@ -722,6 +785,34 @@ export default function DocumentHubPage() {
                                         )}
                                     </td>
                                     <td>
+                                        <div className="doc-module-cell">
+                                            <select
+                                                className="doc-module-select"
+                                                value={doc.sapModule || 'UNCLASSIFIED'}
+                                                disabled={savingModuleFor === (doc.documentId || doc.id)}
+                                                onChange={(e) => handleModuleChange(doc, e.target.value)}
+                                                title={
+                                                    doc.sapModuleMethod === 'manual'
+                                                        ? 'Set manually'
+                                                        : doc.sapModuleMethod === 'scope_map'
+                                                            ? 'Derived from the CALM scope'
+                                                            : doc.sapModuleMethod === 'llm'
+                                                                ? 'Suggested by AI — confirm to lock it in'
+                                                                : 'Not classified yet'
+                                                }
+                                            >
+                                                {moduleOptions.map(m => (
+                                                    <option key={m.code} value={m.code}>{m.label}</option>
+                                                ))}
+                                            </select>
+                                            {doc.needsModuleReview && (
+                                                <span className="doc-module-review" title="Low-confidence AI guess — please confirm">
+                                                    review
+                                                </span>
+                                            )}
+                                        </div>
+                                    </td>
+                                    <td>
                                         <span style={{ fontSize: 13, color: '#475569' }}>
                                             v{doc.version ?? 1}
                                         </span>
@@ -743,7 +834,7 @@ export default function DocumentHubPage() {
                             ))}
                             {documents.length === 0 && (
                                 <tr>
-                                    <td colSpan={8} className="text-center p-8 text-gray-400">
+                                    <td colSpan={9} className="text-center p-8 text-gray-400">
                                         No documents found. Try adjusting filters or syncing a source.
                                     </td>
                                 </tr>

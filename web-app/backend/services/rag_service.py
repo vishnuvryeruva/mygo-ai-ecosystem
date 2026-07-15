@@ -12,6 +12,15 @@ from docx import Document
 
 from db import get_conn, pgvector_available
 from services.openai_service import OpenAIService
+from services.module_classifier import ModuleClassifier, should_reclassify
+from config.sap_modules import (
+    METHOD_LLM,
+    METHOD_MANUAL,
+    MODULE_LABELS,
+    REVIEW_CONFIDENCE_THRESHOLD,
+    UNCLASSIFIED,
+    normalize_module,
+)
 
 # Supported file extensions for extraction from ZIP files
 SUPPORTED_EXTENSIONS = {
@@ -25,6 +34,7 @@ SUPPORTED_EXTENSIONS = {
 class RAGService:
     def __init__(self):
         self.openai_service = OpenAIService()
+        self.module_classifier = ModuleClassifier(openai_service=self.openai_service)
         self._is_sqlite_cache = None
         print("DEBUG: RAG Service initialized with OpenAI embeddings + PostgreSQL (pgvector) fallback")
 
@@ -106,7 +116,8 @@ class RAGService:
                     source, doc_type, project, updated_by, updated_on,
                     web_url, is_placeholder, html_content,
                     uuid, display_id, project_id, scope_id,
-                    version, is_latest, calm_display_id
+                    version, is_latest, calm_display_id,
+                    sap_module, sap_module_confidence, sap_module_method
                 ) VALUES (
                     {placeholders}
                 )
@@ -128,7 +139,10 @@ class RAGService:
                     scope_id = EXCLUDED.scope_id,
                     version = EXCLUDED.version,
                     is_latest = EXCLUDED.is_latest,
-                    calm_display_id = EXCLUDED.calm_display_id
+                    calm_display_id = EXCLUDED.calm_display_id,
+                    sap_module = EXCLUDED.sap_module,
+                    sap_module_confidence = EXCLUDED.sap_module_confidence,
+                    sap_module_method = EXCLUDED.sap_module_method
                 """
         params = (
             chunk_id, doc_id, metadata.get('document_name', ''), content, embedding_val,
@@ -139,22 +153,103 @@ class RAGService:
             metadata.get('uuid', ''), metadata.get('displayId', ''),
             metadata.get('projectId', ''), metadata.get('scopeId', ''),
             metadata.get('version', 1), metadata.get('isLatest', True),
-            metadata.get('calmDisplayId', metadata.get('displayId', ''))
+            metadata.get('calmDisplayId', metadata.get('displayId', '')),
+            metadata.get('sapModule', UNCLASSIFIED),
+            metadata.get('sapModuleConfidence'),
+            metadata.get('sapModuleMethod'),
         )
 
         with conn.cursor() as cur:
             if is_sqlite:
-                placeholders = ", ".join(["?"] * 20)
+                placeholders = ", ".join(["?"] * len(params))
                 cur.execute(
                     insert_sql.format(placeholders=placeholders),
                     params,
                 )
             else:
-                placeholders = ", ".join(["%s"] * 20)
+                placeholders = ", ".join(["%s"] * len(params))
                 cur.execute(
                     insert_sql.format(placeholders=placeholders),
                     params,
                 )
+
+    # ── Module classification ──────────────────────────────────────────────────
+
+    def _existing_module_override(self, doc_id: str, conn):
+        """Return (module, confidence, method) if a human set this document's
+        module, else None. Keeps re-ingest from clobbering a correction."""
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT sap_module, sap_module_confidence, sap_module_method
+                    FROM documents
+                    WHERE document_id = %s AND sap_module_method = %s
+                    LIMIT 1
+                    """,
+                    (doc_id, METHOD_MANUAL),
+                )
+                row = cur.fetchone()
+        except Exception as e:
+            print(f"DEBUG: module override lookup failed for {doc_id}: {e}")
+            return None
+
+        if not row:
+            return None
+        if isinstance(row, tuple):
+            return row[0], row[1], row[2]
+        return row['sap_module'], row['sap_module_confidence'], row['sap_module_method']
+
+    def _resolve_module(self, doc_id, title, text, scope_id, conn, use_llm=True):
+        """Resolve a document's module for ingest.
+
+        Returns a metadata fragment ready to merge into the chunk metadata.
+        Never raises — a classification failure must not fail an ingest.
+        """
+        override = self._existing_module_override(doc_id, conn)
+        if override and not should_reclassify(override[2]):
+            module, confidence, method = override
+        else:
+            module, confidence, method = self.module_classifier.classify(
+                title=title, text=text, scope_id=scope_id, conn=conn, use_llm=use_llm
+            )
+        return {
+            'sapModule': module,
+            'sapModuleConfidence': confidence,
+            'sapModuleMethod': method,
+        }
+
+    def set_document_module(self, doc_id: str, module: str) -> bool:
+        """Apply a human's module correction across every chunk of a document.
+
+        Marked 'manual' so no later re-ingest overwrites it.
+        """
+        normalized = normalize_module(module)
+        if not normalized:
+            raise ValueError(f"'{module}' is not a valid SAP module code")
+
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE documents
+                    SET sap_module = %s,
+                        sap_module_confidence = 1.0,
+                        sap_module_method = %s
+                    WHERE document_id = %s
+                    """,
+                    (normalized, METHOD_MANUAL, doc_id),
+                )
+                updated = cur.rowcount
+            conn.commit()
+            return updated > 0
+        except Exception as e:
+            conn.rollback()
+            print(f"Error setting module for {doc_id}: {e}")
+            raise
+        finally:
+            conn.close()
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -252,6 +347,12 @@ class RAGService:
 
         conn = get_conn()
         try:
+            # Resolve the module before dropping the old chunks — the lookup for a
+            # prior manual override reads the rows we are about to delete.
+            base_metadata.update(
+                self._resolve_module(doc_id, filename, plain_text, scope_id, conn)
+            )
+
             # Delete existing chunks for this document
             self._delete_chunks_for_doc(doc_id, conn)
 
@@ -340,6 +441,11 @@ class RAGService:
 
             conn = get_conn()
             try:
+                # Scope lookup only: the placeholder text is synthetic boilerplate,
+                # so asking an LLM to classify it would just burn a call on noise.
+                chunk_meta.update(
+                    self._resolve_module(doc_id, filename, '', scope_id, conn, use_llm=False)
+                )
                 self._insert_chunk(conn, f"{doc_id}_0", doc_id, placeholder_text, embedding, chunk_meta)
                 conn.commit()
             finally:
@@ -446,6 +552,11 @@ class RAGService:
 
                 conn = get_conn()
                 try:
+                    # No CALM scope on an upload, so this is an LLM classification.
+                    # Resolve once per document, not once per chunk.
+                    module_meta = self._resolve_module(
+                        doc_id, file.filename, text_content, None, conn
+                    )
                     for i, chunk in enumerate(chunks):
                         embedding = self._create_embedding(chunk)
                         metadata = {
@@ -457,6 +568,7 @@ class RAGService:
                             'document_name': file.filename,
                             'is_placeholder': False,
                             'html_content': '',
+                            **module_meta,
                         }
                         self._insert_chunk(conn, f"{doc_id}_{i}", doc_id, chunk, embedding, metadata)
                     conn.commit()
@@ -509,6 +621,9 @@ class RAGService:
 
         conn = get_conn()
         try:
+            # Resolve before deleting: the manual-override lookup reads existing rows.
+            module_meta = self._resolve_module(doc_id, doc_name, content, None, conn)
+
             if is_duplicate:
                 self._delete_chunks_for_doc(doc_id, conn)
 
@@ -523,6 +638,7 @@ class RAGService:
                     'document_name': doc_name,
                     'is_placeholder': False,
                     'html_content': '',
+                    **module_meta,
                 }
                 self._insert_chunk(conn, f'{doc_id}_{i}', doc_id, chunk, embedding, metadata)
             conn.commit()
@@ -683,7 +799,8 @@ class RAGService:
 
     def list_documents(self, page: int = 1, page_size: int = 10, search: str = '',
                        source: str = '', doc_type: str = '', project: str = '',
-                       date_from: str = '', date_to: str = '', latest_only: bool = True):
+                       module: str = '', date_from: str = '', date_to: str = '',
+                       latest_only: bool = True):
         """List unique documents with optional filtering and pagination.
 
         Returns a dict with keys: documents (list), total (int), page (int), page_size (int), total_pages (int).
@@ -713,6 +830,9 @@ class RAGService:
                 if project:
                     where_clauses.append("project = ?")
                     params.append(project)
+                if module:
+                    where_clauses.append("sap_module = ?")
+                    params.append(module)
                 if date_from:
                     where_clauses.append("updated_on >= ?")
                     params.append(date_from)
@@ -741,6 +861,7 @@ class RAGService:
                             document_id, document_name, source, doc_type, project,
                             updated_by, updated_on, web_url, uuid, display_id,
                             version, is_latest, calm_display_id,
+                            sap_module, sap_module_confidence, sap_module_method,
                             MAX(length(content)) AS content_len,
                             COUNT(*) AS chunk_count
                         FROM documents
@@ -770,6 +891,9 @@ class RAGService:
                 if project:
                     where_clauses.append("d.project = %s")
                     params.append(project)
+                if module:
+                    where_clauses.append("d.sap_module = %s")
+                    params.append(module)
                 if date_from:
                     where_clauses.append("d.updated_on >= %s")
                     params.append(date_from)
@@ -813,6 +937,9 @@ class RAGService:
                                 d.version,
                                 d.is_latest,
                                 d.calm_display_id,
+                                d.sap_module,
+                                d.sap_module_confidence,
+                                d.sap_module_method,
                                 length(d.content) AS content_len,
                                 (SELECT COUNT(*)::int FROM documents d2
                                  WHERE d2.document_id IS NOT DISTINCT FROM d.document_id) AS chunk_count
@@ -848,6 +975,9 @@ class RAGService:
                 uid = row.get('uuid')
                 if uid is not None and hasattr(uid, 'hex'):
                     uid = str(uid)
+                module_code = row.get('sap_module') or UNCLASSIFIED
+                module_method = row.get('sap_module_method')
+                module_confidence = row.get('sap_module_confidence')
                 doc_list.append({
                     'name': row.get('document_name') or row.get('document_id') or 'Unknown',
                     'type': row.get('doc_type') or 'Unknown',
@@ -863,6 +993,15 @@ class RAGService:
                     'displayId': row.get('calm_display_id') or row.get('display_id') or '',
                     'size': f"{size_kb:.1f} KB" if size_kb >= 1 else f"{estimated_size} bytes",
                     'chunks': chunk_count,
+                    'sapModule': module_code,
+                    'sapModuleLabel': MODULE_LABELS.get(module_code, module_code),
+                    'sapModuleMethod': module_method,
+                    'sapModuleConfidence': module_confidence,
+                    'needsModuleReview': (
+                        module_method == METHOD_LLM
+                        and (module_confidence is None
+                             or module_confidence < REVIEW_CONFIDENCE_THRESHOLD)
+                    ),
                 })
         except Exception as e:
             print(f"Error building document list: {e}")
@@ -879,14 +1018,21 @@ class RAGService:
             'total_pages': max(1, total_pages),
         }
 
-    def get_document_stats(self, project: str = '', latest_only: bool = True) -> dict:
-        """Aggregate document counts by type, optionally filtered by project name.
+    def get_document_stats(self, project: str = '', module: str = '',
+                           latest_only: bool = True) -> dict:
+        """Aggregate document counts for the dashboard drill-down.
+
+        The project filter applies to every figure returned. The module filter
+        applies to documents_by_type only, so selecting a module narrows the type
+        breakdown while the module chart it was clicked from stays put.
 
         Returns:
-            documents_by_type: [{type, count}, ...]
+            documents_by_type: [{type, count}, ...]  — respects project + module
+            documents_by_module: [{module, label, count}, ...] — respects project
+            needs_review: count of low-confidence LLM guesses in scope
             projects: distinct project names for the filter dropdown
-            total_documents: total distinct documents matching the filter
-            project: active project filter (or empty string)
+            total_documents: distinct documents matching project + module
+            project / module: the active filters, echoed back
         """
         conn = None
         try:
@@ -894,19 +1040,28 @@ class RAGService:
             is_sqlite = self._is_sqlite(conn)
             placeholder = '?' if is_sqlite else '%s'
 
-            where_clauses = []
-            params: list = []
+            # Shared by every aggregate below.
+            base_clauses = []
+            base_params: list = []
 
             if project:
-                where_clauses.append(f"project = {placeholder}")
-                params.append(project)
+                base_clauses.append(f"project = {placeholder}")
+                base_params.append(project)
             if latest_only:
                 if is_sqlite:
-                    where_clauses.append("(is_latest = 1 OR is_latest IS NULL)")
+                    base_clauses.append("(is_latest = 1 OR is_latest IS NULL)")
                 else:
-                    where_clauses.append("(is_latest = TRUE OR is_latest IS NULL)")
+                    base_clauses.append("(is_latest = TRUE OR is_latest IS NULL)")
 
-            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+            base_sql = ("WHERE " + " AND ".join(base_clauses)) if base_clauses else ""
+
+            # Type breakdown and totals additionally honour the module drill-down.
+            typed_clauses = list(base_clauses)
+            typed_params = list(base_params)
+            if module:
+                typed_clauses.append(f"sap_module = {placeholder}")
+                typed_params.append(module)
+            typed_sql = ("WHERE " + " AND ".join(typed_clauses)) if typed_clauses else ""
 
             cursor_factory = None if is_sqlite else psycopg2.extras.RealDictCursor
             with conn.cursor(cursor_factory=cursor_factory) as cur:
@@ -914,27 +1069,59 @@ class RAGService:
                     f"""
                     SELECT doc_type, COUNT(DISTINCT document_id) AS count
                     FROM documents
-                    {where_sql}
+                    {typed_sql}
                     GROUP BY doc_type
                     ORDER BY count DESC
                     """,
-                    params,
+                    typed_params,
                 )
                 rows = cur.fetchall()
 
                 cur.execute(
                     f"""
+                    SELECT sap_module, COUNT(DISTINCT document_id) AS count
+                    FROM documents
+                    {base_sql}
+                    GROUP BY sap_module
+                    ORDER BY count DESC
+                    """,
+                    base_params,
+                )
+                module_rows = cur.fetchall()
+
+                cur.execute(
+                    f"""
                     SELECT COUNT(DISTINCT document_id) AS total
                     FROM documents
-                    {where_sql}
+                    {typed_sql}
                     """,
-                    params,
+                    typed_params,
                 )
                 total_row = cur.fetchone()
                 if is_sqlite:
                     total_documents = (total_row[0] if total_row else 0) or 0
                 else:
                     total_documents = (total_row or {}).get('total') or 0
+
+                # Low-confidence guesses a human should confirm.
+                review_clauses = list(typed_clauses) + [
+                    f"sap_module_method = {placeholder}",
+                    f"(sap_module_confidence IS NULL OR sap_module_confidence < {placeholder})",
+                ]
+                review_params = list(typed_params) + [METHOD_LLM, REVIEW_CONFIDENCE_THRESHOLD]
+                cur.execute(
+                    f"""
+                    SELECT COUNT(DISTINCT document_id) AS total
+                    FROM documents
+                    WHERE {" AND ".join(review_clauses)}
+                    """,
+                    review_params,
+                )
+                review_row = cur.fetchone()
+                if is_sqlite:
+                    needs_review = (review_row[0] if review_row else 0) or 0
+                else:
+                    needs_review = (review_row or {}).get('total') or 0
 
                 # Always return full project list for the filter dropdown
                 cur.execute(
@@ -955,9 +1142,12 @@ class RAGService:
             traceback.print_exc()
             return {
                 'documents_by_type': [],
+                'documents_by_module': [],
+                'needs_review': 0,
                 'projects': [],
                 'total_documents': 0,
                 'project': project or '',
+                'module': module or '',
             }
         finally:
             if conn:
@@ -976,6 +1166,21 @@ class RAGService:
                 'count': int(count or 0),
             })
 
+        documents_by_module = []
+        for row in module_rows:
+            if is_sqlite:
+                code = row[0]
+                count = row[1]
+            else:
+                code = row.get('sap_module')
+                count = row.get('count')
+            code = code or UNCLASSIFIED
+            documents_by_module.append({
+                'module': code,
+                'label': MODULE_LABELS.get(code, code),
+                'count': int(count or 0),
+            })
+
         projects = []
         for row in project_rows:
             name = row[0] if is_sqlite else row.get('project')
@@ -984,9 +1189,12 @@ class RAGService:
 
         return {
             'documents_by_type': documents_by_type,
+            'documents_by_module': documents_by_module,
+            'needs_review': int(needs_review),
             'projects': projects,
             'total_documents': int(total_documents),
             'project': project or '',
+            'module': module or '',
         }
 
     def list_document_versions(self, document_id: str) -> list:

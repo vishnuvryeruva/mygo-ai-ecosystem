@@ -437,6 +437,64 @@ body {
   text-align: right;
 }
 
+/* Module bars drill down into the type chart. Reset the button chrome so they
+   still read as chart rows, not controls. */
+.dashboard-bar-row-clickable {
+  width: 100%;
+  padding: 4px 6px;
+  margin: -4px -6px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.dashboard-bar-row-clickable:hover {
+  background: var(--bg-hover, #f8fafc);
+}
+
+.dashboard-bar-row-clickable:focus-visible {
+  outline: 2px solid var(--mygo-orange);
+  outline-offset: 2px;
+}
+
+.dashboard-bar-row-clickable.is-selected {
+  background: var(--bg-hover, #f8fafc);
+}
+
+.dashboard-bar-row-clickable.is-selected .dashboard-bar-label {
+  color: var(--text-heading);
+  font-weight: 600;
+}
+
+/* Unselected bars recede once a drill-down is active. */
+.dashboard-chart-bars:has(.is-selected) .dashboard-bar-row-clickable:not(.is-selected) .dashboard-bar-fill {
+  opacity: 0.35;
+}
+
+.dashboard-chart-clear {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--mygo-orange);
+  cursor: pointer;
+}
+
+.dashboard-chart-clear:hover {
+  text-decoration: underline;
+}
+
+.dashboard-chart-note {
+  margin: 18px 0 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
 /* ============================================
    DOCUMENT HUB
    ============================================ */
@@ -603,6 +661,54 @@ body {
 
 .doc-type-cell {
   color: var(--text-muted);
+}
+
+/* Module is editable inline: a bare select that reads as text until hovered,
+   so the table stays scannable but a correction is always one click away. */
+.doc-module-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.doc-module-select {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 0.82rem;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  max-width: 170px;
+}
+
+.doc-module-select:hover:not(:disabled) {
+  border-color: var(--border-color);
+  background: var(--bg-card);
+}
+
+.doc-module-select:focus {
+  outline: none;
+  border-color: var(--mygo-orange);
+  background: var(--bg-card);
+}
+
+.doc-module-select:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.doc-module-review {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 .doc-name-cell {

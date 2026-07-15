@@ -3,7 +3,7 @@ set -e
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 DOCKER_USER="vishnuvryeruva98"
-NEXT_PUBLIC_BACKEND_URL="https://mygo-backend-vd2026.cfapps.us10-001.hana.ondemand.com"
+NEXT_PUBLIC_BACKEND_URL="https://mygo-backend-97415b8ftrial.cfapps.us10-001.hana.ondemand.com"
 CF_API="https://api.cf.us10-001.hana.ondemand.com"
 MANIFEST_FILE="manifest.yml"   # change to manifest.yaml if that's your actual filename
 
@@ -100,8 +100,8 @@ cf push
 echo ""
 echo "✅ Deployment complete!"
 echo "   Tag     : $TAG"
-echo "   Frontend: https://mygo-frontend-vd2026.cfapps.us10-001.hana.ondemand.com"
-echo "   Backend : https://mygo-backend-vd2026.cfapps.us10-001.hana.ondemand.com"
+echo "   Frontend: https://mygo-frontend-97415b8ftrial.cfapps.us10-001.hana.ondemand.com"
+echo "   Backend : https://mygo-backend-97415b8ftrial.cfapps.us10-001.hana.ondemand.com"
 echo ""
 echo "⚠️  REMINDER: If you added new env vars to your code, set them via 'cf set-env'"
 echo "   (see the env vars section at the top of this script)"

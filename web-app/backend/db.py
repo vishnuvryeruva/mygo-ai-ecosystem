@@ -42,7 +42,10 @@ def _sql_without_pgvector(sql: str) -> str:
     """Schema DDL for hosts without pgvector (e.g. managed RDS without the extension)."""
     sql = re.sub(r'CREATE EXTENSION[^;]*;', '', sql, flags=re.IGNORECASE)
     sql = sql.replace("embedding       vector(1536),", "embedding       BYTEA,")
-    sql = re.sub(r'CREATE INDEX.*?USING ivfflat.*?;', '', sql, flags=re.IGNORECASE | re.DOTALL)
+    # [^;] keeps this inside a single statement: with .* it would run from the
+    # first CREATE INDEX in the file through the ivfflat one, deleting every
+    # unrelated index in between.
+    sql = re.sub(r'CREATE INDEX[^;]*?USING ivfflat[^;]*?;', '', sql, flags=re.IGNORECASE | re.DOTALL)
     return sql
 
 
@@ -212,6 +215,18 @@ def init_db():
              "ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_latest BOOLEAN DEFAULT TRUE"),
             ("ALTER TABLE documents ADD COLUMN calm_display_id TEXT",
              "ALTER TABLE documents ADD COLUMN IF NOT EXISTS calm_display_id TEXT"),
+            ("ALTER TABLE documents ADD COLUMN sap_module TEXT DEFAULT 'UNCLASSIFIED'",
+             "ALTER TABLE documents ADD COLUMN IF NOT EXISTS sap_module TEXT DEFAULT 'UNCLASSIFIED'"),
+            ("ALTER TABLE documents ADD COLUMN sap_module_confidence REAL",
+             "ALTER TABLE documents ADD COLUMN IF NOT EXISTS sap_module_confidence REAL"),
+            ("ALTER TABLE documents ADD COLUMN sap_module_method TEXT",
+             "ALTER TABLE documents ADD COLUMN IF NOT EXISTS sap_module_method TEXT"),
+            # Must follow the ADD COLUMNs above: on an existing database the
+            # columns do not exist until those have run.
+            ("CREATE INDEX IF NOT EXISTS documents_sap_module_idx ON documents(sap_module)",
+             "CREATE INDEX IF NOT EXISTS documents_sap_module_idx ON documents(sap_module)"),
+            ("CREATE INDEX IF NOT EXISTS documents_project_idx ON documents(project)",
+             "CREATE INDEX IF NOT EXISTS documents_project_idx ON documents(project)"),
         ]:
             try:
                 cur = conn.cursor()

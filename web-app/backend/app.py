@@ -70,7 +70,9 @@ from services.btp_service import BTPService, BtpODataError
 from services import role_service
 from services import user_service
 from services.github_service import GitHubService
+from services.scope_service import ScopeService
 from config.prompts import get_all_prompts, get_prompt, update_prompt
+from config.sap_modules import normalize_module, taxonomy_payload
 
 # Import MCP tools
 from mcp_server import list_tools, execute_tool, TOOLS
@@ -246,6 +248,7 @@ prompt_service = PromptService()
 code_service = CodeService()
 test_service = TestService()
 advisor_service = AdvisorService()
+scope_service = ScopeService()
 
 @app.before_request
 def log_request_info():
@@ -569,9 +572,13 @@ def list_documents():
         source = request.args.get('source', '').strip()
         doc_type = request.args.get('type', '').strip()
         project = request.args.get('project', '').strip()
+        module = request.args.get('module', '').strip()
         date_from = request.args.get('date_from', '').strip()
         date_to = request.args.get('date_to', '').strip()
         latest_only = request.args.get('latest_only', 'true').lower() != 'false'
+
+        if module and not normalize_module(module):
+            return jsonify({"error": f"Unknown SAP module '{module}'"}), 400
 
         result = rag_service.list_documents(
             page=page,
@@ -580,6 +587,7 @@ def list_documents():
             source=source,
             doc_type=doc_type,
             project=project,
+            module=module,
             date_from=date_from,
             date_to=date_to,
             latest_only=latest_only,
@@ -592,12 +600,87 @@ def list_documents():
 
 @app.route('/api/dashboard/stats', methods=['GET'])
 def dashboard_stats():
-    """Document analytics for the dashboard (optionally filtered by project)."""
+    """Document analytics for the dashboard (optionally filtered by project/module)."""
     try:
         project = request.args.get('project', '').strip()
+        module = request.args.get('module', '').strip()
         latest_only = request.args.get('latest_only', 'true').lower() != 'false'
-        result = rag_service.get_document_stats(project=project, latest_only=latest_only)
+
+        if module and not normalize_module(module):
+            return jsonify({"error": f"Unknown SAP module '{module}'"}), 400
+
+        result = rag_service.get_document_stats(
+            project=project, module=module, latest_only=latest_only
+        )
         return jsonify(result)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/sap-modules', methods=['GET'])
+def list_sap_modules():
+    """The module taxonomy, so the frontend never hardcodes the enum."""
+    return jsonify({'modules': taxonomy_payload()})
+
+
+@app.route('/api/documents/<path:document_id>/module', methods=['PUT'])
+def set_document_module(document_id):
+    """Override a document's SAP module. Marks it manual so ingest won't undo it."""
+    try:
+        data = request.json or {}
+        module = (data.get('module') or '').strip()
+        if not module:
+            return jsonify({"error": "module is required"}), 400
+
+        updated = rag_service.set_document_module(document_id, module)
+        if not updated:
+            return jsonify({"error": f"Document {document_id} not found"}), 404
+
+        return jsonify({
+            "message": "Module updated",
+            "documentId": document_id,
+            "sapModule": normalize_module(module),
+            "sapModuleMethod": "manual",
+        })
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/scopes', methods=['GET'])
+def list_cached_scopes():
+    """Cached CALM scopes and their module mapping. Unmapped ones need triage."""
+    try:
+        project_id = request.args.get('projectId', '').strip()
+        return jsonify({'scopes': scope_service.list_scopes(project_id)})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/scopes/<path:scope_id>/module', methods=['PUT'])
+def set_scope_module(scope_id):
+    """Curate a scope's module mapping. Survives later syncs."""
+    try:
+        data = request.json or {}
+        module = (data.get('module') or '').strip()
+        if not module:
+            return jsonify({"error": "module is required"}), 400
+
+        updated = scope_service.set_scope_module(scope_id, module)
+        if not updated:
+            return jsonify({"error": f"Scope {scope_id} not found"}), 404
+
+        return jsonify({"message": "Scope module updated", "scopeId": scope_id,
+                        "sapModule": normalize_module(module)})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1417,6 +1500,14 @@ def calm_list_scopes(source_id):
         
         service = get_calm_service(source.get('config'))
         scopes = service.list_scopes(project_id)
+
+        # Cache them so the classifier's deterministic layer has something to map
+        # against. Best-effort: a cache miss degrades classification, not this call.
+        try:
+            scope_service.sync_scopes(project_id, scopes)
+        except Exception as e:
+            print(f"WARNING: scope cache sync failed for project {project_id}: {e}")
+
         return jsonify({"scopes": scopes})
     except Exception as e:
         import traceback

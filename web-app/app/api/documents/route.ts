@@ -4,7 +4,7 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:500
 
 export async function GET(req: NextRequest) {
   try {
-    // Forward all query params (page, page_size, search, source, type, project, date_from, date_to)
+    // Forward all query params (page, page_size, search, source, type, project, module, date_from, date_to)
     const params = req.nextUrl.searchParams.toString()
     const url = `${BACKEND_URL}/api/documents${params ? `?${params}` : ''}`
 

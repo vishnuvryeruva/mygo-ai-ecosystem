@@ -36,7 +36,10 @@ CREATE TABLE IF NOT EXISTS documents (
     scope_id        TEXT,
     version         INTEGER DEFAULT 1,
     is_latest       BOOLEAN DEFAULT TRUE,
-    calm_display_id TEXT
+    calm_display_id TEXT,
+    sap_module      TEXT DEFAULT 'UNCLASSIFIED',
+    sap_module_confidence REAL,
+    sap_module_method     TEXT   -- scope_map | llm | vector | manual
 );
 
 -- Cosine similarity index for fast nearest-neighbour search
@@ -45,6 +48,25 @@ CREATE TABLE IF NOT EXISTS documents (
 CREATE INDEX IF NOT EXISTS documents_embedding_idx
     ON documents USING ivfflat (embedding vector_cosine_ops)
     WITH (lists = 100);
+
+-- NOTE: the indexes for sap_module/project are created in db.py's migration
+-- list, not here. On an existing database CREATE TABLE IF NOT EXISTS is a no-op,
+-- so those columns only appear after the ALTER TABLE backfill that runs later —
+-- indexing them at this point would fail and abort startup.
+
+-- ── CALM scopes cache ───────────────────────────────────────────────────────
+-- documents.scope_id carries the CALM scope but not its name, so there is
+-- nothing to map against without this. Populated from CalmService.list_scopes;
+-- sap_module is resolved from the name once and is admin-editable thereafter.
+CREATE TABLE IF NOT EXISTS calm_scopes (
+    id          TEXT PRIMARY KEY,
+    name        TEXT,
+    project_id  TEXT,
+    sap_module  TEXT,
+    synced_at   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS calm_scopes_project_id_idx ON calm_scopes(project_id);
 
 -- ── Code Snippets table (user's saved code repository) ────────────────────────
 CREATE TABLE IF NOT EXISTS code_snippets (

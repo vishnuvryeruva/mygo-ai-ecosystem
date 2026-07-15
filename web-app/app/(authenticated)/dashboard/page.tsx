@@ -21,6 +21,13 @@ type DocTypeStat = {
     maxCount: number
 }
 
+type ModuleStat = {
+    code: string
+    label: string
+    count: number
+    maxCount: number
+}
+
 const stats = [
     {
         title: 'Total Sources', value: '4', subtitle: 'CALM, SharePoint, Jira, Solman', icon: (
@@ -64,24 +71,32 @@ const abapByType = [
 
 export default function DashboardPage() {
     const [projectFilter, setProjectFilter] = useState('')
+    const [moduleFilter, setModuleFilter] = useState('')
     const [projectOptions, setProjectOptions] = useState<string[]>([])
     const [docsByType, setDocsByType] = useState<DocTypeStat[]>([])
+    const [docsByModule, setDocsByModule] = useState<ModuleStat[]>([])
+    const [needsReview, setNeedsReview] = useState(0)
     const [isLoadingDocsByType, setIsLoadingDocsByType] = useState(true)
     const [docsByTypeError, setDocsByTypeError] = useState('')
 
-    const fetchDocumentStats = useCallback(async (project: string) => {
+    const fetchDocumentStats = useCallback(async (project: string, module: string) => {
         setIsLoadingDocsByType(true)
         setDocsByTypeError('')
         try {
             const params = new URLSearchParams()
             if (project) params.set('project', project)
+            if (module) params.set('module', module)
             const query = params.toString()
             const res = await axios.get(`/api/dashboard/stats${query ? `?${query}` : ''}`)
             const byType: { type?: string; count?: number }[] = res.data.documents_by_type ?? []
+            const byModule: { module?: string; label?: string; count?: number }[] =
+                res.data.documents_by_module ?? []
             const projects: string[] = res.data.projects ?? []
             const maxCount = Math.max(1, ...byType.map((item) => Number(item.count) || 0))
+            const maxModuleCount = Math.max(1, ...byModule.map((item) => Number(item.count) || 0))
 
             setProjectOptions(projects)
+            setNeedsReview(Number(res.data.needs_review) || 0)
             setDocsByType(
                 byType.map((item) => ({
                     label: resolveTypeLabel(item.type || 'Unknown'),
@@ -89,9 +104,18 @@ export default function DashboardPage() {
                     maxCount,
                 }))
             )
+            setDocsByModule(
+                byModule.map((item) => ({
+                    code: item.module || 'UNCLASSIFIED',
+                    label: item.label || item.module || 'Unclassified',
+                    count: Number(item.count) || 0,
+                    maxCount: maxModuleCount,
+                }))
+            )
         } catch (err) {
             console.error('Failed to fetch document stats:', err)
             setDocsByType([])
+            setDocsByModule([])
             setDocsByTypeError('Unable to load document stats.')
         } finally {
             setIsLoadingDocsByType(false)
@@ -99,8 +123,19 @@ export default function DashboardPage() {
     }, [])
 
     useEffect(() => {
-        fetchDocumentStats(projectFilter)
-    }, [projectFilter, fetchDocumentStats])
+        fetchDocumentStats(projectFilter, moduleFilter)
+    }, [projectFilter, moduleFilter, fetchDocumentStats])
+
+    // A module selected under one project rarely exists under the next.
+    const handleProjectChange = (project: string) => {
+        setProjectFilter(project)
+        setModuleFilter('')
+    }
+
+    const selectedModule = docsByModule.find((item) => item.code === moduleFilter)
+    const typeChartTitle = selectedModule
+        ? `Documents by Type — ${selectedModule.label}`
+        : 'Documents by Type'
 
     return (
         <div className="page-content-area">
@@ -125,11 +160,11 @@ export default function DashboardPage() {
             <div className="dashboard-charts-grid">
                 <div className="dashboard-chart-card">
                     <div className="dashboard-chart-header">
-                        <h3 className="dashboard-chart-title">Documents by Type</h3>
+                        <h3 className="dashboard-chart-title">Documents by Module</h3>
                         <select
                             className="doc-hub-filter-select"
                             value={projectFilter}
-                            onChange={(e) => setProjectFilter(e.target.value)}
+                            onChange={(e) => handleProjectChange(e.target.value)}
                             aria-label="Filter documents by project"
                         >
                             <option value="">All Projects</option>
@@ -143,11 +178,72 @@ export default function DashboardPage() {
                             <p className="dashboard-chart-empty">Loading document stats…</p>
                         ) : docsByTypeError ? (
                             <p className="dashboard-chart-empty">{docsByTypeError}</p>
-                        ) : docsByType.length === 0 ? (
+                        ) : docsByModule.length === 0 ? (
                             <p className="dashboard-chart-empty">
                                 {projectFilter
                                     ? 'No documents found for this project.'
                                     : 'No documents available yet.'}
+                            </p>
+                        ) : (
+                            docsByModule.map((item) => {
+                                const isSelected = item.code === moduleFilter
+                                return (
+                                    <button
+                                        key={item.code}
+                                        type="button"
+                                        className={`dashboard-bar-row dashboard-bar-row-clickable${isSelected ? ' is-selected' : ''}`}
+                                        onClick={() => setModuleFilter(isSelected ? '' : item.code)}
+                                        aria-pressed={isSelected}
+                                        title={isSelected
+                                            ? `Clear the ${item.label} filter`
+                                            : `Show only ${item.label} documents`}
+                                    >
+                                        <span className="dashboard-bar-label">{item.label}</span>
+                                        <div className="dashboard-bar-track">
+                                            <div
+                                                className="dashboard-bar-fill"
+                                                style={{ width: `${(item.count / item.maxCount) * 100}%` }}
+                                            />
+                                        </div>
+                                        <span className="dashboard-bar-count">{item.count}</span>
+                                    </button>
+                                )
+                            })
+                        )}
+                    </div>
+                    {needsReview > 0 && (
+                        <p className="dashboard-chart-note">
+                            {needsReview} document{needsReview === 1 ? '' : 's'} classified with low
+                            confidence — review {needsReview === 1 ? 'it' : 'them'} in the Document Hub.
+                        </p>
+                    )}
+                </div>
+
+                <div className="dashboard-chart-card">
+                    <div className="dashboard-chart-header">
+                        <h3 className="dashboard-chart-title">{typeChartTitle}</h3>
+                        {moduleFilter && (
+                            <button
+                                type="button"
+                                className="dashboard-chart-clear"
+                                onClick={() => setModuleFilter('')}
+                            >
+                                Clear filter
+                            </button>
+                        )}
+                    </div>
+                    <div className="dashboard-chart-bars">
+                        {isLoadingDocsByType ? (
+                            <p className="dashboard-chart-empty">Loading document stats…</p>
+                        ) : docsByTypeError ? (
+                            <p className="dashboard-chart-empty">{docsByTypeError}</p>
+                        ) : docsByType.length === 0 ? (
+                            <p className="dashboard-chart-empty">
+                                {moduleFilter
+                                    ? 'No documents found for this module.'
+                                    : projectFilter
+                                        ? 'No documents found for this project.'
+                                        : 'No documents available yet.'}
                             </p>
                         ) : (
                             docsByType.map((item, i) => (
