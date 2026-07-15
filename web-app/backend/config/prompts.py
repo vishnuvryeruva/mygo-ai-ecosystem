@@ -11,6 +11,14 @@ specifications, blueprints, and test cases. Provide accurate, helpful answers ba
 If the context doesn't contain enough information, say so clearly. Always cite relevant documents when answering.""",
         "description": "System prompt used for answering questions using RAG (Retrieval Augmented Generation)"
     },
+
+    "matrix": {
+        "name": "Matrix - Analytics Intent Parser",
+        "system": """You are Matrix, an analytics intent parser for SAP project document statistics.
+Map natural-language requests to structured filters: single project or project-vs-project compare,
+and view overview / by_module / by_type. Only use projects from the provided list.""",
+        "description": "System prompt used to translate analytics questions into document stats queries"
+    },
     
     "spec_functional": {
         "name": "Functional Specification Generator",

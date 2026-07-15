@@ -229,8 +229,8 @@ export default function AuthenticatedLayout({
     }, [])
 
     const handleQuickAction = (actionId: string) => {
-        // Ask Yoda opens the chatbot widget
-        if (actionId === 'ask-yoda') {
+        // Chat-first agents open the chatbot widget
+        if (actionId === 'ask-yoda' || actionId === 'matrix') {
             handleAgentSelect(actionId)
             return
         }

@@ -8,7 +8,7 @@ export default function GlobalAIAgentsDropdown() {
             window.dispatchEvent(new CustomEvent('sync-source-open', { detail: { sourceId: null } }))
             return
         }
-        const openModal = agentId !== 'ask-yoda'
+        const openModal = agentId !== 'ask-yoda' && agentId !== 'matrix'
         window.dispatchEvent(new CustomEvent('agent-select', { detail: { agentId, openModal } }))
     }
 

@@ -52,6 +52,11 @@ const SyncIcon = () => (
         <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
     </svg>
 )
+const MatrixIcon = () => (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" />
+    </svg>
+)
 
 // ═══════════════════════════════════════════════════════════
 //  Message Types
@@ -61,6 +66,16 @@ interface ChatAction {
     label: string
     variant?: 'primary' | 'secondary' | 'outline'
     icon?: string
+}
+
+interface ChatBar {
+    label: string
+    count: number
+}
+
+interface ChatChart {
+    title: string
+    bars: ChatBar[]
 }
 
 interface ChatMessage {
@@ -73,6 +88,7 @@ interface ChatMessage {
     isRichText?: boolean
     status?: 'info' | 'success' | 'error' | 'loading'
     references?: Reference[]
+    charts?: ChatChart[]
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -103,6 +119,20 @@ const agentConfigs: Record<string, AgentConfig> = {
             { id: 'example-3', label: 'Find technical specs', variant: 'outline' },
         ],
         placeholder: 'Ask Yoda anything...',
+    },
+    'matrix': {
+        id: 'matrix',
+        name: 'Matrix',
+        description: 'Project Analytics Assistant',
+        icon: <MatrixIcon />,
+        gradient: 'linear-gradient(135deg, #0d9488, #14b8a6)',
+        welcomeMessage: 'Ask for document statistics by project, or compare two projects. I\'ll show simple bar charts like the dashboard.',
+        welcomeActions: [
+            { id: 'example-1', label: 'Show document stats for all projects', variant: 'outline' },
+            { id: 'example-2', label: 'Documents by module', variant: 'outline' },
+            { id: 'example-3', label: 'Compare two projects', variant: 'outline' },
+        ],
+        placeholder: 'e.g. Compare Project A vs Project B...',
     },
     'solution-advisor': {
         id: 'solution-advisor',
@@ -206,6 +236,8 @@ async function handleAgentMessage(agentId: string, query: string): Promise<{
     actions?: ChatAction[]
     isRichText?: boolean
     references?: Reference[]
+    charts?: ChatChart[]
+    status?: 'info' | 'success' | 'error' | 'loading'
 }> {
     const token = typeof window !== 'undefined' ? localStorage.getItem('mygo-token') : null
     const axiosConfig = token ? { headers: { Authorization: `Bearer ${token}` } } : {}
@@ -214,6 +246,17 @@ async function handleAgentMessage(agentId: string, query: string): Promise<{
         case 'ask-yoda': {
             const res = await axios.post('/api/ask-yoda', { query }, axiosConfig)
             return { content: res.data.answer, isRichText: true, references: res.data.references }
+        }
+        case 'matrix': {
+            const res = await axios.post('/api/matrix', { query }, axiosConfig)
+            if (res.data.error) {
+                return { content: res.data.error, status: 'error' }
+            }
+            return {
+                content: res.data.answer || 'Here are the statistics.',
+                isRichText: true,
+                charts: Array.isArray(res.data.charts) ? res.data.charts : [],
+            }
         }
         case 'solution-advisor': {
             const res = await axios.post('/api/solution-advisor/requirements', { user_input: query }, axiosConfig)
@@ -330,6 +373,38 @@ function ActionButton({ action, onClick }: { action: ChatAction; onClick: () => 
         <button style={variants[action.variant || 'outline']} onClick={onClick}>
             {action.label}
         </button>
+    )
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Inline Bar Chart (dashboard-style)
+// ═══════════════════════════════════════════════════════════
+function ChatBarChart({ chart }: { chart: ChatChart }) {
+    const bars = chart.bars || []
+    const maxCount = Math.max(1, ...bars.map((b) => Number(b.count) || 0))
+
+    return (
+        <div className="chat-bar-chart">
+            <h4 className="chat-bar-chart-title">{chart.title}</h4>
+            {bars.length === 0 ? (
+                <p className="chat-bar-chart-empty">No data for this breakdown.</p>
+            ) : (
+                <div className="chat-bar-chart-bars">
+                    {bars.map((bar) => (
+                        <div key={bar.label} className="dashboard-bar-row chat-bar-row">
+                            <span className="dashboard-bar-label chat-bar-label">{bar.label}</span>
+                            <div className="dashboard-bar-track">
+                                <div
+                                    className="dashboard-bar-fill"
+                                    style={{ width: `${(Number(bar.count) / maxCount) * 100}%` }}
+                                />
+                            </div>
+                            <span className="dashboard-bar-count">{bar.count}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
     )
 }
 
@@ -561,6 +636,7 @@ export default function ChatbotWidget({
             isRichText: msg.isRichText,
             status: msg.status,
             references: msg.references,
+            charts: msg.charts,
         }])
     }
 
@@ -704,6 +780,15 @@ export default function ChatbotWidget({
                                                         ) : (
                                                             <p>{message.content}</p>
                                                         )
+                                                    )}
+
+                                                    {/* Inline analytics charts (Matrix) */}
+                                                    {message.charts && message.charts.length > 0 && (
+                                                        <div className="chat-bar-charts">
+                                                            {message.charts.map((chart, idx) => (
+                                                                <ChatBarChart key={`${chart.title}-${idx}`} chart={chart} />
+                                                            ))}
+                                                        </div>
                                                     )}
 
                                                     {/* Source references */}

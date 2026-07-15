@@ -619,6 +619,27 @@ def dashboard_stats():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/matrix', methods=['POST'])
+def matrix_agent():
+    """Natural-language document analytics and project-vs-project comparison."""
+    try:
+        from agents import matrix_agent as matrix_agent_mod
+
+        data = request.json or {}
+        query = (data.get('query') or '').strip()
+        if not query:
+            return jsonify({"error": "Query is required"}), 400
+
+        user_id = get_optional_current_user_id()
+        llm_provider = get_llm_provider_for_user(user_id, agent_id='matrix')
+        result = matrix_agent_mod.handle_query(query, rag_service, llm_provider=llm_provider)
+        return jsonify(result)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/sap-modules', methods=['GET'])
 def list_sap_modules():
     """The module taxonomy, so the frontend never hardcodes the enum."""

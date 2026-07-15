@@ -61,6 +61,11 @@ const agentIcons: Record<string, (color: string) => React.ReactNode> = {
             <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
         </svg>
     ),
+    'matrix': (c) => (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" />
+        </svg>
+    ),
 }
 
 const agents: Agent[] = [
@@ -124,6 +129,15 @@ const agents: Agent[] = [
         description: 'Get AI-powered code review, performance suggestions, and best practice recommendations for your ABAP and SAP code.',
         icon: agentIcons['code-advisor']('#059669'),
         color: '#059669',
+        category: 'analysis',
+        status: 'active',
+    },
+    {
+        id: 'matrix',
+        name: 'Matrix',
+        description: 'Ask in natural language for project document statistics, or compare two projects side by side with dashboard-style charts.',
+        icon: agentIcons['matrix']('#0d9488'),
+        color: '#0d9488',
         category: 'analysis',
         status: 'active',
     },

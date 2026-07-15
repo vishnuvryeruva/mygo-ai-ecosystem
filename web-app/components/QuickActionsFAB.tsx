@@ -14,6 +14,11 @@ const fabIcons: Record<string, React.ReactNode> = {
             <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
         </svg>
     ),
+    'matrix': (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0d9488" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" />
+        </svg>
+    ),
     'solution-advisor': (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0891b2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" /><path d="M12 17h.01" />
@@ -72,6 +77,7 @@ export default function QuickActionsFAB({ onAction, activeAgent }: QuickActionsF
 
     const actions = [
         { id: 'ask-yoda', label: 'Ask Yoda' },
+        { id: 'matrix', label: 'Matrix' },
         { id: 'solution-advisor', label: 'Solution Advisor' },
         { id: 'spec-assistant', label: 'Spec Agent' },
         { id: 'code-advisor', label: 'Code Advisor' },

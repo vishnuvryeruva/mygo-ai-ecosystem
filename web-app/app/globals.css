@@ -437,6 +437,50 @@ body {
   text-align: right;
 }
 
+/* Matrix agent charts inside chat bubbles */
+.chat-bar-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+  width: 100%;
+}
+
+.chat-bar-chart {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.chat-bar-chart-title {
+  margin: 0 0 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-heading, #0f172a);
+}
+
+.chat-bar-chart-empty {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.chat-bar-chart-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-bar-row {
+  gap: 10px;
+}
+
+.chat-bar-label {
+  min-width: 88px;
+  font-size: 0.72rem;
+}
+
 /* Module bars drill down into the type chart. Reset the button chrome so they
    still read as chart rows, not controls. */
 .dashboard-bar-row-clickable {
