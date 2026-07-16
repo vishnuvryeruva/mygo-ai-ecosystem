@@ -36,23 +36,34 @@ SUPPORTED_EXTENSIONS = {
 def _deserialize_embedding(raw):
     """Normalize a stored embedding to a plain list of floats.
 
-    Four shapes reach this, depending on how the row was written and read:
-      - bytes  — BYTEA/BLOB holding JSON, when vectors are handled app-side
+    Shapes that reach this, depending on how the row was written and read:
+      - bytes / bytearray / memoryview — BYTEA/BLOB holding JSON text, used
+        wherever pgvector is unavailable and vectors are handled app-side.
+        psycopg2 hands bytea back as a memoryview, not bytes.
       - str    — JSON text, via SQLite
       - Vector — pgvector's own type, once register_vector() is on the connection
       - list/ndarray — anything already sequence-like
 
-    pgvector's Vector is the trap: it is not iterable, so list(raw) raises and an
-    over-broad except turns every embedding into None — which reads downstream as
-    "similarity 0" and silently pairs nothing at all. It exposes to_list() instead.
+    Two traps live here, and the order of these branches is the whole point:
+
+    1. pgvector's Vector is not iterable, so list(raw) raises and an over-broad
+       except turns every embedding into None — which reads downstream as
+       "similarity 0" and silently pairs nothing. It exposes to_list().
+    2. memoryview also has .tolist(), so it looks exactly like an ndarray. But
+       the buffer holds JSON *text*, so .tolist() yields the bytes of that text
+       rather than the vector — garbage that either scores nonsense or raises
+       "can't multiply sequence by non-int of type 'bytes'". It must be decoded
+       as JSON, so it has to be caught before any .tolist() check.
 
     Returns None only when there is genuinely no usable vector.
     """
     if raw is None:
         return None
     try:
-        if isinstance(raw, bytes):
-            return json.loads(raw.decode('utf-8'))
+        # Buffer types first: they carry JSON text, and memoryview would
+        # otherwise be mistaken for an ndarray by the .tolist() branch below.
+        if isinstance(raw, (bytes, bytearray, memoryview)):
+            return json.loads(bytes(raw).decode('utf-8'))
         if isinstance(raw, str):
             return json.loads(raw)
         if hasattr(raw, 'to_list'):     # pgvector.vector.Vector
@@ -724,9 +735,8 @@ class RAGService:
         try:
             if app_side:
                 # Python-based cosine similarity (SQLite or Postgres without pgvector)
-                import json
                 import math
-                
+
                 def cosine_similarity(v1, v2):
                     dot_product = sum(a * b for a, b in zip(v1, v2))
                     magnitude1 = math.sqrt(sum(a * a for a in v1))
@@ -744,20 +754,19 @@ class RAGService:
                     try:
                         # row might be sqlite3.Row or dict
                         row_dict = dict(row)
-                        emb_data = row_dict.get('embedding')
-                        if emb_data:
-                            if isinstance(emb_data, bytes):
-                                emb_list = json.loads(emb_data.decode('utf-8'))
-                            elif isinstance(emb_data, str):
-                                emb_list = json.loads(emb_data)
-                            else:
-                                emb_list = emb_data # Should be list
-                            
+                        # Must go through the shared helper: psycopg2 returns bytea
+                        # as a memoryview, which is neither bytes nor a list, and
+                        # passing it straight to cosine_similarity() multiplies
+                        # floats by single characters. That raises, this except
+                        # swallows it, every row gets skipped, and retrieval
+                        # silently returns nothing at all.
+                        emb_list = _deserialize_embedding(row_dict.get('embedding'))
+                        if emb_list:
                             score = cosine_similarity(query_embedding, emb_list)
                             row_dict['score'] = score
                             scored_rows.append(row_dict)
                     except Exception as e:
-                        print(f"DEBUG: Error processing embedding for row: {e}")
+                        print(f"WARNING: skipping row in similarity search: {e}")
                 
                 # Sort by score descending
                 scored_rows.sort(key=lambda x: x.get('score', 0), reverse=True)
