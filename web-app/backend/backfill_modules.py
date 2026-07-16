@@ -82,7 +82,7 @@ def main():
                     row['scope_id'], row['content'],
                 )
 
-            module, confidence, method = classifier.classify(
+            module, confidence, method, summary = classifier.classify(
                 title=name or '', text=content or '', scope_id=scope_id,
                 conn=conn, use_llm=args.use_llm,
             )
@@ -94,10 +94,11 @@ def main():
                     cur.execute(
                         """
                         UPDATE documents
-                        SET sap_module = %s, sap_module_confidence = %s, sap_module_method = %s
+                        SET sap_module = %s, sap_module_confidence = %s, sap_module_method = %s,
+                            summary = COALESCE(%s, summary)
                         WHERE document_id = %s
                         """,
-                        (module, confidence, method, doc_id),
+                        (module, confidence, method, summary or None, doc_id),
                     )
 
         if not args.dry_run:

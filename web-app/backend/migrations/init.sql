@@ -39,7 +39,15 @@ CREATE TABLE IF NOT EXISTS documents (
     calm_display_id TEXT,
     sap_module      TEXT DEFAULT 'UNCLASSIFIED',
     sap_module_confidence REAL,
-    sap_module_method     TEXT   -- scope_map | llm | vector | manual
+    sap_module_method     TEXT,  -- scope_map | llm | vector | manual
+    -- When Yoda ingested this row. Distinct from updated_on, which is the
+    -- document's last-changed date in the *source system*. A document last
+    -- touched in CALM two years ago but synced today is new to us, and the
+    -- Document Hub has to be able to say so — sorting on updated_on buries
+    -- freshly synced projects pages deep and reads as "sync is broken".
+    synced_on       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- AI summary of the document's design intent, written once at ingest.
+    summary         TEXT
 );
 
 -- Cosine similarity index for fast nearest-neighbour search

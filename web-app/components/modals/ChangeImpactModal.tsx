@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import axios from 'axios'
 import AppModal from './AppModal'
 
-interface FitGapModalProps {
+interface ChangeImpactModalProps {
     onClose: () => void
 }
 
@@ -15,8 +15,11 @@ interface SapModule { code: string; label: string }
 interface DocRef {
     documentId: string
     name: string
+    type: string
     typeLabel: string
+    module: string
     moduleLabel: string
+    summary: string
 }
 
 interface ChangedPoint { point: string; project_a?: string; project_b?: string }
@@ -35,27 +38,44 @@ interface Comparison {
     error?: string
 }
 
-interface FitGapResult {
+interface CoverageRow {
+    module: string
+    moduleLabel: string
+    type: string
+    typeLabel: string
+    countA: number
+    countB: number
+    onlyInA: boolean
+    onlyInB: boolean
+}
+
+interface ChangeImpactResult {
     projectA: string
     projectB: string
-    comparisons: Comparison[]
-    missing: DocRef[]
-    new: DocRef[]
+    coverage: CoverageRow[]
+    commonToBoth: Comparison[]
+    newInSource: DocRef[]
+    removedInComparison: DocRef[]
     summary: string
     stats: { documentsA: number; documentsB: number; paired: number; compared: number; truncated?: boolean }
 }
 
-export default function FitGapModal({ onClose }: FitGapModalProps) {
+export default function ChangeImpactModal({ onClose }: ChangeImpactModalProps) {
     const [projects, setProjects] = useState<Project[]>([])
     const [projectA, setProjectA] = useState('')
     const [projectB, setProjectB] = useState('')
     const [modules, setModules] = useState<SapModule[]>([])
     const [moduleFilter, setModuleFilter] = useState('')
+    const [typeFilter, setTypeFilter] = useState('')
 
     const [loadingProjects, setLoadingProjects] = useState(true)
+    const [loadingTable, setLoadingTable] = useState(false)
     const [running, setRunning] = useState(false)
+    // Distinguishes "table loaded, nothing analysed yet" from "analysis returned
+    // nothing" — otherwise an empty result reads as a broken screen.
+    const [analysed, setAnalysed] = useState(false)
     const [error, setError] = useState('')
-    const [result, setResult] = useState<FitGapResult | null>(null)
+    const [result, setResult] = useState<ChangeImpactResult | null>(null)
 
     // The projects dropdown needs a CALM source. There is normally exactly one,
     // so it is resolved silently rather than spending a third dropdown on it.
@@ -89,22 +109,45 @@ export default function FitGapModal({ onClose }: FitGapModalProps) {
 
     const nameOf = (id: string) => projects.find(p => p.id === id)?.name || ''
 
-    const runComparison = async () => {
+    // Both projects chosen → show the coverage table straight away. It is pure
+    // counting on the backend, so this costs nothing and gives the user something
+    // to aim at before committing to an analysis.
+    useEffect(() => {
+        if (!projectA || !projectB || projectA === projectB) {
+            setResult(null)
+            return
+        }
+        let cancelled = false
+        setLoadingTable(true)
+        setError('')
+        axios.post('/api/change-impact', {
+            projectAId: projectA, projectBId: projectB,
+            projectA: nameOf(projectA), projectB: nameOf(projectB),
+            tableOnly: true,
+        })
+            .then(res => { if (!cancelled) { setResult(res.data); setAnalysed(false) } })
+            .catch(() => { if (!cancelled) setError('Failed to load the document coverage table.') })
+            .finally(() => { if (!cancelled) setLoadingTable(false) })
+        return () => { cancelled = true }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [projectA, projectB])
+
+    const runComparison = async (moduleCode = moduleFilter, typeCode = typeFilter) => {
         setRunning(true)
         setError('')
-        setResult(null)
         try {
-            const res = await axios.post('/api/fit-gap', {
+            const res = await axios.post('/api/change-impact', {
                 projectAId: projectA,
                 projectBId: projectB,
                 projectA: nameOf(projectA),
                 projectB: nameOf(projectB),
-                module: moduleFilter,
+                module: moduleCode,
+                docType: typeCode,
             })
             if (res.data.error) setError(res.data.error)
-            else setResult(res.data)
+            else { setResult(res.data); setAnalysed(true) }
         } catch (err: any) {
-            setError(err?.response?.data?.error || 'Fit-gap analysis failed.')
+            setError(err?.response?.data?.error || 'Change impact analysis failed.')
         } finally {
             setRunning(false)
         }
@@ -119,10 +162,11 @@ export default function FitGapModal({ onClose }: FitGapModalProps) {
                     <div>
                         <h2 className="modal-title flex items-center gap-2">
                             <span className="text-2xl">⚖️</span>
-                            Fit-Gap Analysis
+                            Change Impact Analysis
                         </h2>
                         <p className="text-sm text-muted mt-1">
-                            Compare two projects&apos; documents on solution design — what&apos;s common, changed, and new
+                            Compare a source project against another on solution design — configuration,
+                            process and architecture, not wording
                         </p>
                     </div>
                     <button onClick={onClose} className="modal-close">✕</button>
@@ -132,7 +176,7 @@ export default function FitGapModal({ onClose }: FitGapModalProps) {
                     {/* Selection */}
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm font-medium mb-1">Project A</label>
+                            <label className="block text-sm font-medium mb-1">Source project</label>
                             <select
                                 className="doc-hub-filter-select w-full"
                                 value={projectA}
@@ -144,7 +188,7 @@ export default function FitGapModal({ onClose }: FitGapModalProps) {
                             </select>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium mb-1">Project B</label>
+                            <label className="block text-sm font-medium mb-1">Comparison project</label>
                             <select
                                 className="doc-hub-filter-select w-full"
                                 value={projectB}
@@ -162,7 +206,7 @@ export default function FitGapModal({ onClose }: FitGapModalProps) {
                     <div className="flex items-end gap-4">
                         <div className="flex-1">
                             <label className="block text-sm font-medium mb-1">
-                                SAP module <span className="text-muted font-normal">(optional — narrows the comparison)</span>
+                                SAP module <span className="text-muted font-normal">(optional — narrows the analysis)</span>
                             </label>
                             <select
                                 className="doc-hub-filter-select w-full"
@@ -176,7 +220,7 @@ export default function FitGapModal({ onClose }: FitGapModalProps) {
                             </select>
                         </div>
                         <button
-                            onClick={runComparison}
+                            onClick={() => runComparison()}
                             disabled={!canRun}
                             className="btn-primary px-6 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
@@ -187,6 +231,8 @@ export default function FitGapModal({ onClose }: FitGapModalProps) {
                     {projectA && projectA === projectB && (
                         <p className="text-sm text-amber-600">Pick two different projects.</p>
                     )}
+
+                    {loadingTable && <p className="text-sm text-muted">Loading document coverage…</p>}
 
                     {running && (
                         <p className="text-sm text-muted">
@@ -199,8 +245,62 @@ export default function FitGapModal({ onClose }: FitGapModalProps) {
                         <div className="p-3 rounded bg-red-50 text-red-700 text-sm border border-red-200">{error}</div>
                     )}
 
+                    {/* Coverage table — what exists on each side, before spending anything */}
+                    {result && result.coverage?.length > 0 && (
+                        <div className="border border-slate-200 rounded-lg overflow-hidden">
+                            <div className="px-4 py-2 bg-slate-50 border-b border-slate-200">
+                                <h4 className="text-sm font-semibold">Documents by module and type</h4>
+                                <p className="text-xs text-muted mt-0.5">
+                                    Pick a row to analyse just that section
+                                </p>
+                            </div>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="text-left border-b border-slate-200">
+                                            <th className="px-4 py-2 font-medium">Module</th>
+                                            <th className="px-4 py-2 font-medium">Document type</th>
+                                            <th className="px-4 py-2 font-medium text-right">{result.projectA}</th>
+                                            <th className="px-4 py-2 font-medium text-right">{result.projectB}</th>
+                                            <th className="px-4 py-2"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {result.coverage.map((row, i) => (
+                                            <tr key={i} className="border-b border-slate-100 last:border-0">
+                                                <td className="px-4 py-2">{row.moduleLabel}</td>
+                                                <td className="px-4 py-2">{row.typeLabel}</td>
+                                                <td className="px-4 py-2 text-right tabular-nums">{row.countA}</td>
+                                                <td className="px-4 py-2 text-right tabular-nums">{row.countB}</td>
+                                                <td className="px-4 py-2 text-right">
+                                                    {row.countA > 0 && row.countB > 0 ? (
+                                                        <button
+                                                            className="text-xs text-teal-700 hover:underline disabled:opacity-40"
+                                                            disabled={running}
+                                                            onClick={() => {
+                                                                setModuleFilter(row.module)
+                                                                setTypeFilter(row.type)
+                                                                runComparison(row.module, row.type)
+                                                            }}
+                                                        >
+                                                            Analyse
+                                                        </button>
+                                                    ) : (
+                                                        <span className="text-xs text-muted">
+                                                            {row.onlyInB ? `only in ${result.projectB}` : `only in ${result.projectA}`}
+                                                        </span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Results */}
-                    {result && (
+                    {result && analysed && (
                         <div className="space-y-4">
                             <div className="p-3 rounded bg-slate-50 border border-slate-200">
                                 <p className="text-sm" dangerouslySetInnerHTML={{ __html: boldify(result.summary) }} />
@@ -211,7 +311,7 @@ export default function FitGapModal({ onClose }: FitGapModalProps) {
                                 </p>
                             </div>
 
-                            {result.comparisons.map((c, i) => (
+                            {result.commonToBoth.map((c, i) => (
                                 <div key={i} className="border border-slate-200 rounded-lg overflow-hidden">
                                     <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                                         <span className="font-medium text-sm">
@@ -227,7 +327,7 @@ export default function FitGapModal({ onClose }: FitGapModalProps) {
                                         {c.error && <p className="text-sm text-red-600">{c.error}</p>}
                                         {c.summary && <p className="text-sm">{c.summary}</p>}
 
-                                        <PointList title="Common" tone="green" points={c.common.map(p => p.point)} />
+                                        <PointList title="Common to both" tone="green" points={c.common.map(p => p.point)} />
 
                                         {c.changed.length > 0 && (
                                             <div>
@@ -238,27 +338,43 @@ export default function FitGapModal({ onClose }: FitGapModalProps) {
                                                     {c.changed.map((p, j) => (
                                                         <li key={j} className="text-sm border-l-2 border-amber-400 pl-3">
                                                             <div className="font-medium">{p.point}</div>
-                                                            {p.project_a && <div className="text-xs text-muted">A: {p.project_a}</div>}
-                                                            {p.project_b && <div className="text-xs text-muted">B: {p.project_b}</div>}
+                                                            {p.project_a && (
+                                                                <div className="text-xs text-muted">{result.projectA}: {p.project_a}</div>
+                                                            )}
+                                                            {p.project_b && (
+                                                                <div className="text-xs text-muted">{result.projectB}: {p.project_b}</div>
+                                                            )}
                                                         </li>
                                                     ))}
                                                 </ul>
                                             </div>
                                         )}
 
-                                        <PointList title="New in B" tone="blue" points={c.new.map(p => p.point)} />
+                                        <PointList
+                                            title={`New in ${result.projectB}`}
+                                            tone="blue"
+                                            points={c.new.map(p => p.point)}
+                                        />
                                     </div>
                                 </div>
                             ))}
 
                             <GapList
-                                title={`Only in ${result.projectA} — no counterpart in ${result.projectB}`}
-                                docs={result.missing}
+                                title={`New in source — in ${result.projectA}, not in ${result.projectB}`}
+                                docs={result.newInSource}
                             />
                             <GapList
-                                title={`Only in ${result.projectB} — not present in ${result.projectA}`}
-                                docs={result.new}
+                                title={`Removed in comparison — in ${result.projectB}, not in ${result.projectA}`}
+                                docs={result.removedInComparison}
                             />
+
+                            {result.commonToBoth.length === 0 &&
+                                result.newInSource.length === 0 &&
+                                result.removedInComparison.length === 0 && (
+                                    <p className="text-sm text-muted">
+                                        Nothing to report for this section.
+                                    </p>
+                                )}
                         </div>
                     )}
                 </div>
@@ -284,17 +400,24 @@ function PointList({ title, tone, points }: { title: string; tone: 'green' | 'bl
     )
 }
 
+/** A gap section. Leads with what each document *says* — the filename is a
+ *  secondary detail, because "RICEF DOC3" tells a consultant nothing. */
 function GapList({ title, docs }: { title: string; docs: DocRef[] }) {
     if (!docs || docs.length === 0) return null
     return (
         <div className="border border-slate-200 rounded-lg p-4">
-            <h4 className="text-sm font-semibold mb-2">{title} ({docs.length})</h4>
-            <ul className="space-y-1">
+            <h4 className="text-sm font-semibold mb-3">{title} ({docs.length})</h4>
+            <ul className="space-y-3">
                 {docs.map(d => (
-                    <li key={d.documentId} className="text-sm flex items-center gap-2">
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{d.moduleLabel}</span>
-                        <span className="text-xs text-muted">{d.typeLabel}</span>
-                        <span>{d.name}</span>
+                    <li key={d.documentId} className="border-l-2 border-slate-300 pl-3">
+                        <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{d.moduleLabel}</span>
+                            <span className="text-xs text-muted">{d.typeLabel}</span>
+                        </div>
+                        <p className="text-sm">
+                            {d.summary || <span className="text-muted italic">No summary yet — re-sync this document to generate one.</span>}
+                        </p>
+                        <p className="text-xs text-muted mt-1">{d.name}</p>
                     </li>
                 ))}
             </ul>

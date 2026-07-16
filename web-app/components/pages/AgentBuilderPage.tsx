@@ -61,7 +61,7 @@ const agentIcons: Record<string, (color: string) => React.ReactNode> = {
             <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
         </svg>
     ),
-    'fit-gap': (c) => (
+    'change-impact': (c) => (
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 3v18" /><path d="M5 7h5M5 12h5M5 17h5" /><path d="M14 7h5M14 12h5M14 17h5" />
         </svg>
@@ -133,10 +133,10 @@ const agents: Agent[] = [
         status: 'active',
     },
     {
-        id: 'fit-gap',
-        name: 'Fit-Gap Analysis',
+        id: 'change-impact',
+        name: 'Change Impact Analysis',
         description: 'Compare two projects\' documents on solution design — configuration, process and architecture — and see what is common, what has changed, and what is new.',
-        icon: agentIcons['fit-gap']('#0d9488'),
+        icon: agentIcons['change-impact']('#0d9488'),
         color: '#0d9488',
         category: 'analysis',
         status: 'active',

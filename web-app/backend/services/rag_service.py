@@ -4,6 +4,7 @@ import json
 import zipfile
 import re
 from datetime import datetime
+from html import unescape
 
 import PyPDF2
 import psycopg2
@@ -150,7 +151,8 @@ class RAGService:
                     web_url, is_placeholder, html_content,
                     uuid, display_id, project_id, scope_id,
                     version, is_latest, calm_display_id,
-                    sap_module, sap_module_confidence, sap_module_method
+                    sap_module, sap_module_confidence, sap_module_method,
+                    synced_on, summary
                 ) VALUES (
                     {placeholders}
                 )
@@ -175,7 +177,12 @@ class RAGService:
                     calm_display_id = EXCLUDED.calm_display_id,
                     sap_module = EXCLUDED.sap_module,
                     sap_module_confidence = EXCLUDED.sap_module_confidence,
-                    sap_module_method = EXCLUDED.sap_module_method
+                    sap_module_method = EXCLUDED.sap_module_method,
+                    synced_on = EXCLUDED.synced_on,
+                    -- Keep the stored summary when this run produced none, rather
+                    -- than wiping it: a re-ingest with use_llm=False has no summary
+                    -- to offer, and losing one is worse than keeping a stale one.
+                    summary = COALESCE(EXCLUDED.summary, documents.summary)
                 """
         params = (
             chunk_id, doc_id, metadata.get('document_name', ''), content, embedding_val,
@@ -190,6 +197,10 @@ class RAGService:
             metadata.get('sapModule', UNCLASSIFIED),
             metadata.get('sapModuleConfidence'),
             metadata.get('sapModuleMethod'),
+            # Set here rather than left to the column default: the default only
+            # fires on INSERT, and a re-sync takes the ON CONFLICT path.
+            metadata.get('syncedOn') or datetime.now(),
+            metadata.get('summary'),
         )
 
         with conn.cursor() as cur:
@@ -234,22 +245,28 @@ class RAGService:
         return row['sap_module'], row['sap_module_confidence'], row['sap_module_method']
 
     def _resolve_module(self, doc_id, title, text, scope_id, conn, use_llm=True):
-        """Resolve a document's module for ingest.
+        """Resolve a document's module and summary for ingest.
 
         Returns a metadata fragment ready to merge into the chunk metadata.
         Never raises — a classification failure must not fail an ingest.
         """
+        module, confidence, method, summary = self.module_classifier.classify(
+            title=title, text=text, scope_id=scope_id, conn=conn, use_llm=use_llm
+        )
+
+        # A human's correction outranks both the scope map and the model, but it
+        # says nothing about the summary — that still refreshes from the content.
         override = self._existing_module_override(doc_id, conn)
         if override and not should_reclassify(override[2]):
             module, confidence, method = override
-        else:
-            module, confidence, method = self.module_classifier.classify(
-                title=title, text=text, scope_id=scope_id, conn=conn, use_llm=use_llm
-            )
+
         return {
             'sapModule': module,
             'sapModuleConfidence': confidence,
             'sapModuleMethod': method,
+            # None, not '': the insert COALESCEs on NULL to keep an existing
+            # summary when this run produced none (e.g. a scope-only backfill).
+            'summary': summary or None,
         }
 
     def set_document_module(self, doc_id: str, module: str) -> bool:
@@ -350,6 +367,11 @@ class RAGService:
 
         # Strip HTML tags to get plain text for embeddings
         plain_text = re.sub(r'<[^>]+>', ' ', html_content)
+        # Unescape after stripping tags, not before: doing it first would turn an
+        # escaped "&lt;p&gt;" in the document's own text into a tag and delete it.
+        # Without this, entities like &#x27; and &nbsp; reach the embedding and the
+        # module classifier as literal noise.
+        plain_text = unescape(plain_text)
         plain_text = re.sub(r'\s+', ' ', plain_text).strip()
 
         if not plain_text:
@@ -830,10 +852,23 @@ class RAGService:
         )
         return {"answer": answer, "references": references}
 
+    # Sort keys the API accepts, mapped to SQL. An allowlist, because these go
+    # into the query as text and can never be parameterized.
+    SORT_OPTIONS = {
+        # Default: most recently synced first. Sorting on updated_on instead
+        # means a project whose CALM documents were last touched years ago lands
+        # pages deep the moment it is synced, which reads as "sync is broken".
+        'synced': 'synced_on DESC NULLS LAST, updated_on DESC NULLS LAST',
+        # Last changed in the source system.
+        'updated': 'updated_on DESC NULLS LAST',
+        'name': 'document_name ASC',
+    }
+    DEFAULT_SORT = 'synced'
+
     def list_documents(self, page: int = 1, page_size: int = 10, search: str = '',
                        source: str = '', doc_type: str = '', project: str = '',
                        module: str = '', date_from: str = '', date_to: str = '',
-                       latest_only: bool = True):
+                       latest_only: bool = True, sort: str = DEFAULT_SORT):
         """List unique documents with optional filtering and pagination.
 
         Returns a dict with keys: documents (list), total (int), page (int), page_size (int), total_pages (int).
@@ -841,6 +876,7 @@ class RAGService:
         page = max(1, page)
         page_size = min(max(1, page_size), 100)
         offset = (page - 1) * page_size
+        order_sql = self.SORT_OPTIONS.get(sort, self.SORT_OPTIONS[self.DEFAULT_SORT])
 
         conn = None
         try:
@@ -895,12 +931,13 @@ class RAGService:
                             updated_by, updated_on, web_url, uuid, display_id,
                             version, is_latest, calm_display_id,
                             sap_module, sap_module_confidence, sap_module_method,
+                            synced_on, summary,
                             MAX(length(content)) AS content_len,
                             COUNT(*) AS chunk_count
                         FROM documents
                         {where_sql}
                         GROUP BY document_id
-                        ORDER BY updated_on DESC NULLS LAST
+                        ORDER BY {order_sql}
                         LIMIT ? OFFSET ?
                         """,
                         params + [page_size, offset],
@@ -973,6 +1010,8 @@ class RAGService:
                                 d.sap_module,
                                 d.sap_module_confidence,
                                 d.sap_module_method,
+                                d.synced_on,
+                                d.summary,
                                 length(d.content) AS content_len,
                                 (SELECT COUNT(*)::int FROM documents d2
                                  WHERE d2.document_id IS NOT DISTINCT FROM d.document_id) AS chunk_count
@@ -981,7 +1020,7 @@ class RAGService:
                             ORDER BY d.document_id, d.id
                         )
                         SELECT * FROM unique_docs
-                        ORDER BY updated_on DESC NULLS LAST
+                        ORDER BY {order_sql}
                         LIMIT %s OFFSET %s
                         """,
                         params + [page_size, offset],
@@ -1018,6 +1057,8 @@ class RAGService:
                     'project': row.get('project') or 'N/A',
                     'updatedBy': row.get('updated_by') or 'System',
                     'updatedOn': str(row.get('updated_on')) if row.get('updated_on') else None,
+                    'syncedOn': str(row.get('synced_on')) if row.get('synced_on') else None,
+                    'summary': row.get('summary') or '',
                     'webUrl': row.get('web_url'),
                     'documentId': row.get('document_id'),
                     'uuid': uid or '',
@@ -1268,7 +1309,7 @@ class RAGService:
                 cur.execute(
                     f"""
                     SELECT id, document_id, document_name, doc_type, sap_module,
-                           content, embedding
+                           content, embedding, summary
                     FROM documents
                     WHERE {" AND ".join(clauses)}
                     ORDER BY document_id, id
@@ -1290,7 +1331,7 @@ class RAGService:
             r = dict(row) if not isinstance(row, tuple) else {
                 'id': row[0], 'document_id': row[1], 'document_name': row[2],
                 'doc_type': row[3], 'sap_module': row[4], 'content': row[5],
-                'embedding': row[6],
+                'embedding': row[6], 'summary': row[7],
             }
             doc_id = r.get('document_id')
             if not doc_id:
@@ -1302,6 +1343,7 @@ class RAGService:
                     'name': r.get('document_name') or doc_id,
                     'type': r.get('doc_type') or 'Unknown',
                     'module': r.get('sap_module') or UNCLASSIFIED,
+                    'summary': r.get('summary') or '',
                     'text': '',
                     # Ordered by chunk id, so this is the document's opening chunk.
                     'embedding': _deserialize_embedding(r.get('embedding')),

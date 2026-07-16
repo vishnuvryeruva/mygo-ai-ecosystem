@@ -1,8 +1,8 @@
 """
-Fit-Gap Analysis Agent
+Change Impact Analysis Agent
 
-Compares two SAP projects' documents and reports what is common, what has
-changed, and what is new.
+Compares two SAP projects' documents and reports what is common to both, what is
+new in the source project, and what has been removed in the comparison project.
 
 The shape of the problem, and why it is built this way:
 
@@ -67,7 +67,7 @@ DOC_TYPE_LABELS = {
     'REQUIREMENT': 'Requirement',
 }
 
-COMPARE_SYSTEM_PROMPT = """You are an SAP solution architect performing a fit-gap analysis between two implementation projects.
+COMPARE_SYSTEM_PROMPT = """You are an SAP solution architect performing a change impact analysis between two implementation projects.
 
 You will be given the same type of document from two different projects. Compare them on SOLUTION DESIGN, not on wording.
 
@@ -162,6 +162,37 @@ def _bucket(docs: list) -> dict:
     return out
 
 
+def build_coverage_table(docs_a: list, docs_b: list) -> list:
+    """Counts per module and document type on both sides.
+
+    This is what lets a consultant choose what to analyse instead of comparing a
+    whole project blind: see that MM has 12 test cases here and 9 there, then run
+    the analysis on that cell alone. It is pure counting — no LLM calls — so the
+    table can render immediately while the comparison is still a click away.
+    """
+    rows = {}
+    for side, docs in (('a', docs_a), ('b', docs_b)):
+        for d in docs:
+            key = (d.get('module') or UNCLASSIFIED, d.get('type') or 'Unknown')
+            row = rows.setdefault(key, {
+                'module': key[0],
+                'moduleLabel': _module_label(key[0]),
+                'type': key[1],
+                'typeLabel': _type_label(key[1]),
+                'countA': 0,
+                'countB': 0,
+            })
+            row['count' + side.upper()] += 1
+
+    table = list(rows.values())
+    for row in table:
+        # Surfaced so the UI can flag one-sided cells without recomputing them.
+        row['onlyInA'] = row['countB'] == 0
+        row['onlyInB'] = row['countA'] == 0
+    table.sort(key=lambda r: (r['moduleLabel'], r['typeLabel']))
+    return table
+
+
 def pair_documents(docs_a: list, docs_b: list) -> dict:
     """Match A's documents to B's within each (module, type) bucket.
 
@@ -250,7 +281,7 @@ def compare_pair(pair: dict, project_a: str, project_b: str, llm_provider: str =
         )
         parsed = _extract_json(raw)
     except Exception as e:
-        print(f"FIT_GAP: comparison failed for {pair['a']['name']} vs {pair['b']['name']}: {e}")
+        print(f"CHANGE_IMPACT: comparison failed for {pair['a']['name']} vs {pair['b']['name']}: {e}")
         return {'error': str(e), 'common': [], 'changed': [], 'new': [],
                 'summary': 'Comparison unavailable for this pair.'}
 
@@ -267,6 +298,17 @@ def compare_pair(pair: dict, project_a: str, project_b: str, llm_provider: str =
 
 
 def _doc_ref(d: dict) -> dict:
+    """A document in a gap section.
+
+    The summary is the point: a filename like "RICEF DOC3" tells a consultant
+    nothing about what is missing, so the stored summary carries the answer. It
+    falls back to an excerpt of the content when a document predates summaries
+    rather than showing a bare name.
+    """
+    summary = (d.get('summary') or '').strip()
+    if not summary:
+        text = (d.get('text') or '').strip()
+        summary = (text[:280] + '…') if len(text) > 280 else text
     return {
         'documentId': d.get('documentId'),
         'name': d.get('name'),
@@ -274,45 +316,77 @@ def _doc_ref(d: dict) -> dict:
         'typeLabel': _type_label(d.get('type')),
         'module': d.get('module'),
         'moduleLabel': _module_label(d.get('module')),
+        'summary': summary,
     }
 
 
-def run_fit_gap(project_a: str, project_b: str, rag_service,
-                project_a_id: str = '', project_b_id: str = '',
-                module: str = '', llm_provider: str = 'openai',
-                max_pairs: int = MAX_PAIRS_PER_RUN) -> dict:
-    """Compare two projects. Returns pairs with verdicts, plus gaps on both sides."""
+def run_change_impact(project_a: str, project_b: str, rag_service,
+                      project_a_id: str = '', project_b_id: str = '',
+                      module: str = '', doc_type: str = '',
+                      llm_provider: str = 'openai',
+                      table_only: bool = False,
+                      max_pairs: int = MAX_PAIRS_PER_RUN) -> dict:
+    """Compare a source project against a comparison project.
+
+    project_a is the source, project_b the comparison. Results come back in three
+    sections: common to both, new in the source, and removed in the comparison.
+
+    table_only returns just the coverage table — counts per module and type, no
+    LLM calls. That is the first screen: pick the cell worth analysing, then run
+    the analysis narrowed to it, instead of paying for a whole-project sweep.
+    """
     docs_a = rag_service.get_documents_for_comparison(
         project_id=project_a_id, project='' if project_a_id else project_a, module=module)
     docs_b = rag_service.get_documents_for_comparison(
         project_id=project_b_id, project='' if project_b_id else project_b, module=module)
 
+    # Narrowing to a section ("just the test cases") happens here rather than in
+    # SQL so the coverage table above it still reflects the whole project.
+    if doc_type:
+        docs_a = [d for d in docs_a if d.get('type') == doc_type]
+        docs_b = [d for d in docs_b if d.get('type') == doc_type]
+
+    coverage = build_coverage_table(docs_a, docs_b)
+    base = {
+        'projectA': project_a,
+        'projectB': project_b,
+        'module': module or '',
+        'docType': doc_type or '',
+        'coverage': coverage,
+        'commonToBoth': [],
+        'newInSource': [],
+        'removedInComparison': [],
+        'stats': {
+            'documentsA': len(docs_a), 'documentsB': len(docs_b),
+            'paired': 0, 'compared': 0, 'truncated': False,
+        },
+    }
+
+    if table_only:
+        base['summary'] = (
+            f"**{project_a}** has **{len(docs_a)}** document(s) with content, "
+            f"**{project_b}** has **{len(docs_b)}**. Pick a module and document type to analyse."
+        )
+        return base
+
     if not docs_a and not docs_b:
-        return {
-            'projectA': project_a, 'projectB': project_b,
-            'comparisons': [], 'missing': [], 'new': [],
-            'summary': (
-                'Neither project has documents with content in the Document Hub. '
-                'Sync them from CALM first.'
-            ),
-            'stats': {'documentsA': 0, 'documentsB': 0, 'paired': 0, 'compared': 0},
-        }
+        base['summary'] = (
+            'Neither project has documents with content in the Document Hub. '
+            'Sync them from CALM first.'
+        )
+        return base
+
     if not docs_a or not docs_b:
         empty_side = project_a if not docs_a else project_b
         filled = docs_b if not docs_a else docs_a
-        return {
-            'projectA': project_a, 'projectB': project_b,
-            'comparisons': [],
-            'missing': [_doc_ref(d) for d in (docs_a or [])],
-            'new': [_doc_ref(d) for d in (docs_b or [])],
-            'summary': (
-                f'**{empty_side}** has no documents with content in the Document Hub, so there '
-                f'is nothing to compare against. The other project has {len(filled)}. '
-                'Sync it from CALM to run a real fit-gap.'
-            ),
-            'stats': {'documentsA': len(docs_a), 'documentsB': len(docs_b),
-                      'paired': 0, 'compared': 0},
-        }
+        base['newInSource'] = [_doc_ref(d) for d in (docs_a or [])]
+        base['removedInComparison'] = [_doc_ref(d) for d in (docs_b or [])]
+        base['summary'] = (
+            f'**{empty_side}** has no documents with content in the Document Hub, so there '
+            f'is nothing to compare against. The other project has {len(filled)}. '
+            'Sync it from CALM to run a real analysis.'
+        )
+        return base
 
     matched = pair_documents(docs_a, docs_b)
     pairs = matched['pairs']
@@ -348,19 +422,18 @@ def run_fit_gap(project_a: str, project_b: str, rag_service,
         f"**{total_common}** common, **{total_changed}** changed, **{total_new}** new design points.",
     ]
     if matched['missing']:
-        bits.append(f"**{len(matched['missing'])}** document(s) in {project_a} have no counterpart in {project_b}.")
+        bits.append(f"**{len(matched['missing'])}** document(s) in {project_a} are not in {project_b}.")
     if matched['new']:
         bits.append(f"**{len(matched['new'])}** document(s) in {project_b} are not in {project_a}.")
     if truncated:
         bits.append(f"Showing the {max_pairs} closest pairs of {len(pairs)}.")
 
-    return {
-        'projectA': project_a,
-        'projectB': project_b,
-        'module': module or '',
-        'comparisons': comparisons,
-        'missing': [_doc_ref(d) for d in matched['missing']],
-        'new': [_doc_ref(d) for d in matched['new']],
+    base.update({
+        'commonToBoth': comparisons,
+        # Source-only: the source project has these, the comparison does not.
+        'newInSource': [_doc_ref(d) for d in matched['missing']],
+        # Comparison-only: present there, absent from the source.
+        'removedInComparison': [_doc_ref(d) for d in matched['new']],
         'summary': ' '.join(bits),
         'stats': {
             'documentsA': len(docs_a),
@@ -369,4 +442,5 @@ def run_fit_gap(project_a: str, project_b: str, rag_service,
             'compared': len(comparisons),
             'truncated': truncated,
         },
-    }
+    })
+    return base

@@ -33,18 +33,25 @@ _TAXONOMY_LINES = "\n".join(
     f"- {code}: {MODULE_LABELS[code]}" for code in ASSIGNABLE_CODES
 )
 
-CLASSIFIER_SYSTEM_PROMPT = f"""You are an SAP solution architect. Classify a document into exactly one SAP functional module.
+CLASSIFIER_SYSTEM_PROMPT = f"""You are an SAP solution architect. Classify a document into exactly one SAP functional module, and summarize what it specifies.
 
 Allowed modules:
 {_TAXONOMY_LINES}
 
 Rules:
-- Reply with JSON only: {{"module": "<CODE>", "confidence": <0.0-1.0>}}
+- Reply with JSON only: {{"module": "<CODE>", "confidence": <0.0-1.0>, "summary": "<2-3 sentences>"}}
 - "module" MUST be one of the codes listed above, copied exactly.
 - Use CROSS when the document genuinely spans several modules (e.g. master data).
 - Use TECH for Basis, security, authorizations, integration or migration content.
 - confidence is your own honest estimate: 1.0 means certain, below 0.5 means guessing.
-- Never invent a module code. Never explain. JSON only."""
+- "summary" describes the SOLUTION DESIGN this document specifies: the process it
+  covers, key configuration or org-structure decisions, integrations, and any custom
+  objects. Write it so a consultant who has not opened the document knows what is in
+  it. State only what the document says. No preamble like "This document describes".
+- Never invent a module code. Never explain outside the JSON. JSON only."""
+
+# Long enough for a useful design summary, short enough to skim in a list.
+SUMMARY_CHAR_LIMIT = 600
 
 
 def should_reclassify(current_method) -> bool:
@@ -108,14 +115,22 @@ class ModuleClassifier:
     # ── Layer 2: LLM ──────────────────────────────────────────────────────────
 
     def classify_by_llm(self, title, text, llm_provider='openai'):
-        """Classify from content. Returns (module_code, confidence) or (None, 0.0).
+        """Classify and summarize from content.
+
+        Returns (module_code, confidence, summary). module_code is None when the
+        model gave nothing usable; summary may be '' independently of that.
+
+        Module and summary come from one call on purpose. They read the same
+        excerpt to answer the same question — what does this document specify —
+        so splitting them would double the cost and latency of every ingest for
+        no gain.
 
         The provider layer only exposes a generic json_mode flag, so the enum is
         enforced here: anything off-list is discarded rather than stored.
         """
         excerpt = (text or '').strip()[:CLASSIFY_CHAR_LIMIT]
         if not excerpt and not title:
-            return None, 0.0
+            return None, 0.0, ''
 
         user_prompt = f"Document title: {title or 'Untitled'}\n\nDocument content:\n{excerpt}"
 
@@ -126,53 +141,64 @@ class ModuleClassifier:
                     {"role": "user", "content": user_prompt},
                 ],
                 temperature=0,
-                max_tokens=50,
+                # Was 50 when this returned a bare code; the summary needs room.
+                max_tokens=400,
                 provider=llm_provider,
                 json_mode=True,
             )
         except Exception as e:
             print(f"MODULE_CLASSIFIER: LLM call failed: {e}")
-            return None, 0.0
+            return None, 0.0, ''
 
         try:
             parsed = json.loads(raw)
         except (json.JSONDecodeError, TypeError):
             print(f"MODULE_CLASSIFIER: non-JSON response discarded: {raw!r}")
-            return None, 0.0
+            return None, 0.0, ''
+
+        summary = str(parsed.get('summary') or '').strip()[:SUMMARY_CHAR_LIMIT]
 
         module = normalize_module(parsed.get('module'))
         if not module or module == UNCLASSIFIED:
             print(f"MODULE_CLASSIFIER: off-taxonomy module discarded: {parsed.get('module')!r}")
-            return None, 0.0
+            # A bad module code says nothing about the summary — keep it.
+            return None, 0.0, summary
 
         try:
             confidence = float(parsed.get('confidence', 0.0))
         except (TypeError, ValueError):
             confidence = 0.0
 
-        return module, max(0.0, min(1.0, confidence))
+        return module, max(0.0, min(1.0, confidence)), summary
 
     # ── The cascade ───────────────────────────────────────────────────────────
 
     def classify(self, title='', text='', scope_id=None, conn=None,
-                 llm_provider='openai', use_llm=True):
-        """Resolve a document's module.
+                 llm_provider='openai', use_llm=True, want_summary=True):
+        """Resolve a document's module, and summarize it.
 
-        Returns (module_code, confidence, method). Always returns a usable
-        triple — classification must never break ingest.
+        Returns (module_code, confidence, method, summary). Always returns a
+        usable tuple — classification must never break ingest.
+
+        The scope map still wins on the module when it has an answer: it is exact
+        and explainable, where the model is guessing. But the summary only comes
+        from the LLM, so when a summary is wanted the call happens either way and
+        the scope's verdict is layered on top of it.
         """
+        module, confidence, method, summary = UNCLASSIFIED, 0.0, None, ''
         try:
             scope_module = self.classify_by_scope(scope_id, conn=conn)
             if scope_module:
-                return scope_module, 1.0, METHOD_SCOPE_MAP
+                module, confidence, method = scope_module, 1.0, METHOD_SCOPE_MAP
 
-            if use_llm:
-                llm_module, confidence = self.classify_by_llm(
+            # Skip the call only when it could tell us nothing we still need.
+            if use_llm and (want_summary or not scope_module):
+                llm_module, llm_confidence, summary = self.classify_by_llm(
                     title, text, llm_provider=llm_provider
                 )
-                if llm_module:
-                    return llm_module, confidence, METHOD_LLM
+                if llm_module and not scope_module:
+                    module, confidence, method = llm_module, llm_confidence, METHOD_LLM
         except Exception as e:
             print(f"MODULE_CLASSIFIER: classification failed for {title!r}: {e}")
 
-        return UNCLASSIFIED, 0.0, None
+        return module, confidence, method, summary

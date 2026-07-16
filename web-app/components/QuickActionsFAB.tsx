@@ -14,7 +14,7 @@ const fabIcons: Record<string, React.ReactNode> = {
             <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
         </svg>
     ),
-    'fit-gap': (
+    'change-impact': (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0d9488" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 3v18" /><path d="M5 7h5M5 12h5M5 17h5" /><path d="M14 7h5M14 12h5M14 17h5" />
         </svg>
@@ -77,7 +77,7 @@ export default function QuickActionsFAB({ onAction, activeAgent }: QuickActionsF
 
     const actions = [
         { id: 'ask-yoda', label: 'Ask Yoda' },
-        { id: 'fit-gap', label: 'Fit-Gap' },
+        { id: 'change-impact', label: 'Change Impact' },
         { id: 'solution-advisor', label: 'Solution Advisor' },
         { id: 'spec-assistant', label: 'Spec Agent' },
         { id: 'code-advisor', label: 'Code Advisor' },

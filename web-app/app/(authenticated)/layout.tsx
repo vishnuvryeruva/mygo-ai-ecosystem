@@ -8,7 +8,7 @@ import TopHeader from '@/components/TopHeader'
 import ChatbotWidget from '@/components/ChatbotWidget'
 import QuickActionsFAB from '@/components/QuickActionsFAB'
 import SolutionAdvisorModal from '@/components/modals/SolutionAdvisorModal'
-import FitGapModal from '@/components/modals/FitGapModal'
+import ChangeImpactModal from '@/components/modals/ChangeImpactModal'
 import SpecAssistantModal from '@/components/modals/SpecAssistantModal'
 import PromptGeneratorModal from '@/components/modals/PromptGeneratorModal'
 import ExplainCodeModal from '@/components/modals/ExplainCodeModal'
@@ -308,8 +308,8 @@ export default function AuthenticatedLayout({
             <QuickActionsFAB onAction={handleQuickAction} activeAgent={expandedAgent} />
 
             {/* Modals */}
-            {activeModal === 'fit-gap' && (
-                <FitGapModal onClose={closeModal} />
+            {activeModal === 'change-impact' && (
+                <ChangeImpactModal onClose={closeModal} />
             )}
             {activeModal === 'solution-advisor' && (
                 <SolutionAdvisorModal

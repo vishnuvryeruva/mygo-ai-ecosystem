@@ -576,9 +576,15 @@ def list_documents():
         date_from = request.args.get('date_from', '').strip()
         date_to = request.args.get('date_to', '').strip()
         latest_only = request.args.get('latest_only', 'true').lower() != 'false'
+        sort = request.args.get('sort', RAGService.DEFAULT_SORT).strip()
 
         if module and not normalize_module(module):
             return jsonify({"error": f"Unknown SAP module '{module}'"}), 400
+        if sort not in RAGService.SORT_OPTIONS:
+            return jsonify({
+                "error": f"Unknown sort '{sort}'",
+                "allowed": list(RAGService.SORT_OPTIONS),
+            }), 400
 
         result = rag_service.list_documents(
             page=page,
@@ -591,6 +597,7 @@ def list_documents():
             date_from=date_from,
             date_to=date_to,
             latest_only=latest_only,
+            sort=sort,
         )
         return jsonify(result)
     except Exception as e:
@@ -619,16 +626,19 @@ def dashboard_stats():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/api/fit-gap', methods=['POST'])
-def fit_gap_analysis():
-    """Fit-gap analysis: compare two projects' documents on solution design.
+@app.route('/api/change-impact', methods=['POST'])
+def change_impact_analysis():
+    """Change impact analysis: compare two projects' documents on solution design.
 
     Takes the project ids from the CALM projects dropdown. Names are accepted as
     a fallback and for display, but the id is the join key — CALM projects get
     renamed, and a rename must not silently return an empty report.
+
+    tableOnly returns the coverage table alone (no LLM calls) so the UI can show
+    what is there before anyone pays for an analysis.
     """
     try:
-        from agents import fitgap_agent
+        from agents import change_impact_agent
 
         data = request.json or {}
         project_a = (data.get('projectA') or '').strip()
@@ -636,18 +646,23 @@ def fit_gap_analysis():
         project_a_id = (data.get('projectAId') or '').strip()
         project_b_id = (data.get('projectBId') or '').strip()
         module = (data.get('module') or '').strip()
+        doc_type = (data.get('docType') or '').strip()
+        table_only = bool(data.get('tableOnly'))
 
         if not (project_a or project_a_id) or not (project_b or project_b_id):
             return jsonify({"error": "Two projects are required"}), 400
         if project_a_id and project_a_id == project_b_id:
             return jsonify({"error": "Pick two different projects"}), 400
+        if module and not normalize_module(module):
+            return jsonify({"error": f"Unknown SAP module '{module}'"}), 400
 
         user_id = get_optional_current_user_id()
-        llm_provider = get_llm_provider_for_user(user_id, agent_id='fit-gap')
-        result = fitgap_agent.run_fit_gap(
+        llm_provider = get_llm_provider_for_user(user_id, agent_id='change-impact')
+        result = change_impact_agent.run_change_impact(
             project_a or project_a_id, project_b or project_b_id, rag_service,
             project_a_id=project_a_id, project_b_id=project_b_id,
-            module=module, llm_provider=llm_provider,
+            module=module, doc_type=doc_type, llm_provider=llm_provider,
+            table_only=table_only,
         )
         return jsonify(result)
     except Exception as e:
@@ -1165,8 +1180,67 @@ def mcp_health():
 from services import source_config_service
 from services.calm_service import get_calm_service
 from services.markdown_utils import markdown_to_html
-from html import unescape
+from html import escape, unescape
 import re
+
+
+def _render_test_case_html(test_case: dict) -> str:
+    """Render a CALM Manual Test Case into HTML for viewing and ingestion.
+
+    Manual test cases are not documents in CALM — they live behind the Test
+    Management API as structured activities and actions, so get_document() fails
+    on them and sync used to fall through to a metadata-only placeholder. The
+    result was ~190 bytes of stub text per test case: nothing to classify by
+    module, nothing to summarize, nothing to compare.
+
+    Flattening the structure into prose gives the rest of the pipeline the same
+    thing it gets from any other document.
+    """
+    if not test_case:
+        return ''
+
+    title = (test_case.get('title') or '').strip()
+    parts = []
+    if title:
+        parts.append(f"<h1>{escape(title)}</h1>")
+
+    meta = []
+    if test_case.get('displayId'):
+        meta.append(f"ID: {escape(str(test_case['displayId']))}")
+    if test_case.get('priorityCode') is not None:
+        meta.append(f"Priority: {escape(str(test_case['priorityCode']))}")
+    if meta:
+        parts.append(f"<p>{' · '.join(meta)}</p>")
+
+    def _rows(node, key):
+        """toActivities/toActions come back as a bare list on OData v4, but tolerate
+        the v2-style {'results': [...]} envelope rather than silently render nothing."""
+        val = node.get(key)
+        if isinstance(val, dict):
+            val = val.get('results') or val.get('value') or []
+        return val if isinstance(val, list) else []
+
+    for activity in sorted(_rows(test_case, 'toActivities'), key=lambda a: a.get('sequence') or 0):
+        act_title = (activity.get('title') or 'Activity').strip()
+        parts.append(f"<h2>{escape(act_title)}</h2>")
+        if activity.get('isInScope') is False:
+            parts.append("<p><em>Out of scope</em></p>")
+
+        for action in sorted(_rows(activity, 'toActions'), key=lambda a: a.get('sequence') or 0):
+            step = escape((action.get('title') or '').strip())
+            parts.append(f"<h3>Step {escape(str(action.get('sequence') or ''))}: {step}</h3>")
+            description = (action.get('description') or '').strip()
+            expected = (action.get('expectedResult') or '').strip()
+            if description:
+                parts.append(f"<p><strong>Action:</strong> {escape(description)}</p>")
+            if expected:
+                parts.append(f"<p><strong>Expected result:</strong> {escape(expected)}</p>")
+
+    # Title alone is the placeholder case wearing a different hat — say so rather
+    # than ingesting a heading and calling it content.
+    if len(parts) <= 2:
+        return ''
+    return '\n'.join(parts)
 
 
 def _normalize_document_html_for_view(raw_content: str) -> str:
@@ -2121,6 +2195,13 @@ def sync_documents():
                             if description:
                                 html_content = _normalize_document_html_for_view(description)
                             _apply_calm_task_metadata(normalized_doc, calm_task, sync_source_type)
+                        elif item_type == 'test_case':
+                            # Test cases live behind the Test Management API, not the
+                            # document API — get_document() 404s on them, which is how
+                            # they ended up stored as content-free placeholders.
+                            test_case = calm_service_instance.get_manual_test_case(doc_id)
+                            html_content = _render_test_case_html(test_case)
+                            _apply_test_case_metadata(normalized_doc, test_case, sync_source_type)
                         else:
                             calm_doc = calm_service_instance.get_document(doc_id)
                             html_content = calm_doc.get('content') or calm_doc.get('htmlContent') or calm_doc.get('text')
@@ -2205,6 +2286,36 @@ def _apply_calm_task_metadata(normalized_doc: dict, calm_task: dict, sync_source
     )
     if last_changed_by:
         normalized_doc['metadata']['updatedBy'] = last_changed_by
+
+
+def _apply_test_case_metadata(normalized_doc: dict, test_case: dict, sync_source_type: str = 'CALM') -> None:
+    """Merge CALM Manual Test Case fields into document metadata.
+
+    scopeId is the one that earns its keep: it lets the scope_map classifier
+    resolve the module for free, instead of paying for an LLM call or leaving the
+    test case unclassified.
+    """
+    metadata = normalized_doc['metadata']
+    preserved_source = metadata.get('source') or sync_source_type
+    preserved_project = metadata.get('project')
+
+    for key in ('scopeId', 'projectId', 'displayId', 'solutionProcessId', 'priorityCode'):
+        value = test_case.get(key)
+        if value is not None:
+            metadata[key] = value
+
+    if test_case.get('title'):
+        metadata['name'] = test_case['title']
+        normalized_doc['name'] = test_case['title']
+
+    modified = test_case.get('modifiedAt')
+    if modified:
+        metadata['modifiedAt'] = modified
+        metadata['updatedOn'] = modified
+
+    metadata['source'] = preserved_source
+    if preserved_project:
+        metadata['project'] = preserved_project
 
 
 def _normalize_document_structure(doc: dict) -> dict:

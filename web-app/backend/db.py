@@ -221,12 +221,22 @@ def init_db():
              "ALTER TABLE documents ADD COLUMN IF NOT EXISTS sap_module_confidence REAL"),
             ("ALTER TABLE documents ADD COLUMN sap_module_method TEXT",
              "ALTER TABLE documents ADD COLUMN IF NOT EXISTS sap_module_method TEXT"),
+            # SQLite rejects a non-constant default on ADD COLUMN ("Cannot add a
+            # column with non-constant default"), so it gets a bare column and
+            # existing rows keep NULL — ordering handles that with NULLS LAST.
+            # Postgres backfills every existing row to the migration timestamp.
+            ("ALTER TABLE documents ADD COLUMN synced_on TIMESTAMP",
+             "ALTER TABLE documents ADD COLUMN IF NOT EXISTS synced_on TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+            ("ALTER TABLE documents ADD COLUMN summary TEXT",
+             "ALTER TABLE documents ADD COLUMN IF NOT EXISTS summary TEXT"),
             # Must follow the ADD COLUMNs above: on an existing database the
             # columns do not exist until those have run.
             ("CREATE INDEX IF NOT EXISTS documents_sap_module_idx ON documents(sap_module)",
              "CREATE INDEX IF NOT EXISTS documents_sap_module_idx ON documents(sap_module)"),
             ("CREATE INDEX IF NOT EXISTS documents_project_idx ON documents(project)",
              "CREATE INDEX IF NOT EXISTS documents_project_idx ON documents(project)"),
+            ("CREATE INDEX IF NOT EXISTS documents_synced_on_idx ON documents(synced_on)",
+             "CREATE INDEX IF NOT EXISTS documents_synced_on_idx ON documents(synced_on DESC)"),
         ]:
             try:
                 cur = conn.cursor()

@@ -20,8 +20,8 @@ const agents = [
         ),
     },
     {
-        id: 'fit-gap',
-        title: 'Fit-Gap Analysis',
+        id: 'change-impact',
+        title: 'Change Impact Analysis',
         description: 'Compare two projects — common, changed, new',
         icon: (
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0d9488" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

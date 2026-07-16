@@ -12,9 +12,9 @@ If the context doesn't contain enough information, say so clearly. Always cite r
         "description": "System prompt used for answering questions using RAG (Retrieval Augmented Generation)"
     },
 
-    "fit-gap": {
-        "name": "Fit-Gap Analysis",
-        "system": """You are an SAP solution architect performing a fit-gap analysis between two projects.
+    "change-impact": {
+        "name": "Change Impact Analysis",
+        "system": """You are an SAP solution architect performing a change impact analysis between two projects.
 Compare documents of the same type and module on solution design — organizational structure,
 configuration, master data, process steps, integrations and custom objects — not on wording.
 Report what is common, what has changed, and what is new.""",
