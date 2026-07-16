@@ -596,11 +596,20 @@ def explain_code():
         code_type = data.get('code_type', 'ABAP')  # ABAP, Python, etc.
         program_name = data.get('program_name', '')
         
+        # If code is empty but program_name is provided, attempt to fetch it from SAP
+        if not code and program_name:
+            fetched = code_service.fetch_code_from_sap(program_name, code_type)
+            if fetched and not fetched.startswith("Code fetching from SAP"):
+                code = fetched
+            else:
+                return jsonify({"error": fetched or "Could not fetch code from SAP"}), 400
+        
         explanation = code_service.explain_code(code, code_type, program_name, llm_provider=llm_provider)
         
         return jsonify({
             "explanation": explanation,
-            "code_type": code_type
+            "code_type": code_type,
+            "code": code
         })
     except Exception as e:
         import traceback
@@ -671,13 +680,26 @@ def analyze_code():
         data = request.json
         code = data.get('code', '')
         code_type = data.get('code_type', 'ABAP')
+        program_name = data.get('program_name', '')
         
+        # If code is empty but program_name is provided, attempt to fetch it from SAP
+        if not code and program_name:
+            fetched = code_service.fetch_code_from_sap(program_name, code_type)
+            if fetched and not fetched.startswith("No active SAP ADT") and not fetched.startswith("Failed to connect") and not fetched.startswith("Error fetching"):
+                code = fetched
+            else:
+                return jsonify({"error": fetched or "Could not fetch code from SAP"}), 400
+                
+        if not code:
+            return jsonify({"error": "Code or program name is required"}), 400
+            
         analysis = advisor_service.analyze_code(code, code_type, llm_provider=llm_provider)
         
         return jsonify({
             "suggestions": analysis['suggestions'],
             "anti_patterns": analysis['anti_patterns'],
-            "improvements": analysis['improvements']
+            "improvements": analysis['improvements'],
+            "code": code
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1075,6 +1097,28 @@ def test_new_connection():
             service.test_connection()
             return jsonify({"success": True, "message": "Connection successful"})
         
+        elif data.get('type') == 'SAP_ADT':
+            api_endpoint = data.get('apiEndpoint', '').strip()
+            username = data.get('clientId', '').strip()
+            password = data.get('clientSecret', '').strip()
+            sap_client = data.get('sapClient', '100').strip()
+            
+            if not all([api_endpoint, username, password]):
+                return jsonify({"success": False, "error": "API Endpoint, Username, and Password are required"})
+                
+            from services.sap_adt_service import DirectADTClient
+            client = DirectADTClient(
+                api_endpoint=api_endpoint,
+                client=sap_client,
+                username=username,
+                password=password
+            )
+            success = client.connect()
+            if success:
+                return jsonify({"success": True, "message": "Connection successful"})
+            else:
+                return jsonify({"success": False, "error": "Failed to connect to SAP. Check credentials."})
+        
         return jsonify({"success": False, "error": "Unsupported source type"})
     except Exception as e:
         error_msg = str(e)
@@ -1089,6 +1133,43 @@ def test_new_connection():
             error_msg = "Endpoint not found - check the URL"
         
         return jsonify({"success": False, "error": error_msg}), 500
+
+
+@app.route('/api/sap/run-tests', methods=['POST'])
+def sap_run_tests():
+    """Trigger ABAP Unit tests directly on SAP for a class"""
+    try:
+        data = request.json
+        class_name = data.get('class_name', '')
+        
+        if not class_name:
+            return jsonify({"error": "Class name is required"}), 400
+            
+        # Find active SAP ADT configuration
+        sources = source_config_service.list_sources()
+        sap_source = next((s for s in sources if s['type'] == 'SAP_ADT'), None)
+        
+        if not sap_source:
+            return jsonify({"error": "No SAP ADT connection configured. Please set one up in Settings."}), 400
+            
+        source_details = source_config_service.get_source(sap_source['id'])
+        config = source_details.get('config', {})
+        
+        from services.sap_adt_service import DirectADTClient
+        client = DirectADTClient(
+            api_endpoint=config.get('apiEndpoint', ''),
+            client=config.get('sapClient', '100'),
+            username=config.get('clientId', ''),
+            password=config.get('clientSecret', '')
+        )
+        
+        client.connect()
+        results = client.run_unit_tests(class_name)
+        return jsonify(results)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 
 # ============================================================================

@@ -108,6 +108,7 @@ interface ConnectionForm {
     clientSecret: string
     apiEndpoint: string
     tokenUrl: string
+    sapClient?: string
 }
 
 const emptyConnection: ConnectionForm = {
@@ -118,6 +119,7 @@ const emptyConnection: ConnectionForm = {
     clientSecret: '',
     apiEndpoint: '',
     tokenUrl: '',
+    sapClient: '100',
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -260,7 +262,12 @@ export default function SettingsPage() {
 
     /* ── Helpers ────────────────────────────────────────── */
     const handleTestConnection = async () => {
-        if (!connectionForm.apiEndpoint || !connectionForm.tokenUrl || !connectionForm.clientId || !connectionForm.clientSecret) {
+        if (connectionForm.sourceType === 'SAP_ADT') {
+            if (!connectionForm.apiEndpoint || !connectionForm.clientId || !connectionForm.clientSecret) {
+                setTestResult({ success: false, message: 'Please fill in Host/Endpoint, Username, and Password' })
+                return
+            }
+        } else if (!connectionForm.apiEndpoint || !connectionForm.tokenUrl || !connectionForm.clientId || !connectionForm.clientSecret) {
             setTestResult({ success: false, message: 'Please fill in all required fields' })
             return
         }
@@ -275,7 +282,8 @@ export default function SettingsPage() {
                 apiEndpoint: connectionForm.apiEndpoint,
                 tokenUrl: connectionForm.tokenUrl,
                 clientId: connectionForm.clientId,
-                clientSecret: connectionForm.clientSecret
+                clientSecret: connectionForm.clientSecret,
+                sapClient: connectionForm.sapClient
             })
 
             if (response.data.success) {
@@ -309,7 +317,8 @@ export default function SettingsPage() {
                 apiEndpoint: connectionForm.apiEndpoint,
                 tokenUrl: connectionForm.tokenUrl,
                 clientId: connectionForm.clientId,
-                clientSecret: connectionForm.clientSecret
+                clientSecret: connectionForm.clientSecret,
+                sapClient: connectionForm.sapClient
             })
 
             await refreshSources()
@@ -731,10 +740,18 @@ export default function SettingsPage() {
                                             <label>Source Type *</label>
                                             <select
                                                 value={connectionForm.sourceType}
-                                                onChange={e => setConnectionForm({ ...connectionForm, sourceType: e.target.value })}
+                                                onChange={e => {
+                                                    const val = e.target.value;
+                                                    setConnectionForm({
+                                                        ...connectionForm,
+                                                        sourceType: val,
+                                                        authType: val === 'SAP_ADT' ? 'Basic Authentication' : connectionForm.authType
+                                                    });
+                                                }}
                                             >
                                                 <option value="CALM">SAP Cloud ALM</option>
                                                 <option value="BTP">SAP BTP</option>
+                                                <option value="SAP_ADT">SAP ADT Direct Connection</option>
                                                 <option value="SharePoint">SharePoint</option>
                                                 <option value="JIRA">JIRA</option>
                                             </select>
@@ -743,7 +760,7 @@ export default function SettingsPage() {
                                             <label>Source Name *</label>
                                             <input
                                                 type="text"
-                                                placeholder="e.g. Mygo Cloud ALM"
+                                                placeholder={connectionForm.sourceType === 'SAP_ADT' ? "e.g. Mygo SAP ADT" : "e.g. Mygo Cloud ALM"}
                                                 value={connectionForm.sourceName}
                                                 onChange={e => setConnectionForm({ ...connectionForm, sourceName: e.target.value })}
                                             />
@@ -753,6 +770,7 @@ export default function SettingsPage() {
                                             <select
                                                 value={connectionForm.authType}
                                                 onChange={e => setConnectionForm({ ...connectionForm, authType: e.target.value })}
+                                                disabled={connectionForm.sourceType === 'SAP_ADT'}
                                             >
                                                 <option value="OAuth 2.0">OAuth 2.0</option>
                                                 <option value="Client Credentials">Client Credentials</option>
@@ -760,34 +778,59 @@ export default function SettingsPage() {
                                             </select>
                                         </div>
                                         <div className="settings-form-group">
-                                            <label>API Endpoint URL *</label>
+                                            <label>{connectionForm.sourceType === 'SAP_ADT' ? 'SAP ADT Endpoint Host URL *' : 'API Endpoint URL *'}</label>
                                             <input
                                                 type="text"
-                                                placeholder="https://<tenant>.alm.cloud.sap"
+                                                placeholder={connectionForm.sourceType === 'SAP_ADT' ? "https://sapdev.company.com:44300" : "https://<tenant>.alm.cloud.sap"}
                                                 value={connectionForm.apiEndpoint}
                                                 onChange={e => setConnectionForm({ ...connectionForm, apiEndpoint: e.target.value })}
                                             />
                                         </div>
+                                        {connectionForm.sourceType !== 'SAP_ADT' && (
+                                            <div className="settings-form-group">
+                                                <label>Auth/Token URL *</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="https://<tenant>.authentication.../oauth/token"
+                                                    value={connectionForm.tokenUrl}
+                                                    onChange={e => setConnectionForm({ ...connectionForm, tokenUrl: e.target.value })}
+                                                />
+                                            </div>
+                                        )}
+                                        {connectionForm.sourceType === 'SAP_ADT' && (
+                                            <div className="settings-form-group">
+                                                <label>SAP Client ID *</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="e.g. 100"
+                                                    value={connectionForm.sapClient || ''}
+                                                    onChange={e => setConnectionForm({ ...connectionForm, sapClient: e.target.value })}
+                                                />
+                                            </div>
+                                        )}
                                         <div className="settings-form-group">
-                                            <label>Auth/Token URL *</label>
+                                            <label>
+                                                {connectionForm.sourceType === 'SAP_ADT'
+                                                    ? 'SAP Developer Username *'
+                                                    : connectionForm.authType === 'Basic Authentication'
+                                                        ? 'Username / Client ID *'
+                                                        : 'Client ID *'}
+                                            </label>
                                             <input
                                                 type="text"
-                                                placeholder="https://<tenant>.authentication.../oauth/token"
-                                                value={connectionForm.tokenUrl}
-                                                onChange={e => setConnectionForm({ ...connectionForm, tokenUrl: e.target.value })}
-                                            />
-                                        </div>
-                                        <div className="settings-form-group">
-                                            <label>{connectionForm.authType === 'Basic Authentication' ? 'Username / Client ID *' : 'Client ID *'}</label>
-                                            <input
-                                                type="text"
-                                                placeholder={connectionForm.authType === 'Basic Authentication' ? "Username" : "Client ID"}
+                                                placeholder={connectionForm.sourceType === 'SAP_ADT' ? "e.g. DEVELOPER" : connectionForm.authType === 'Basic Authentication' ? "Username" : "Client ID"}
                                                 value={connectionForm.clientId}
                                                 onChange={e => setConnectionForm({ ...connectionForm, clientId: e.target.value })}
                                             />
                                         </div>
                                         <div className="settings-form-group">
-                                            <label>{connectionForm.authType === 'Basic Authentication' ? 'Password / Client Secret *' : 'Client Secret *'}</label>
+                                            <label>
+                                                {connectionForm.sourceType === 'SAP_ADT'
+                                                    ? 'SAP Developer Password *'
+                                                    : connectionForm.authType === 'Basic Authentication'
+                                                        ? 'Password / Client Secret *'
+                                                        : 'Client Secret *'}
+                                            </label>
                                             <input
                                                 type="password"
                                                 placeholder="••••••••"

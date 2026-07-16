@@ -131,7 +131,8 @@ def create_source(data: Dict) -> Dict:
             'tokenUrl': data.get('tokenUrl', ''),
             'clientId': data.get('clientId', ''),
             'clientSecret': data.get('clientSecret', ''),
-            'authType': data.get('authType', 'OAuth 2.0')
+            'authType': data.get('authType', 'OAuth 2.0'),
+            'sapClient': data.get('sapClient', '100')
         }
     }
     
@@ -171,6 +172,7 @@ def update_source(source_id: str, data: Dict) -> Optional[Dict]:
             source['config']['tokenUrl'] = data.get('tokenUrl', source['config'].get('tokenUrl', ''))
             source['config']['clientId'] = data.get('clientId', source['config'].get('clientId', ''))
             source['config']['authType'] = data.get('authType', source['config'].get('authType', 'OAuth 2.0'))
+            source['config']['sapClient'] = data.get('sapClient', source['config'].get('sapClient', '100'))
             
             # Only update secret if provided
             if data.get('clientSecret'):
@@ -289,6 +291,27 @@ def test_connection(source_id: str) -> Dict:
             update_source_status(source_id, 'connected')
             return {'success': True, 'message': 'Connection successful'}
                 
+        except Exception as e:
+            update_source_status(source_id, 'error')
+            return {'success': False, 'error': str(e)}
+            
+    elif source['type'] == 'SAP_ADT':
+        try:
+            from services.sap_adt_service import DirectADTClient
+            config = source.get('config', {})
+            client = DirectADTClient(
+                api_endpoint=config.get('apiEndpoint', ''),
+                client=config.get('sapClient', '100'),
+                username=config.get('clientId', ''),
+                password=config.get('clientSecret', '')
+            )
+            success = client.connect()
+            if success:
+                update_source_status(source_id, 'connected')
+                return {'success': True, 'message': 'Connection successful'}
+            else:
+                update_source_status(source_id, 'error')
+                return {'success': False, 'error': 'Failed to connect to SAP.'}
         except Exception as e:
             update_source_status(source_id, 'error')
             return {'success': False, 'error': str(e)}

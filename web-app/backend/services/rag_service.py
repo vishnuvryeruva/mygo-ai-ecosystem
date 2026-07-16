@@ -9,7 +9,7 @@ import psycopg2.extras
 from pgvector.psycopg2 import register_vector
 from docx import Document
 
-from db import get_conn
+from db import get_conn, has_vector_extension
 from services.openai_service import OpenAIService
 
 # Supported file extensions for extraction from ZIP files
@@ -85,12 +85,13 @@ class RAGService:
     def _insert_chunk(self, conn, chunk_id: str, doc_id: str, content: str,
                       embedding, metadata: dict):
         """Insert a single chunk row into the documents table."""
-        is_sqlite = self._is_sqlite(conn)
-        
-        # Convert embedding list to bytes/blob for SQLite if necessary
-        if is_sqlite and isinstance(embedding, list):
+        # Convert embedding list to bytes/blob/text for SQLite or standard Postgres
+        has_vector = has_vector_extension() if not is_sqlite else False
+        if (is_sqlite or not has_vector) and isinstance(embedding, list):
             import json
-            embedding_val = json.dumps(embedding).encode('utf-8')
+            embedding_val = json.dumps(embedding)
+            if is_sqlite:
+                embedding_val = embedding_val.encode('utf-8')
         else:
             embedding_val = embedding
 
@@ -481,8 +482,9 @@ class RAGService:
         is_sqlite = self._is_sqlite(conn)
         
         try:
-            if is_sqlite:
-                # Python-based cosine similarity for SQLite
+            has_vector = has_vector_extension() if not is_sqlite else False
+            if is_sqlite or not has_vector:
+                # Python-based cosine similarity for SQLite or Postgres without pgvector
                 import json
                 import math
                 

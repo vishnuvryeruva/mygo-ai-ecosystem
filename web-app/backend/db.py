@@ -95,6 +95,25 @@ def get_conn(register_vec=True):
         return SQLiteConnectionProxy(conn)
 
 
+def has_vector_extension() -> bool:
+    """Check if the vector extension is available and enabled in PostgreSQL."""
+    conn = None
+    try:
+        conn = get_conn(register_vec=False)
+        is_sqlite = isinstance(conn, SQLiteConnectionProxy) or isinstance(conn, sqlite3.Connection)
+        if is_sqlite:
+            return False
+            
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
+            return cur.fetchone() is not None
+    except Exception:
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
 def init_db():
     """
     Create all required tables if they don't exist.
@@ -106,20 +125,29 @@ def init_db():
     # Check if we are using SQLite (via proxy or direct)
     is_sqlite = isinstance(conn, SQLiteConnectionProxy) or isinstance(conn, sqlite3.Connection)
     
+    has_pgvector = True
+    if not is_sqlite:
+        try:
+            cur = conn.cursor()
+            cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            has_pgvector = False
+            print(f"WARNING: PostgreSQL does not support pgvector extension ({e}). Falling back to text-based embeddings and Python similarity matching.")
+
     try:
         with open(sql_path, "r") as f:
             sql = f.read()
         
-        # SQL compatibility tweaks for SQLite
-        if is_sqlite:
+        # SQL compatibility tweaks for SQLite or Postgres without pgvector
+        if is_sqlite or not has_pgvector:
             # Remove Postgres-specific extensions and types
             sql = re.sub(r'CREATE EXTENSION.*?;', '', sql, flags=re.IGNORECASE | re.DOTALL)
-            sql = sql.replace("embedding       vector(1536),", "embedding       BLOB,")
+            sql = sql.replace("embedding       vector(1536),", "embedding       TEXT,")
             sql = sql.replace("JSONB", "TEXT")
-            # Remove any IVFFLAT index stuff which SQLite won't understand
+            # Remove any IVFFLAT index stuff which SQLite/standard Postgres won't understand
             sql = re.sub(r'CREATE INDEX.*?USING ivfflat.*?;', '', sql, flags=re.IGNORECASE | re.DOTALL)
-            # Replace %s with ? for SQLite placeholders in migrations if necessary, 
-            # but init.sql usually has literal SQL.
         
         cur = conn.cursor()
         if is_sqlite:
@@ -129,8 +157,11 @@ def init_db():
             
         conn.commit()
         
-        if not is_sqlite:
-            register_vector(conn)
+        if not is_sqlite and has_pgvector:
+            try:
+                register_vector(conn)
+            except Exception as e:
+                print(f"WARNING: Could not register vector types: {e}")
 
         # Backfill schema changes for existing databases.
         for ddl in [
@@ -148,7 +179,7 @@ def init_db():
             except Exception:
                 pass
             
-        print(f"DEBUG: Database initialized successfully ({'SQLite' if is_sqlite else 'PostgreSQL'}).")
+        print(f"DEBUG: Database initialized successfully ({'SQLite' if is_sqlite else ('PostgreSQL with pgvector' if has_pgvector else 'PostgreSQL without pgvector')}).")
     except Exception as e:
         if not is_sqlite:
             conn.rollback()

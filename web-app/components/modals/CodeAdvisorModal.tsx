@@ -30,6 +30,7 @@ interface AntiPattern {
 export default function CodeAdvisorModal({ onClose, initialCode = '', initialCodeType = 'ABAP' }: CodeAdvisorModalProps) {
   const [code, setCode] = useState(initialCode)
   const [codeType, setCodeType] = useState(initialCodeType)
+  const [programName, setProgramName] = useState('')
   const codeRef = useAutoResize(code, 12)
   const [analysis, setAnalysis] = useState<{
     suggestions: Suggestion[]
@@ -68,19 +69,24 @@ export default function CodeAdvisorModal({ onClose, initialCode = '', initialCod
 
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!code.trim()) return
+    if (!code.trim() && !programName.trim()) return
 
     setLoading(true)
     setPushed(false)
     try {
       const response = await axios.post('/api/analyze-code', {
         code,
-        code_type: codeType
+        code_type: codeType,
+        program_name: programName
       })
       setAnalysis(response.data)
-    } catch (error) {
+      if (response.data.code && !code) {
+        setCode(response.data.code)
+      }
+    } catch (error: any) {
       console.error('Error analyzing code:', error)
-      alert('Error analyzing code. Please try again.')
+      const errorMsg = error?.response?.data?.error || 'Error analyzing code. Please try again.'
+      alert(errorMsg)
     } finally {
       setLoading(false)
     }
@@ -111,6 +117,17 @@ export default function CodeAdvisorModal({ onClose, initialCode = '', initialCod
           ) : !initialCode ? (
             <form onSubmit={handleAnalyze}>
               <div className="input-group">
+                <label className="input-label">Program/Class/Function Name (Optional)</label>
+                <input
+                  type="text"
+                  value={programName}
+                  onChange={(e) => setProgramName(e.target.value)}
+                  placeholder="e.g., Z_MY_PROGRAM"
+                  className="input"
+                />
+              </div>
+
+              <div className="input-group">
                 <label className="input-label">Code Type</label>
                 <select
                   value={codeType}
@@ -129,7 +146,7 @@ export default function CodeAdvisorModal({ onClose, initialCode = '', initialCod
                   ref={codeRef}
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
-                  placeholder="Paste your code for analysis..."
+                  placeholder="Paste your code here or enter program name to fetch from SAP..."
                   className="input font-mono text-sm"
                   style={{ resize: 'none' }}
                 />
@@ -137,7 +154,7 @@ export default function CodeAdvisorModal({ onClose, initialCode = '', initialCod
 
               <button
                 type="submit"
-                disabled={loading || !code.trim()}
+                disabled={loading || (!code.trim() && !programName.trim())}
                 className="btn btn-primary w-full"
               >
                 Analyze Code

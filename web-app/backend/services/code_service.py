@@ -43,9 +43,47 @@ Keep the explanation clear and concise, suitable for developers at various skill
         return explanation
     
     def fetch_code_from_sap(self, program_name, code_type='ABAP'):
-        """Placeholder for SAP code fetching - would integrate with SAP system"""
-        # This would typically connect to SAP system via RFC or OData
-        # For now, return a placeholder message
-        return f"Code fetching from SAP for {program_name} would be implemented here. " \
-               f"This requires SAP system connection (RFC, OData, or ADT)."
+        """Fetch code from SAP system via direct ADT client."""
+        try:
+            from services import source_config_service
+            sources = source_config_service.list_sources()
+            sap_source = next((s for s in sources if s['type'] == 'SAP_ADT'), None)
+            
+            if not sap_source:
+                return f"No active SAP ADT configuration found in Settings."
+                
+            source_details = source_config_service.get_source(sap_source['id'])
+            if not source_details:
+                return f"SAP ADT configuration could not be loaded."
+                
+            config = source_details.get('config', {})
+            from services.sap_adt_service import DirectADTClient
+            client = DirectADTClient(
+                api_endpoint=config.get('apiEndpoint', ''),
+                client=config.get('sapClient', '100'),
+                username=config.get('clientId', ''),
+                password=config.get('clientSecret', '')
+            )
+            
+            success = client.connect()
+            if not success:
+                return f"Failed to connect and authenticate against the SAP ADT system."
+                
+            # Heuristic to detect class vs program
+            name_clean = program_name.strip().upper()
+            if name_clean.startswith(('ZCL_', 'CL_')) or '==CP' in name_clean:
+                # Class
+                if '===' in name_clean:
+                    name_clean = name_clean.split('=')[0]
+                code = client.fetch_abap_class_code(name_clean)
+            else:
+                # Program/Include
+                code = client.fetch_abap_program_code(name_clean)
+                
+            if not code:
+                return f"Object '{program_name}' not found or has no source code on the SAP system."
+                
+            return code
+        except Exception as e:
+            return f"Error fetching code from SAP: {str(e)}"
 
