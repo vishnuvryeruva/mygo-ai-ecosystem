@@ -1307,6 +1307,52 @@ class RAGService:
             'module': module or '',
         }
 
+    def list_synced_projects(self) -> list:
+        """Projects that have at least one document in the Yoda knowledge base.
+
+        Used by Change Impact Analysis — comparison only works against content that
+        has been synced into Document Hub, not against every CALM project.
+        """
+        conn = None
+        try:
+            conn = get_conn()
+            is_sqlite = self._is_sqlite(conn)
+            cursor_factory = None if is_sqlite else psycopg2.extras.RealDictCursor
+            with conn.cursor(cursor_factory=cursor_factory) as cur:
+                cur.execute(
+                    """
+                    SELECT project_id, MAX(project) AS project
+                    FROM documents
+                    WHERE project_id IS NOT NULL
+                      AND TRIM(project_id) <> ''
+                    GROUP BY project_id
+                    ORDER BY MAX(project)
+                    """
+                )
+                rows = cur.fetchall()
+        except Exception as e:
+            print(f"Error listing synced projects: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+        projects = []
+        for row in rows:
+            if is_sqlite:
+                project_id, name = row[0], row[1]
+            else:
+                project_id, name = row.get('project_id'), row.get('project')
+            if not project_id:
+                continue
+            projects.append({
+                'id': str(project_id),
+                'name': (name or '').strip() or str(project_id),
+            })
+        return projects
+
     def get_documents_for_comparison(self, project_id: str = '', project: str = '',
                                      module: str = '', max_chars: int = 6000) -> list:
         """One entry per document — identity, module, type, text, embedding.

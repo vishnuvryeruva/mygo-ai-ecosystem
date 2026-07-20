@@ -626,13 +626,27 @@ def dashboard_stats():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/synced-projects', methods=['GET'])
+def list_synced_projects():
+    """Projects that have documents synced into the Yoda knowledge base.
+
+    Change Impact Analysis can only compare these — unsynced CALM projects have
+    no content in Document Hub to analyse.
+    """
+    try:
+        return jsonify({'projects': rag_service.list_synced_projects()})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/change-impact', methods=['POST'])
 def change_impact_analysis():
     """Change impact analysis: compare two projects' documents on solution design.
 
-    Takes the project ids from the CALM projects dropdown. Names are accepted as
-    a fallback and for display, but the id is the join key — CALM projects get
-    renamed, and a rename must not silently return an empty report.
+    Takes project ids for projects already synced into the Yoda knowledge base.
+    Names are accepted as a fallback and for display, but the id is the join key.
 
     tableOnly returns the coverage table alone (no LLM calls) so the UI can show
     what is there before anyone pays for an analysis.

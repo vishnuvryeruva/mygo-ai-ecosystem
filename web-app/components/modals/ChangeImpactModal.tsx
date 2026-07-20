@@ -8,7 +8,6 @@ interface ChangeImpactModalProps {
     onClose: () => void
 }
 
-interface Source { id: string; name: string; type: string }
 interface Project { id: string; name: string }
 interface SapModule { code: string; label: string }
 
@@ -77,23 +76,20 @@ export default function ChangeImpactModal({ onClose }: ChangeImpactModalProps) {
     const [error, setError] = useState('')
     const [result, setResult] = useState<ChangeImpactResult | null>(null)
 
-    // The projects dropdown needs a CALM source. There is normally exactly one,
-    // so it is resolved silently rather than spending a third dropdown on it.
+    // Only projects synced into Yoda (Document Hub) can be analysed — CALM
+    // projects with no synced documents have nothing to compare.
     const loadProjects = useCallback(async () => {
         setLoadingProjects(true)
         setError('')
         try {
-            const srcRes = await axios.get('/api/sources')
-            const sources: Source[] = srcRes.data.sources ?? srcRes.data ?? []
-            const calm = sources.find(s => (s.type || '').toUpperCase() === 'CALM')
-            if (!calm) {
-                setError('No Cloud ALM source is configured. Add one under Settings to compare projects.')
-                return
+            const res = await axios.get('/api/synced-projects')
+            const synced: Project[] = res.data.projects ?? []
+            setProjects(synced)
+            if (synced.length === 0) {
+                setError('No projects are synced to Yoda yet. Sync documents from Data Sources first, then run Change Impact Analysis.')
             }
-            const res = await axios.get(`/api/calm/${calm.id}/projects`)
-            setProjects(res.data.projects ?? [])
         } catch {
-            setError('Failed to load projects from Cloud ALM.')
+            setError('Failed to load synced projects.')
         } finally {
             setLoadingProjects(false)
         }
@@ -165,7 +161,7 @@ export default function ChangeImpactModal({ onClose }: ChangeImpactModalProps) {
                             Change Impact Analysis
                         </h2>
                         <p className="text-sm text-muted mt-1">
-                            Compare a source project against another on solution design — configuration,
+                            Compare two projects synced to Yoda on solution design — configuration,
                             process and architecture, not wording
                         </p>
                     </div>
@@ -181,9 +177,15 @@ export default function ChangeImpactModal({ onClose }: ChangeImpactModalProps) {
                                 className="doc-hub-filter-select w-full"
                                 value={projectA}
                                 onChange={e => setProjectA(e.target.value)}
-                                disabled={loadingProjects}
+                                disabled={loadingProjects || projects.length === 0}
                             >
-                                <option value="">{loadingProjects ? 'Loading projects…' : 'Select a project'}</option>
+                                <option value="">
+                                    {loadingProjects
+                                        ? 'Loading projects…'
+                                        : projects.length === 0
+                                            ? 'No synced projects'
+                                            : 'Select a project'}
+                                </option>
                                 {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                             </select>
                         </div>
@@ -193,9 +195,15 @@ export default function ChangeImpactModal({ onClose }: ChangeImpactModalProps) {
                                 className="doc-hub-filter-select w-full"
                                 value={projectB}
                                 onChange={e => setProjectB(e.target.value)}
-                                disabled={loadingProjects}
+                                disabled={loadingProjects || projects.length === 0}
                             >
-                                <option value="">{loadingProjects ? 'Loading projects…' : 'Select a project'}</option>
+                                <option value="">
+                                    {loadingProjects
+                                        ? 'Loading projects…'
+                                        : projects.length === 0
+                                            ? 'No synced projects'
+                                            : 'Select a project'}
+                                </option>
                                 {projects.map(p => (
                                     <option key={p.id} value={p.id} disabled={p.id === projectA}>{p.name}</option>
                                 ))}
