@@ -734,7 +734,10 @@ class RAGService:
         
         try:
             if app_side:
-                # Python-based cosine similarity (SQLite or Postgres without pgvector)
+                # Python-based cosine similarity (SQLite or Postgres without pgvector).
+                # CF Hyperscaler Postgres typically has no pgvector, so this is the
+                # production path there — Document Hub can still list rows while
+                # Ask Yoda returned references: [] when row shaping was wrong.
                 import math
 
                 def cosine_similarity(v1, v2):
@@ -745,14 +748,24 @@ class RAGService:
                         return 0
                     return dot_product / (magnitude1 * magnitude2)
 
-                with conn.cursor() as cur:
-                    cur.execute("SELECT content, source, doc_type, project, document_name, web_url, document_id, embedding FROM documents")
+                # RealDictCursor is required on Postgres: a plain cursor yields
+                # tuples, and dict(tuple) raises for every row — which the except
+                # below used to swallow, leaving scored_rows empty and the LLM
+                # with no context. SQLite already returns sqlite3.Row via row_factory.
+                cursor_factory = (
+                    None if self._is_sqlite(conn) else psycopg2.extras.RealDictCursor
+                )
+                with conn.cursor(cursor_factory=cursor_factory) as cur:
+                    cur.execute(
+                        "SELECT content, source, doc_type, project, document_name, "
+                        "web_url, document_id, embedding FROM documents"
+                    )
                     all_rows = cur.fetchall()
-                
+
                 scored_rows = []
+                skipped = 0
                 for row in all_rows:
                     try:
-                        # row might be sqlite3.Row or dict
                         row_dict = dict(row)
                         # Must go through the shared helper: psycopg2 returns bytea
                         # as a memoryview, which is neither bytes nor a list, and
@@ -765,9 +778,18 @@ class RAGService:
                             score = cosine_similarity(query_embedding, emb_list)
                             row_dict['score'] = score
                             scored_rows.append(row_dict)
+                        else:
+                            skipped += 1
                     except Exception as e:
+                        skipped += 1
                         print(f"WARNING: skipping row in similarity search: {e}")
-                
+
+                if not scored_rows:
+                    print(
+                        f"WARNING: app-side vector search matched 0/{len(all_rows)} rows "
+                        f"(skipped={skipped}). Check embeddings / OPENAI_API_KEY / BYTEA JSON."
+                    )
+
                 # Sort by score descending
                 scored_rows.sort(key=lambda x: x.get('score', 0), reverse=True)
                 rows = scored_rows[:top_k]
@@ -815,13 +837,18 @@ class RAGService:
 
         context = "\n\n".join(row['content'] for row in rows)
 
-        # Inject global document index
+        # Inject global document index (list_documents returns a paginated dict)
         try:
-            doc_list = self.list_documents()
-            global_index = "Available Documents Index:\n"
-            for doc in doc_list:
-                global_index += f"- '{doc['name']}' (Project: {doc['project']}, Source: {doc['source']})\n"
-            context = global_index + "\n\nDetailed Excerpts:\n" + context
+            listing = self.list_documents(page=1, page_size=100)
+            docs = listing.get('documents') or []
+            if docs:
+                global_index = "Available Documents Index:\n"
+                for doc in docs:
+                    global_index += (
+                        f"- '{doc.get('name')}' "
+                        f"(Project: {doc.get('project')}, Source: {doc.get('source')})\n"
+                    )
+                context = global_index + "\n\nDetailed Excerpts:\n" + context
         except Exception as e:
             print(f"DEBUG: Failed to append global index to context: {e}")
 
