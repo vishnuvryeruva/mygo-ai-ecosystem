@@ -320,6 +320,23 @@ export default function SpecAssistantModal({ onClose, initialRequirements }: Spe
     }
   }
 
+  const handleGeneratePrompt = () => {
+    if (!specContent.trim()) return
+
+    const task = requirements.trim()
+      ? `Original requirements:\n${requirements.trim()}\n\n${specType.charAt(0).toUpperCase() + specType.slice(1)} specification:\n${specContent}`
+      : specContent
+
+    window.dispatchEvent(new CustomEvent('prompt-studio-open', {
+      detail: {
+        task,
+        language: 'ABAP',
+        prompt: '',
+        autoGeneratePrompt: true,
+      }
+    }))
+  }
+
   return (
     <AppModal onClose={onClose}>
       <div>
@@ -457,6 +474,16 @@ export default function SpecAssistantModal({ onClose, initialRequirements }: Spe
                   sourceLabel="Spec Assistant"
                   almDocumentType={specType === 'functional' ? 'functional_spec' : 'technical_spec'}
                 />
+              )}
+
+              {specContent && (
+                <button
+                  type="button"
+                  onClick={handleGeneratePrompt}
+                  className="btn btn-primary w-full"
+                >
+                  Generate Prompt →
+                </button>
               )}
 
               {/* Refinement suggestions */}

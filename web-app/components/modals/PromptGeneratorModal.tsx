@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 import RichTextResponse from '../RichTextResponse'
 import ScrollToLatestButton from '../ScrollToLatestButton'
@@ -14,11 +14,12 @@ interface PromptGeneratorModalProps {
   initialLanguage?: string
   initialTask?: string
   autoGenerateCode?: boolean
+  autoGeneratePrompt?: boolean
 }
 
 type Step = 'describe' | 'refine' | 'code'
 
-export default function PromptGeneratorModal({ onClose, initialPrompt, initialLanguage, initialTask, autoGenerateCode }: PromptGeneratorModalProps) {
+export default function PromptGeneratorModal({ onClose, initialPrompt, initialLanguage, initialTask, autoGenerateCode, autoGeneratePrompt }: PromptGeneratorModalProps) {
   const [language, setLanguage] = useState(initialLanguage || 'ABAP')
   const [taskDescription, setTaskDescription] = useState(initialTask || '')
   const taskRef = useAutoResize(taskDescription, 4)
@@ -143,8 +144,7 @@ export default function PromptGeneratorModal({ onClose, initialPrompt, initialLa
   }
 
   // ── Step 1: Generate prompt ────────────────
-  const handleGenerate = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const generatePromptFromTask = async () => {
     if (!taskDescription.trim()) return
 
     setLoading(true)
@@ -170,6 +170,20 @@ export default function PromptGeneratorModal({ onClose, initialPrompt, initialLa
       setLoading(false)
     }
   }
+
+  const handleGenerate = async (e: React.FormEvent) => {
+    e.preventDefault()
+    await generatePromptFromTask()
+  }
+
+  // Auto-generate prompt when opened with a prefilled task (e.g. from Spec Agent)
+  const didAutoGeneratePrompt = useRef(false)
+  useEffect(() => {
+    if (autoGeneratePrompt && initialTask?.trim() && !initialPrompt && !didAutoGeneratePrompt.current) {
+      didAutoGeneratePrompt.current = true
+      generatePromptFromTask()
+    }
+  }, [autoGeneratePrompt, initialTask, initialPrompt])
 
   // ── Step 2: Refine prompt ──────────────────
   const handleRefinement = async () => {

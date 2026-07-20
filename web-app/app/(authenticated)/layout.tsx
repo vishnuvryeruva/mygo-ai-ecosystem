@@ -47,6 +47,7 @@ export default function AuthenticatedLayout({
         language: string; 
         task?: string;
         autoGenerate?: boolean;
+        autoGeneratePrompt?: boolean;
     } | null>(null)
     // Agent prefill from Document Hub (content only, no auto-submit)
     const [agentPrefillData, setAgentPrefillData] = useState<{
@@ -175,7 +176,8 @@ export default function AuthenticatedLayout({
                     prompt: detail.prompt || '', 
                     language: detail.language || 'ABAP',
                     task: detail.task || '',
-                    autoGenerate: detail.autoGenerate
+                    autoGenerate: detail.autoGenerate,
+                    autoGeneratePrompt: detail.autoGeneratePrompt
                 })
                 setActiveModal('prompt-generator')
             }
@@ -344,6 +346,7 @@ export default function AuthenticatedLayout({
                     initialLanguage={promptStudioData?.language}
                     initialTask={promptStudioData?.task}
                     autoGenerateCode={promptStudioData?.autoGenerate}
+                    autoGeneratePrompt={promptStudioData?.autoGeneratePrompt}
                 />
             )}
             {activeModal === 'explain-code' && (
