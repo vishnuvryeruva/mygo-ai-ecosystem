@@ -108,6 +108,27 @@ class OpenAIService:
         self._resolved_gemini_model = candidates[0] if candidates else preferred
         return self._resolved_gemini_model
 
+    def _fallback_to_openai(self, primary_provider, primary_error, messages,
+                            temperature, max_tokens, json_mode):
+        """OpenAI backup for when the chosen provider fails.
+
+        Resilience is worth keeping — but only when it stays honest. If OpenAI
+        succeeds, the caller never knew the primary hiccuped. If OpenAI ALSO
+        fails (e.g. the account is out of credits), the raised error names BOTH
+        causes, so the real reason the user's chosen provider failed is not
+        buried under OpenAI's. Previously only OpenAI's error surfaced, which is
+        why a dead OpenAI account looked like "AI Core is broken".
+        """
+        try:
+            return self._get_openai_response(
+                messages, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode
+            )
+        except Exception as openai_error:
+            raise RuntimeError(
+                f"{primary_provider} failed ({primary_error}); "
+                f"OpenAI fallback also failed ({openai_error})"
+            ) from openai_error
+
     def chat_completion(self, messages, temperature=0.3, max_tokens=2000, provider="openai", json_mode=False):
         """Generic chat completion method across supported providers."""
         resolved_provider = self._normalize_provider(provider)
@@ -138,7 +159,7 @@ class OpenAIService:
             except Exception as e:
                 self._log_provider_failure("claude", self.claude_model, e)
                 print("LLM_ROUTER_FALLBACK: from=claude to=openai")
-                return self._get_openai_response(messages, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode)
+                return self._fallback_to_openai("claude", e, messages, temperature, max_tokens, json_mode)
 
         if resolved_provider == "gemini":
             model_name = self._resolve_gemini_model()
@@ -166,7 +187,7 @@ class OpenAIService:
             except Exception as e:
                 self._log_provider_failure("gemini", model_name, e)
                 print("LLM_ROUTER_FALLBACK: from=gemini to=openai")
-                return self._get_openai_response(messages, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode)
+                return self._fallback_to_openai("gemini", e, messages, temperature, max_tokens, json_mode)
 
         if resolved_provider == "ai_core":
             try:
@@ -180,7 +201,7 @@ class OpenAIService:
             except Exception as e:
                 self._log_provider_failure("ai_core", self.ai_core_service.model_name, e)
                 print("LLM_ROUTER_FALLBACK: from=ai_core to=openai")
-                return self._get_openai_response(messages, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode)
+                return self._fallback_to_openai("ai_core", e, messages, temperature, max_tokens, json_mode)
 
         # Default OpenAI path
         return self._get_openai_response(messages, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode)
