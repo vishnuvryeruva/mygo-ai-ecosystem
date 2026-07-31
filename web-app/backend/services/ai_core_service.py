@@ -53,6 +53,12 @@ class AICoreService:
         # Embeddings — separate deployment/model from chat.
         self.embedding_deployment_id = os.getenv("AI_CORE_EMBEDDING_DEPLOYMENT_ID", "").strip()
         self.embedding_model = os.getenv("AI_CORE_EMBEDDING_MODEL", "").strip()
+        # AI Core proxies these OpenAI models through Azure OpenAI, whose
+        # embeddings endpoint requires an api-version query param. Overridable in
+        # case the tenant pins a different one.
+        self.embedding_api_version = os.getenv(
+            "AI_CORE_EMBEDDING_API_VERSION", "2023-05-15"
+        ).strip() or "2023-05-15"
 
         self._access_token: Optional[str] = None
         self._token_expires_at: float = 0
@@ -309,13 +315,17 @@ class AICoreService:
                 "and AI_CORE_EMBEDDING_MODEL."
             )
         token = self._get_access_token()
+        # Azure OpenAI (which AI Core proxies) requires api-version on the query
+        # string; the deployment already pins the model, so the body carries only
+        # the input.
         endpoint = (
-            f"{self.api_url}/v2/inference/deployments/{self.embedding_deployment_id}/embeddings"
+            f"{self.api_url}/v2/inference/deployments/{self.embedding_deployment_id}"
+            f"/embeddings?api-version={self.embedding_api_version}"
         )
         response = requests.post(
             endpoint,
             headers=self._api_headers(token),
-            json={"input": [text], "model": self.embedding_model},
+            json={"input": [text]},
             timeout=60,
         )
         if response.status_code != 200:
