@@ -94,23 +94,84 @@ class RAGService:
         return self._is_sqlite(conn) or not pgvector_available()
 
     # ── Embedding ─────────────────────────────────────────────────────────────
+    #
+    # The whole corpus is embedded with ONE model. Every stored vector and every
+    # query vector must come from it, or cosine similarity compares points in
+    # different geometric spaces and retrieval silently returns nonsense. So the
+    # fallback below is deliberately narrow: it only ever switches the *gateway*
+    # (OpenAI's API vs SAP AI Core), never the model. A provider that cannot serve
+    # EMBEDDING_MODEL is skipped, not substituted.
+    EMBEDDING_MODEL = "text-embedding-3-small"
+    EMBEDDING_DIM = 1536
 
-    def _create_embedding(self, text):
-        """Create embedding using OpenAI's text-embedding-3-small model (1536-dim)."""
-        try:
-            from openai import OpenAI
-            client = OpenAI(
-                api_key=os.getenv('OPENAI_API_KEY'),
-                timeout=120.0
+    def _embedding_provider_order(self):
+        """Providers to try, in order. OpenAI direct first (cheapest, primary);
+        AI Core second, but only when it is serving the same model."""
+        raw = os.getenv("EMBEDDING_PROVIDER_ORDER", "openai,ai_core")
+        order = [p.strip().lower() for p in raw.split(",") if p.strip()]
+        return order or ["openai"]
+
+    def _embed_openai(self, text):
+        from openai import OpenAI
+        client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'), timeout=120.0)
+        response = client.embeddings.create(model=self.EMBEDDING_MODEL, input=text)
+        return response.data[0].embedding
+
+    def _embed_ai_core(self, text):
+        ai_core = self.openai_service.ai_core_service
+        # Vector-space guard: AI Core must be serving the exact corpus model.
+        # A different model would deserialize and score fine while returning
+        # garbage — the worst kind of failure — so we refuse rather than risk it.
+        if not ai_core.is_embeddings_configured():
+            raise RuntimeError("AI Core embeddings not configured")
+        if ai_core.embedding_model != self.EMBEDDING_MODEL:
+            raise RuntimeError(
+                f"AI Core embedding model '{ai_core.embedding_model}' != corpus model "
+                f"'{self.EMBEDDING_MODEL}'; refusing to mix vector spaces"
             )
-            response = client.embeddings.create(
-                model="text-embedding-3-small",
-                input=text
-            )
-            return response.data[0].embedding
-        except Exception as e:
-            print(f"ERROR: Failed to create embedding: {e}")
-            raise
+        return ai_core.create_embedding(text)
+
+    def _create_embedding(self, text, _retries=2):
+        """Embed text with the corpus model, trying each configured provider.
+
+        Falls over from one gateway to the next (e.g. OpenAI 429 → AI Core) and
+        retries transient failures, so a single provider's outage or a blip does
+        not take down retrieval, ingestion, classification, and comparison at once
+        — which is exactly what a hardcoded single provider did.
+
+        Raises only when every provider is exhausted; the error names each
+        provider's failure so the cause (quota vs auth vs config) is obvious.
+        """
+        providers = {
+            'openai': self._embed_openai,
+            'ai_core': self._embed_ai_core,
+        }
+        errors = []
+        for name in self._embedding_provider_order():
+            fn = providers.get(name)
+            if fn is None:
+                continue
+            for attempt in range(1, _retries + 1):
+                try:
+                    vec = fn(text)
+                    if name != 'openai':
+                        print(f"EMBEDDING: served by fallback provider '{name}'")
+                    return vec
+                except Exception as e:
+                    msg = str(e)
+                    errors.append(f"{name}: {msg}")
+                    # Quota/config errors will not recover on retry — move on.
+                    transient = not any(
+                        s in msg.lower()
+                        for s in ('quota', 'insufficient', 'credit', 'not configured',
+                                  'refusing to mix', 'invalid api key', 'unauthorized')
+                    )
+                    if transient and attempt < _retries:
+                        import time
+                        time.sleep(0.5 * attempt)
+                        continue
+                    break
+        raise RuntimeError("All embedding providers failed → " + " | ".join(errors))
 
     # ── Internal helpers ───────────────────────────────────────────────────────
 
@@ -163,7 +224,7 @@ class RAGService:
                     uuid, display_id, project_id, scope_id,
                     version, is_latest, calm_display_id,
                     sap_module, sap_module_confidence, sap_module_method,
-                    synced_on, summary
+                    synced_on, summary, embedding_model
                 ) VALUES (
                     {placeholders}
                 )
@@ -193,7 +254,8 @@ class RAGService:
                     -- Keep the stored summary when this run produced none, rather
                     -- than wiping it: a re-ingest with use_llm=False has no summary
                     -- to offer, and losing one is worse than keeping a stale one.
-                    summary = COALESCE(EXCLUDED.summary, documents.summary)
+                    summary = COALESCE(EXCLUDED.summary, documents.summary),
+                    embedding_model = EXCLUDED.embedding_model
                 """
         params = (
             chunk_id, doc_id, metadata.get('document_name', ''), content, embedding_val,
@@ -212,6 +274,9 @@ class RAGService:
             # fires on INSERT, and a re-sync takes the ON CONFLICT path.
             metadata.get('syncedOn') or datetime.now(),
             metadata.get('summary'),
+            # Every chunk is embedded by _create_embedding, which only ever uses
+            # EMBEDDING_MODEL, so stamp that as the source of truth.
+            self.EMBEDDING_MODEL,
         )
 
         with conn.cursor() as cur:
@@ -758,15 +823,24 @@ class RAGService:
                 with conn.cursor(cursor_factory=cursor_factory) as cur:
                     cur.execute(
                         "SELECT content, source, doc_type, project, document_name, "
-                        "web_url, document_id, embedding FROM documents"
+                        "web_url, document_id, embedding, embedding_model FROM documents"
                     )
                     all_rows = cur.fetchall()
 
                 scored_rows = []
                 skipped = 0
+                mismatched = 0
                 for row in all_rows:
                     try:
                         row_dict = dict(row)
+                        # Only compare vectors from the same model. NULL means a
+                        # historical row, all of which used the current model, so
+                        # it is compatible; a different non-null model is not, and
+                        # scoring across it would return plausible-looking nonsense.
+                        stored_model = row_dict.get('embedding_model')
+                        if stored_model and stored_model != self.EMBEDDING_MODEL:
+                            mismatched += 1
+                            continue
                         # Must go through the shared helper: psycopg2 returns bytea
                         # as a memoryview, which is neither bytes nor a list, and
                         # passing it straight to cosine_similarity() multiplies
@@ -783,6 +857,13 @@ class RAGService:
                     except Exception as e:
                         skipped += 1
                         print(f"WARNING: skipping row in similarity search: {e}")
+
+                if mismatched:
+                    print(
+                        f"WARNING: {mismatched} row(s) skipped — embedded with a different "
+                        f"model than '{self.EMBEDDING_MODEL}'. Re-embed them to make them "
+                        "searchable again."
+                    )
 
                 if not scored_rows:
                     print(

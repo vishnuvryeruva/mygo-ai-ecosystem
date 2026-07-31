@@ -47,7 +47,13 @@ CREATE TABLE IF NOT EXISTS documents (
     -- freshly synced projects pages deep and reads as "sync is broken".
     synced_on       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     -- AI summary of the document's design intent, written once at ingest.
-    summary         TEXT
+    summary         TEXT,
+    -- The embedding model that produced `embedding`. All rows share one model
+    -- today, but stamping it means a future model change is detectable: queries
+    -- can skip vectors from a different model instead of silently comparing
+    -- across incompatible spaces, and a migration can find exactly what to
+    -- re-embed. NULL is read as the current corpus model (historical rows).
+    embedding_model TEXT
 );
 
 -- Cosine similarity index for fast nearest-neighbour search

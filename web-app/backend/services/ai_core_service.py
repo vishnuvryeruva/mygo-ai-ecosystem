@@ -9,6 +9,16 @@ Optional:
   AI_CORE_DEPLOYMENT_ID (auto-discovered from /v2/lm/deployments if unset)
   AI_CORE_MODEL (default: gpt-4o)
   AI_CORE_MODEL_VERSION (default: latest)
+
+Embeddings (used as an OpenAI fallback so a dead OpenAI account does not take
+down all RAG):
+  AI_CORE_EMBEDDING_DEPLOYMENT_ID  — deployment serving the embedding model
+  AI_CORE_EMBEDDING_MODEL          — MUST match the model the corpus was built
+                                     with (text-embedding-3-small). A different
+                                     model produces vectors in a different space
+                                     and silently breaks retrieval, so the
+                                     RAGService fallback refuses to use AI Core
+                                     embeddings unless this equals its own model.
 """
 
 import base64
@@ -40,12 +50,22 @@ class AICoreService:
         self.model_name = os.getenv("AI_CORE_MODEL", "gpt-4o").strip() or "gpt-4o"
         self.model_version = os.getenv("AI_CORE_MODEL_VERSION", "latest").strip() or "latest"
 
+        # Embeddings — separate deployment/model from chat.
+        self.embedding_deployment_id = os.getenv("AI_CORE_EMBEDDING_DEPLOYMENT_ID", "").strip()
+        self.embedding_model = os.getenv("AI_CORE_EMBEDDING_MODEL", "").strip()
+
         self._access_token: Optional[str] = None
         self._token_expires_at: float = 0
         self._cached_deployment_id: Optional[str] = None
 
     def is_configured(self) -> bool:
         return bool(self.client_id and self.client_secret and self.auth_url and self.api_url)
+
+    def is_embeddings_configured(self) -> bool:
+        """True only when a dedicated embedding deployment and model are set.
+        The model matters: the caller checks it against the corpus model before
+        trusting these vectors, so we never guess a default here."""
+        return bool(self.is_configured() and self.embedding_deployment_id and self.embedding_model)
 
     def config_status(self) -> Dict[str, Any]:
         """Non-secret summary for logging / diagnostics."""
@@ -274,6 +294,43 @@ class AICoreService:
         if usage:
             self._log(f"Token usage: {usage}")
         return text
+
+    def create_embedding(self, text: str) -> List[float]:
+        """Embed a single string via an AI Core embedding deployment.
+
+        Returns a list of floats. The model is whatever the deployment serves and
+        is echoed by AI_CORE_EMBEDDING_MODEL; the caller is responsible for
+        confirming that model matches the corpus before mixing these vectors with
+        stored ones.
+        """
+        if not self.is_embeddings_configured():
+            raise RuntimeError(
+                "AI Core embeddings not configured. Set AI_CORE_EMBEDDING_DEPLOYMENT_ID "
+                "and AI_CORE_EMBEDDING_MODEL."
+            )
+        token = self._get_access_token()
+        endpoint = (
+            f"{self.api_url}/v2/inference/deployments/{self.embedding_deployment_id}/embeddings"
+        )
+        response = requests.post(
+            endpoint,
+            headers=self._api_headers(token),
+            json={"input": [text], "model": self.embedding_model},
+            timeout=60,
+        )
+        if response.status_code != 200:
+            self._log(f"Embedding failed status={response.status_code} body={response.text[:400]}")
+            raise RuntimeError(
+                f"SAP AI Core embedding failed ({response.status_code}): {response.text[:300]}"
+            )
+        payload = response.json()
+        # OpenAI-compatible shape: {"data": [{"embedding": [...]}]}
+        data = payload.get("data") or []
+        if not data or "embedding" not in data[0]:
+            raise RuntimeError(
+                f"SAP AI Core embedding response had no vector. keys={list(payload.keys())}"
+            )
+        return list(data[0]["embedding"])
 
     def verify_connection(self) -> Dict[str, Any]:
         """Lightweight connectivity check for diagnostics."""

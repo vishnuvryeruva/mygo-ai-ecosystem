@@ -229,6 +229,8 @@ def init_db():
              "ALTER TABLE documents ADD COLUMN IF NOT EXISTS synced_on TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
             ("ALTER TABLE documents ADD COLUMN summary TEXT",
              "ALTER TABLE documents ADD COLUMN IF NOT EXISTS summary TEXT"),
+            ("ALTER TABLE documents ADD COLUMN embedding_model TEXT",
+             "ALTER TABLE documents ADD COLUMN IF NOT EXISTS embedding_model TEXT"),
             # Must follow the ADD COLUMNs above: on an existing database the
             # columns do not exist until those have run.
             ("CREATE INDEX IF NOT EXISTS documents_sap_module_idx ON documents(sap_module)",
