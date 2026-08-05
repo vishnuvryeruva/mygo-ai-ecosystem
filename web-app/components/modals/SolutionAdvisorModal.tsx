@@ -374,11 +374,13 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec, initialReq
                 })()}
 
                 {/* Chat Messages */}
-                <div className="scroll-to-latest-wrap">
+                {/* The cap lives on the wrapper (not the scroll box) so the scroll box
+                    keeps filling it via flex when the panel is height-constrained. */}
+                <div className="scroll-to-latest-wrap flex-auto" style={{ maxHeight: '400px', minHeight: '96px' }}>
                     <div
                         ref={messagesContainerRef}
                         className="modal-body space-y-4"
-                        style={{ maxHeight: '400px' }}
+                        style={{ flex: '1 1 auto' }}
                         onScroll={handleMessagesScroll}
                     >
                         {messages.map((message, index) => (
@@ -414,9 +416,11 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec, initialReq
                     />
                 </div>
 
-                {/* Generated Solution Preview (if available) */}
+                {/* Generated Solution Preview (if available). Expanded, this panel yields
+                    height back to the chat instead of pushing the footer out of the modal
+                    on short screens. */}
                 {generatedSolution && currentStep !== 'requirements' && (
-                    <div className="px-6 py-3 border-t border-[var(--glass-border)] bg-indigo-500/10">
+                    <div className="solution-preview px-6 py-3 border-t border-[var(--glass-border)] bg-indigo-500/10">
                         <details className="cursor-pointer">
                             <summary className="text-sm font-medium text-indigo-400">📋 Current Solution (click to expand)</summary>
                             <div className="mt-2 text-sm text-muted max-h-40 overflow-y-auto p-3 glass-subtle rounded-lg">
@@ -428,7 +432,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec, initialReq
 
                 {/* Action Buttons */}
                 {currentStep === 'solution' && (
-                    <div className="px-6 py-4 border-t border-[var(--glass-border)] bg-gray-50/50 dark:bg-black/20 flex gap-3">
+                    <div className="px-6 py-4 border-t border-[var(--glass-border)] bg-gray-50/50 dark:bg-black/20 flex gap-3 flex-shrink-0">
                         <button
                             onClick={handleBack}
                             disabled={loading}
@@ -454,7 +458,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec, initialReq
                 )}
 
                 {currentStep === 'improvise' && (
-                    <div className="px-6 py-4 border-t border-[var(--glass-border)] bg-gray-50/50 dark:bg-black/20 flex gap-3">
+                    <div className="px-6 py-4 border-t border-[var(--glass-border)] bg-gray-50/50 dark:bg-black/20 flex gap-3 flex-shrink-0">
                         <button
                             onClick={handleBack}
                             disabled={loading}
@@ -473,7 +477,7 @@ export default function SolutionAdvisorModal({ onClose, onCreateSpec, initialReq
                 )}
 
                 {currentStep === 'complete' && (
-                    <div className="px-6 py-4 border-t border-[var(--glass-border)] bg-green-500/10 flex gap-3">
+                    <div className="px-6 py-4 border-t border-[var(--glass-border)] bg-green-500/10 flex gap-3 flex-shrink-0">
                         <button
                             onClick={handleBack}
                             disabled={loading}

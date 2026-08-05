@@ -1831,13 +1831,17 @@ body {
 }
 
 /* The direct child <div> each modal renders must fill and flex so the chain
-   panel → wrapper → modal-body stays intact and scrolling works. */
+   panel → wrapper → modal-body stays intact and scrolling works.
+   overflow-y: auto rather than hidden is a safety net: flex shrinking still runs
+   first, so this only engages on very short windows where the sections have all
+   hit their minimums — there it scrolls instead of clipping the footer out of reach. */
 .app-modal-panel > div {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* Re-use existing header / body / footer / close helpers inside AppModal */
@@ -2029,8 +2033,42 @@ body {
   min-height: 0;
 }
 
+/* Column flex + overflow clipping so the scroll container inside always tracks
+   the wrapper's height. Without this the wrapper (position: relative) lets a
+   fixed-height message list spill over the sections below it whenever flex
+   shrinks the wrapper — the list then paints on top of the footer / banners. */
 .scroll-to-latest-wrap {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Solution Advisor's "Current Solution" preview. Collapsed it stays rigid; expanded
+   it may shrink down to a still-readable minimum so the chat and the footer keep
+   their space on short windows. Browsers without :has() simply keep it rigid. */
+.solution-preview {
+  flex-shrink: 0;
+}
+
+.solution-preview:has(details[open]) {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 1;
+  min-height: 110px;
+  overflow: hidden;
+}
+
+.solution-preview:has(details[open]) > details {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.solution-preview:has(details[open]) > details > div {
+  flex: 1 1 auto;
   min-height: 0;
 }
 
