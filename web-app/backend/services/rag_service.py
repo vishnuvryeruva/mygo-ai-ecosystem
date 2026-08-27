@@ -3,11 +3,23 @@ import io
 import zipfile
 import re
 
-import PyPDF2
+try:
+    import PyPDF2
+except ImportError:
+    PyPDF2 = None
+
 import psycopg2
 import psycopg2.extras
-from pgvector.psycopg2 import register_vector
-from docx import Document
+
+try:
+    from pgvector.psycopg2 import register_vector
+except ImportError:
+    register_vector = None
+
+try:
+    from docx import Document
+except ImportError:
+    Document = None
 
 from db import get_conn, has_vector_extension
 from services.openai_service import OpenAIService
@@ -612,6 +624,141 @@ class RAGService:
             provider=llm_provider
         )
         return {"answer": answer, "references": references}
+
+    # ── SAP ADT Package Ingestion ──────────────────────────────────────────────
+
+    def ingest_from_sap_adt(self, package_name: str, destination: str = '',
+                             user_id: str = 'system') -> dict:
+        """
+        Fetch an entire SAP package via ADTMCPRouter and ingest all ABAP objects
+        into the RAG vector database.
+
+        This replaces the BTP objectsSet crawl for code ingestion:
+          - BTP used:  objectsSet OData entity → sourcecodeSet per object
+          - ADT uses:  /sap/bc/adt/repository/nodestructure → source/main per object
+
+        Args:
+            package_name: SAP package name (e.g. '$TMP', 'ZFIORI_SALES')
+            destination:  Optional ADT destination name (unused for embedded mode)
+            user_id:      User performing the sync (for audit metadata)
+
+        Returns:
+            {
+                "success": True,
+                "package": "ZPACKAGE",
+                "ingested": ["ZCL_FOO", "ZREPORT_01", ...],
+                "skipped":  ["ZIF_BAR"],
+                "errors":   [{"object": "ZCL_BAD", "error": "..."}],
+                "total_objects": N,
+                "total_ingested": N
+            }
+        """
+        from services.sap_adt_mcp_service import ADTMCPRouter
+        router = ADTMCPRouter.from_source_config()
+
+        # ── Step 1: List all objects in the package ───────────────────────
+        print(f"[RAGService] ingest_from_sap_adt: listing package {package_name}")
+        pkg_result = router.list_package(package_name)
+
+        if not pkg_result.get('success'):
+            return {
+                "success": False,
+                "package": package_name,
+                "error": pkg_result.get('error', 'Failed to list package contents'),
+                "ingested": [], "skipped": [], "errors": []
+            }
+
+        objects = pkg_result.get('objects', [])
+        print(f"[RAGService] ingest_from_sap_adt: found {len(objects)} objects in {package_name}")
+
+        # ── Step 2: Fetch + ingest each object ────────────────────────────
+        ingested = []
+        skipped  = []
+        errors   = []
+
+        # Object types we can fetch source for — skip metadata-only types
+        FETCHABLE_TYPES = {'CLAS', 'INTF', 'PROG', 'INCL', 'FUGR', 'TABL', 'DDLS',
+                           'VIEW', 'DTEL', 'DOMA', 'MSAG'}
+
+        for obj in objects:
+            obj_name = obj.get('name', '').strip().upper()
+            obj_type = obj.get('type', '').strip().upper()
+            obj_desc = obj.get('description', '')
+
+            if not obj_name or obj_type not in FETCHABLE_TYPES:
+                skipped.append(obj_name or f"<unnamed {obj_type}>")
+                continue
+
+            try:
+                code_result = router.fetch_code(obj_name, obj_type)
+
+                if not code_result.get('success') or not code_result.get('source_code'):
+                    errors.append({
+                        'object': obj_name,
+                        'error': code_result.get('error', 'Empty source returned')
+                    })
+                    continue
+
+                source_text = code_result['source_code']
+                doc_id      = f"SAP_ADT_{package_name}_{obj_name}"
+
+                # Build metadata matching existing document schema
+                chunk_metadata = {
+                    'document_name': obj_name,
+                    'source':        'SAP_ADT',
+                    'type':          f"ABAP_{obj_type}",
+                    'project':       package_name,
+                    'updatedBy':     user_id,
+                    'updatedOn':     '',
+                    'webUrl':        '',
+                    'html_content':  '',
+                    'uuid':          '',
+                    'displayId':     obj_name,
+                    'projectId':     package_name,
+                    'scopeId':       obj_type,
+                }
+
+                # Chunk, embed, and store the source code
+                conn = get_conn()
+                try:
+                    # Remove existing chunks for this object if re-syncing
+                    self._delete_chunks_for_doc(doc_id, conn)
+
+                    chunks = self._chunk_text(source_text)
+                    for i, chunk in enumerate(chunks):
+                        chunk_id  = f"{doc_id}_{i}"
+                        embedding = self._create_embedding(
+                            f"SAP {obj_type} {obj_name}: {chunk[:200]}"
+                        )
+                        self._insert_chunk(conn, chunk_id, doc_id, chunk,
+                                           embedding, chunk_metadata)
+                    conn.commit()
+                    ingested.append(obj_name)
+                    print(f"[RAGService] Ingested {obj_name} ({obj_type}) — {len(chunks)} chunks")
+                except Exception as db_err:
+                    conn.rollback()
+                    errors.append({'object': obj_name, 'error': f"DB error: {str(db_err)}"})
+                finally:
+                    conn.close()
+
+            except Exception as e:
+                errors.append({'object': obj_name, 'error': str(e)})
+
+        result = {
+            "success": True,
+            "package": package_name,
+            "source": pkg_result.get('source', 'SAP_ADT'),
+            "total_objects":  len(objects),
+            "total_ingested": len(ingested),
+            "total_skipped":  len(skipped),
+            "total_errors":   len(errors),
+            "ingested": ingested,
+            "skipped":  skipped,
+            "errors":   errors
+        }
+        print(f"[RAGService] ingest_from_sap_adt complete: {len(ingested)} ingested, "
+              f"{len(skipped)} skipped, {len(errors)} errors")
+        return result
 
     def list_documents(self, page: int = 1, page_size: int = 10, search: str = '',
                        source: str = '', doc_type: str = '', project: str = '',

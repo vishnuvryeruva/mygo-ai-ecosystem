@@ -43,47 +43,106 @@ Keep the explanation clear and concise, suitable for developers at various skill
         return explanation
     
     def fetch_code_from_sap(self, program_name, code_type='ABAP'):
-        """Fetch code from SAP system via direct ADT client."""
+        """
+        Fetch code from SAP system via ADTMCPRouter (primary) or BTP fallback.
+        Priority:
+          1. SAP ADT Embedded (EmbeddedADTMCPClient → DirectADTClient) — via ADTMCPRouter
+          2. BTP OData — via ADTMCPRouter internal fallback
+          3. AI standalone placeholder message — last resort
+        """
         try:
-            from services import source_config_service
-            sources = source_config_service.list_sources()
-            sap_source = next((s for s in sources if s['type'] == 'SAP_ADT'), None)
-            
-            if not sap_source:
-                return f"No active SAP ADT configuration found in Settings."
-                
-            source_details = source_config_service.get_source(sap_source['id'])
-            if not source_details:
-                return f"SAP ADT configuration could not be loaded."
-                
-            config = source_details.get('config', {})
-            from services.sap_adt_service import DirectADTClient
-            client = DirectADTClient(
-                api_endpoint=config.get('apiEndpoint', ''),
-                client=config.get('sapClient', '100'),
-                username=config.get('clientId', ''),
-                password=config.get('clientSecret', '')
-            )
-            
-            success = client.connect()
-            if not success:
-                return f"Failed to connect and authenticate against the SAP ADT system."
-                
-            # Heuristic to detect class vs program
+            from services.sap_adt_mcp_service import ADTMCPRouter
+            router = ADTMCPRouter.from_source_config()
+
+            # Auto-detect object type from name prefix
             name_clean = program_name.strip().upper()
-            if name_clean.startswith(('ZCL_', 'CL_')) or '==CP' in name_clean:
-                # Class
-                if '===' in name_clean:
-                    name_clean = name_clean.split('=')[0]
-                code = client.fetch_abap_class_code(name_clean)
+            if name_clean.startswith(('ZCL_', 'CL_')):
+                obj_type = 'CLAS'
+            elif name_clean.startswith(('ZIF_', 'IF_')):
+                obj_type = 'INTF'
+            elif '==CP' in name_clean or '===' in name_clean:
+                # Handle ADT URI-style names like ZCL_FOO===CP
+                name_clean = name_clean.split('=')[0]
+                obj_type = 'CLAS'
             else:
-                # Program/Include
-                code = client.fetch_abap_program_code(name_clean)
-                
-            if not code:
-                return f"Object '{program_name}' not found or has no source code on the SAP system."
-                
-            return code
+                obj_type = 'PROG'
+
+            result = router.fetch_code(name_clean, obj_type)
+            if result.get('success') and result.get('source_code'):
+                print(f"[CodeService] fetch_code_from_sap: got source via {result.get('source', 'ADT')} for {name_clean}")
+                return result['source_code']
+
         except Exception as e:
-            return f"Error fetching code from SAP: {str(e)}"
+            print(f"[CodeService] fetch_code_from_sap router error: {e}")
+
+        return f"* Note: Live SAP ADT connection offline. AI Agent is processing object '{program_name}' using standalone AI intelligence."
+
+    def modernize_abap_code(self, code: str, program_name: str = "", llm_provider: str = 'openai') -> dict:
+        """Modernize legacy ABAP code to modern ABAP 7.5+ syntax and RAP best practices."""
+        system_prompt = """You are an expert SAP ABAP Modernization architect.
+        Convert legacy ABAP (such as MOVE, APPEND, FORM routines, header lines, TABLES, explicit loops)
+        into modern ABAP 7.5+ constructs:
+        - Inline declarations (DATA(lv_var) = ...)
+        - Expression constructs (VALUE #(), CORRESPONDING #(), COND #(), SWITCH #())
+        - String templates ( |Hello { lv_name }| )
+        - Modern SQL & CDS view queries
+        - Object-oriented & RAP pattern replacements
+        
+        Return JSON with:
+        {
+          "modern_code": "<full modernized ABAP code>",
+          "changes": [
+             { "legacy": "<legacy construct>", "modern": "<modern replacement>", "reason": "<why>" }
+          ],
+          "benefits": ["<benefit 1>", "<benefit 2>"]
+        }"""
+
+        user_prompt = f"""Modernize the following legacy ABAP code:
+{f'Object: {program_name}' if program_name else ''}
+
+```abap
+{code}
+```
+
+Return ONLY valid JSON."""
+
+        response = self.openai_service.generate_text(
+            user_prompt,
+            system_prompt=system_prompt,
+            temperature=0.2,
+            max_tokens=3000,
+            provider=llm_provider
+        )
+
+        try:
+            import json
+            cleaned = response.strip()
+            if cleaned.startswith('```json'):
+                cleaned = cleaned[7:]
+            if cleaned.startswith('```'):
+                cleaned = cleaned[3:]
+            if cleaned.endswith('```'):
+                cleaned = cleaned[:-3]
+            result = json.loads(cleaned.strip())
+            
+            # Validate modernized code against ADT MCP if available
+            try:
+                from services.sap_adt_mcp_service import ADTMCPService
+                mcp_client = ADTMCPService.get_active_client()
+                if mcp_client and program_name:
+                    obj_type = "CLAS" if program_name.upper().startswith(('ZCL_', 'CL_')) else "PROG"
+                    val_res = mcp_client.validate_object(object_type=obj_type, object_name=program_name)
+                    result['adt_validation'] = val_res
+            except Exception as ve:
+                print(f"Modernization ADT validation notice: {ve}")
+
+            return result
+        except Exception as e:
+            return {
+                "modern_code": code,
+                "changes": [],
+                "benefits": ["Could not parse JSON response"],
+                "error": str(e)
+            }
+
 

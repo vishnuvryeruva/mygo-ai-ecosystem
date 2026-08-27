@@ -59,6 +59,11 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
   const [almError, setAlmError] = useState('')
   const [almSuccessDoc, setAlmSuccessDoc] = useState<any>(null)
 
+  const getAuthConfig = () => {
+    const token = typeof window !== 'undefined' ? (localStorage.getItem('mygo-token') || localStorage.getItem('token')) : null
+    return token ? { headers: { Authorization: `Bearer ${token}` } } : {}
+  }
+
   const handleOpenAlmUpload = async () => {
     setAlmUploadStep('form')
     setAlmError('')
@@ -170,12 +175,12 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
           code,
           test_type: testType,
           format: 'preview'
-        }),
+        }, getAuthConfig()),
         axios.post('/api/generate-test-cases', {
           code,
           test_type: testType,
           format: 'calm'
-        })
+        }, getAuthConfig())
       ])
       
       setTestCases(previewResponse.data.test_cases || previewResponse.data.testCases || previewResponse.data)
@@ -195,11 +200,13 @@ export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorMod
 
     setDownloadLoading(true)
     try {
+      const authConfig = getAuthConfig()
       const response = await axios.post('/api/generate-test-cases', {
         code,
         test_type: testType,
         format: backendFormat
       }, {
+        ...authConfig,
         responseType: 'blob'
       })
 

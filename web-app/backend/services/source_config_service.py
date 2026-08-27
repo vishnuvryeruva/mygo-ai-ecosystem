@@ -295,23 +295,24 @@ def test_connection(source_id: str) -> Dict:
             update_source_status(source_id, 'error')
             return {'success': False, 'error': str(e)}
             
-    elif source['type'] == 'SAP_ADT':
+    elif source['type'] in ('SAP_ADT', 'SAP_ADT_MCP'):
         try:
             from services.sap_adt_service import DirectADTClient
             config = source.get('config', {})
             client = DirectADTClient(
-                api_endpoint=config.get('apiEndpoint', ''),
-                client=config.get('sapClient', '100'),
-                username=config.get('clientId', ''),
-                password=config.get('clientSecret', '')
+                api_endpoint=config.get('apiEndpoint') or config.get('sapHost', ''),
+                client=config.get('sapClient', '300'),
+                username=config.get('clientId') or config.get('username', ''),
+                password=config.get('clientSecret') or config.get('password', ''),
+                sap_router=config.get('sapRouter') or config.get('saprouterString') or config.get('routerString', '')
             )
             success = client.connect()
             if success:
                 update_source_status(source_id, 'connected')
-                return {'success': True, 'message': 'Connection successful'}
+                return {'success': True, 'message': f'Connection successful to {client.host}!'}
             else:
                 update_source_status(source_id, 'error')
-                return {'success': False, 'error': 'Failed to connect to SAP.'}
+                return {'success': False, 'error': f'Failed to authenticate with SAP system at {client.host}'}
         except Exception as e:
             update_source_status(source_id, 'error')
             return {'success': False, 'error': str(e)}

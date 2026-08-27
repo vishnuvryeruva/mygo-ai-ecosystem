@@ -10,7 +10,10 @@ import re
 import psycopg2
 import psycopg2.extras
 import sqlite3
-from pgvector.psycopg2 import register_vector
+try:
+    from pgvector.psycopg2 import register_vector
+except ImportError:
+    register_vector = None
 from dotenv import load_dotenv
 
 # Load .env before reading DATABASE_URL — db.py may be imported before app.py calls load_dotenv()
@@ -78,7 +81,7 @@ def get_conn(register_vec=True):
     try:
         conn = psycopg2.connect(DATABASE_URL)
         # Register pgvector types on this connection (skip during init_db)
-        if register_vec:
+        if register_vec and register_vector:
             try:
                 register_vector(conn)
             except Exception as e:
@@ -157,7 +160,7 @@ def init_db():
             
         conn.commit()
         
-        if not is_sqlite and has_pgvector:
+        if not is_sqlite and has_pgvector and register_vector:
             try:
                 register_vector(conn)
             except Exception as e:
@@ -171,6 +174,8 @@ def init_db():
              "ALTER TABLE users ADD COLUMN IF NOT EXISTS api_keys TEXT NOT NULL DEFAULT '{}'"),
             ("ALTER TABLE users ADD COLUMN agent_providers TEXT NOT NULL DEFAULT '{}'",
              "ALTER TABLE users ADD COLUMN IF NOT EXISTS agent_providers TEXT NOT NULL DEFAULT '{}'"),
+            ("ALTER TABLE users ADD COLUMN preferred_models TEXT NOT NULL DEFAULT '{}'",
+             "ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_models TEXT NOT NULL DEFAULT '{}'"),
         ]:
             try:
                 cur = conn.cursor()

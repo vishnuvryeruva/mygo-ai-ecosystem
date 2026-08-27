@@ -27,6 +27,8 @@ interface AntiPattern {
   suggestion: string
 }
 
+import SapCredentialsModal, { SapCredentials, getStoredSapCredentials } from './SapCredentialsModal'
+
 export default function CodeAdvisorModal({ onClose, initialCode = '', initialCodeType = 'ABAP' }: CodeAdvisorModalProps) {
   const [code, setCode] = useState(initialCode)
   const [codeType, setCodeType] = useState(initialCodeType)
@@ -43,6 +45,13 @@ export default function CodeAdvisorModal({ onClose, initialCode = '', initialCod
   // Interactive states for premium feedback and choice capture
   const [antiPatternFeedback, setAntiPatternFeedback] = useState<Record<number, 'like' | 'dislike' | undefined>>({})
   const [suggestionStatus, setSuggestionStatus] = useState<Record<number, 'accepted' | 'ignored' | undefined>>({})
+  const [showSapModal, setShowSapModal] = useState(false)
+  const [sapCreds, setSapCreds] = useState<SapCredentials | null>(null)
+
+  const getAuthConfig = () => {
+    const token = typeof window !== 'undefined' ? (localStorage.getItem('mygo-token') || localStorage.getItem('token')) : null
+    return token ? { headers: { Authorization: `Bearer ${token}` } } : {}
+  }
 
   // Automatically trigger code analysis on mount if initialCode is provided
   useEffect(() => {
@@ -54,7 +63,7 @@ export default function CodeAdvisorModal({ onClose, initialCode = '', initialCod
           const response = await axios.post('/api/analyze-code', {
             code: initialCode,
             code_type: initialCodeType
-          })
+          }, getAuthConfig())
           setAnalysis(response.data)
         } catch (error) {
           console.error('Error analyzing code:', error)
@@ -78,7 +87,7 @@ export default function CodeAdvisorModal({ onClose, initialCode = '', initialCod
         code,
         code_type: codeType,
         program_name: programName
-      })
+      }, getAuthConfig())
       setAnalysis(response.data)
       if (response.data.code && !code) {
         setCode(response.data.code)
@@ -92,8 +101,41 @@ export default function CodeAdvisorModal({ onClose, initialCode = '', initialCod
     }
   }
 
-  const handlePushToS4 = () => {
-    setPushed(true)
+  const [isPushing, setIsPushing] = useState(false)
+  const [pushStatus, setPushStatus] = useState<string | null>(null)
+
+  const handlePushToS4 = async (overrideCreds?: SapCredentials) => {
+    if (!programName && !code) {
+      alert('Please provide an Object/Program Name or Code to push.')
+      return
+    }
+
+    const credentialsToUse = overrideCreds || sapCreds || getStoredSapCredentials()
+    if (!credentialsToUse) {
+      setShowSapModal(true)
+      return
+    }
+
+    setIsPushing(true)
+    setPushStatus(null)
+    try {
+      const response = await axios.post('/api/sap/mcp/push-fix', {
+        object_name: programName || 'ZCL_MY_FIXED_CLASS',
+        code: code,
+        sap_credentials: credentialsToUse
+      }, getAuthConfig())
+      if (response.data.success) {
+        setPushed(true)
+        setPushStatus(response.data.message || 'Successfully pushed to SAP system via ADT MCP!')
+      } else {
+        alert(response.data.error || 'Failed to push to SAP system')
+      }
+    } catch (err: any) {
+      console.error('Error pushing fixes to SAP:', err)
+      alert(err?.response?.data?.error || 'Failed to push fixes to SAP via ADT MCP.')
+    } finally {
+      setIsPushing(false)
+    }
   }
 
   return (
@@ -343,7 +385,7 @@ export default function CodeAdvisorModal({ onClose, initialCode = '', initialCod
                 </div>
                 <button
                   type="button"
-                  onClick={handlePushToS4}
+                  onClick={() => handlePushToS4()}
                   disabled={pushed}
                   className="btn"
                   style={{
@@ -376,6 +418,17 @@ export default function CodeAdvisorModal({ onClose, initialCode = '', initialCod
           )}
         </div>
       </div>
+
+      <SapCredentialsModal
+        isOpen={showSapModal}
+        onClose={() => setShowSapModal(false)}
+        toolName="Push Fix to SAP ADT"
+        onConfirm={(creds) => {
+          setSapCreds(creds)
+          setShowSapModal(false)
+          handlePushToS4(creds)
+        }}
+      />
     </AppModal>
   )
 }

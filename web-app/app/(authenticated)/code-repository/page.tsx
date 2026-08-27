@@ -5,6 +5,8 @@ import axios from 'axios'
 import AIAgentsDropdown from '@/components/AIAgentsDropdown'
 import FetchCodeModal from '@/components/modals/FetchCodeModal'
 import RichTextResponse from '@/components/RichTextResponse'
+import SapPasswordModal, { getSessionSapCreds, setSessionSapPassword } from '@/components/common/SapPasswordModal'
+
 
 // SAP Object Type Icons mapping
 const TypeIcon = ({ type }: { type: string }) => {
@@ -83,8 +85,16 @@ export default function CodeHubPage() {
     const [isFetchModalOpen, setIsFetchModalOpen] = useState(false)
     const [isStateLoaded, setIsStateLoaded] = useState(false)
 
+    // SAP ADT Live Pull State
+    const [isAdtModalOpen, setIsAdtModalOpen] = useState(false)
+    const [isSapPasswordModalOpen, setIsSapPasswordModalOpen] = useState(false)
+    const [adtObjectName, setAdtObjectName] = useState('CL_ABAP_TYPEDESCR')
+    const [adtObjectType, setAdtObjectType] = useState<'CLASS' | 'PROGRAM'>('CLASS')
+    const [isAdtFetching, setIsAdtFetching] = useState(false)
+
     // Toast State
     const [toastMessage, setToastMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null)
+
 
     // Cloud ALM push state
     const [almUploadStep, setAlmUploadStep] = useState<'idle' | 'form' | 'uploading' | 'success' | 'error'>('idle')
@@ -235,6 +245,75 @@ export default function CodeHubPage() {
             setIsLoading(false)
         }
     }
+
+    const handleStartAdtFetch = () => {
+        setIsAdtModalOpen(false)
+        const creds = getSessionSapCreds()
+        if (!creds?.password) {
+            setIsSapPasswordModalOpen(true)
+        } else {
+            executeAdtFetch(creds.password)
+        }
+    }
+
+    const executeAdtFetch = async (password: string) => {
+        setIsSapPasswordModalOpen(false)
+        setIsAdtFetching(true)
+        try {
+            const token = localStorage.getItem('mygo-token') || localStorage.getItem('token')
+            const headers = token ? { Authorization: `Bearer ${token}` } : {}
+            const sessionCreds = getSessionSapCreds() || {}
+            const ephemeralCreds = {
+                sapHost: sessionCreds.sapHost || '',
+                sapClient: sessionCreds.sapClient || '100',
+                username: sessionCreds.username || '',
+                password: password,
+                sapRouter: sessionCreds.sapRouter || ''
+            }
+
+
+            const res = await axios.post('/api/sap/mcp/fetch-code', {
+                object_name: adtObjectName.trim().toUpperCase(),
+                object_type: adtObjectType,
+                sap_credentials: ephemeralCreds
+            }, { headers })
+
+            if (res.data?.success && res.data?.code) {
+                const cleanName = adtObjectName.trim().toUpperCase()
+                const newRecordId = `ADT_${cleanName}_${Date.now()}`
+                const newRecord = {
+                    id: newRecordId,
+                    name: cleanName,
+                    type: adtObjectType === 'CLASS' ? 'CLAS' : 'PROG',
+                    package: 'LIVE_SAP_ADT',
+                    createdBy: 'SAP_SYSTEM',
+                    description: `Live SAP S/4HANA ADT Object (${res.data.length || res.data.code.length} bytes)`,
+                    source: 'SAP S/4HANA (ADT)',
+                    savedAt: new Date().toLocaleString(),
+                    rawData: {
+                        Objname: cleanName,
+                        Objtype: adtObjectType === 'CLASS' ? 'CLAS' : 'PROG',
+                        raw_code: res.data.code
+                    }
+                }
+
+                setFetchedRecords(prev => [newRecord, ...prev])
+                setSelectedRecordId(newRecordId)
+                setFetchedRawCode(res.data.code)
+                setToastMessage({ text: `Successfully pulled ${cleanName} from SAP S/4HANA!`, type: 'success' })
+                setTimeout(() => setToastMessage(null), 4000)
+            } else {
+                throw new Error(res.data?.error || 'Failed to retrieve code from SAP')
+            }
+        } catch (err: any) {
+            console.error('ADT fetch error:', err)
+            setToastMessage({ text: err?.response?.data?.error || err.message || 'SAP ADT fetch failed', type: 'error' })
+            setTimeout(() => setToastMessage(null), 5000)
+        } finally {
+            setIsAdtFetching(false)
+        }
+    }
+
 
     const handleAgentAction = React.useCallback(async (agentId: string) => {
         setIsAdvising(true)
@@ -666,6 +745,19 @@ export default function CodeHubPage() {
                 </div>
                 <div className="flex gap-3">
                     <button 
+                        className="btn flex items-center gap-2 font-bold px-4 py-2.5 rounded-xl shadow-sm text-white transition-all hover:opacity-90" 
+                        style={{ background: 'linear-gradient(135deg, #FF682C 0%, #d64a13 100%)' }}
+                        onClick={() => setIsAdtModalOpen(true)} 
+                        disabled={isAdtFetching}
+                    >
+                        {isAdtFetching ? (
+                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        ) : (
+                            <span style={{ fontSize: 16 }}>⚡</span>
+                        )}
+                        PULL LIVE ABAP (SAP ADT)
+                    </button>
+                    <button 
                         className="btn btn-primary flex items-center gap-2" 
                         onClick={() => setIsFetchModalOpen(true)} 
                         disabled={isLoading}
@@ -683,6 +775,7 @@ export default function CodeHubPage() {
                     <AIAgentsDropdown onAgentSelect={handleCodeHubAgentSelect} />
                 </div>
             </div>
+
 
             {/* Filters - MATCHES DOCUMENT HUB */}
             <div className="doc-hub-filters">
@@ -1059,6 +1152,87 @@ export default function CodeHubPage() {
                     top: top
                 }}
             />
+
+            {/* ADT Live Pull Dialog */}
+            {isAdtModalOpen && (
+                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[60] p-6" onClick={() => setIsAdtModalOpen(false)}>
+                    <div 
+                        className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200" 
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-orange-500 flex items-center justify-center text-white text-lg shadow-md shadow-orange-200">
+                                    ⚡
+                                </div>
+                                <div>
+                                    <h3 className="font-extrabold text-lg text-slate-800 tracking-tight">Pull from SAP ADT</h3>
+                                    <p className="text-slate-500 text-xs font-medium">Fetch live source directly from S/4HANA (HMF)</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setIsAdtModalOpen(false)} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-all">
+                                ×
+                            </button>
+                        </div>
+
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.15em] mb-2 block">Object Type</label>
+                                <select 
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm font-bold text-slate-800 outline-none focus:border-orange-500 transition-all"
+                                    value={adtObjectType}
+                                    onChange={(e) => setAdtObjectType(e.target.value as any)}
+                                >
+                                    <option value="CLASS">ABAP OO Class (CLAS)</option>
+                                    <option value="PROGRAM">ABAP Program / Report (PROG)</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.15em] mb-2 block">Object Name</label>
+                                <input 
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm font-bold text-slate-800 outline-none focus:border-orange-500 transition-all font-mono uppercase"
+                                    placeholder="e.g. CL_ABAP_TYPEDESCR or ZCL_..."
+                                    value={adtObjectName}
+                                    onChange={(e) => setAdtObjectName(e.target.value.toUpperCase())}
+                                />
+                            </div>
+
+                            <div className="pt-2 flex gap-3">
+                                <button 
+                                    type="button"
+                                    onClick={() => setIsAdtModalOpen(false)}
+                                    className="flex-1 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-600 text-sm font-bold hover:bg-slate-100 transition-all"
+                                >
+                                    Cancel
+                                </button>
+                                <button 
+                                    type="button"
+                                    onClick={handleStartAdtFetch}
+                                    disabled={!adtObjectName.trim()}
+                                    className="flex-1 py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 text-white text-sm font-bold shadow-md hover:opacity-90 transition-all disabled:opacity-50"
+                                >
+                                    Next → Authenticate
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* SAP Authentication Password Modal */}
+            <SapPasswordModal
+                isOpen={isSapPasswordModalOpen}
+                onClose={() => setIsSapPasswordModalOpen(false)}
+                onConfirm={(password) => executeAdtFetch(password)}
+                systemId={getSessionSapCreds()?.systemId || 'SAP'}
+                client={getSessionSapCreds()?.sapClient || '100'}
+                username={getSessionSapCreds()?.username || ''}
+                title="SAP ADT Authentication"
+                description="Enter password to authenticate with SAP system"
+            />
+
+
 
             {toastMessage && (
                 <div style={{ position: 'fixed', bottom: '30px', left: '50%', transform: 'translateX(-50%)', zIndex: 1000, padding: '0.75rem 1.5rem', borderRadius: '12px', color: 'white', fontWeight: 600, background: toastMessage.type === 'success' ? '#059669' : '#dc2626', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', animation: 'slideUp 0.3s ease-out' }}>

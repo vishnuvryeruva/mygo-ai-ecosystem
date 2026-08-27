@@ -45,3 +45,5 @@ ENV/
 .venv
 vector_db/
 sources.json
+*.db
+

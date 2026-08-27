@@ -1,9 +1,20 @@
 import os
 from typing import Optional
 from dotenv import load_dotenv
-from openai import OpenAI
-from anthropic import Anthropic
-import google.generativeai as genai
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+
+try:
+    from anthropic import Anthropic
+except ImportError:
+    Anthropic = None
+
+try:
+    import google.generativeai as genai
+except ImportError:
+    genai = None
 
 load_dotenv()
 
@@ -17,24 +28,33 @@ class OpenAIService:
     VALID_PROVIDERS = {"openai", "claude", "gemini"}
 
     def __init__(self):
-        self.openai_model = os.getenv("OPENAI_MODEL", "gpt-4.1")
-        self.claude_model = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
-        # 1.5-pro is often unavailable for some keys/projects; use a broadly available default.
-        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.openai_model = os.getenv("OPENAI_MODEL", "gpt-4o")
+        if self.openai_model in ("gpt-4.1", "gpt-4-1", "gpt-4.1-mini"):
+            self.openai_model = "gpt-4o"
+
+        self.claude_model = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-20241022")
+        if self.claude_model in ("claude-sonnet-4-6", "claude-4-6"):
+            self.claude_model = "claude-3-5-sonnet-20241022"
+
+        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+        if self.gemini_model in ("gemini-2.5-flash", "gemini-2.5"):
+            self.gemini_model = "gemini-1.5-flash"
 
         self.openai_client = None
         openai_key = os.getenv("OPENAI_API_KEY")
-        if openai_key:
-            self.openai_client = OpenAI(api_key=openai_key, timeout=120.0)
+        if openai_key and OpenAI:
+            self.openai_client = OpenAI(api_key=openai_key.strip(), timeout=120.0)
 
         self.claude_client = None
         claude_key = os.getenv("CLAUDE_API_KEY")
-        if claude_key:
-            self.claude_client = Anthropic(api_key=claude_key, timeout=120.0)
+        if claude_key and Anthropic:
+            self.claude_client = Anthropic(api_key=claude_key.strip(), timeout=120.0)
 
+        self.has_gemini = False
         gemini_key = os.getenv("GEMINI_API_KEY")
-        if gemini_key:
-            genai.configure(api_key=gemini_key)
+        if gemini_key and genai:
+            genai.configure(api_key=gemini_key.strip())
+            self.has_gemini = True
         self._resolved_gemini_model = None
 
     def _normalize_provider(self, provider: Optional[str]) -> str:
@@ -49,7 +69,11 @@ class OpenAIService:
 
     def _get_openai_response(self, messages, temperature=0.3, max_tokens=2000, json_mode=False):
         if not self.openai_client:
+            if self.has_gemini:
+                print("LLM_ROUTER_FALLBACK: OpenAI key missing -> falling back to Gemini")
+                return self.chat_completion(messages, temperature=temperature, max_tokens=max_tokens, provider="gemini", json_mode=json_mode)
             raise Exception("OpenAI is selected but OPENAI_API_KEY is not configured.")
+        
         self._log_model_selection("openai", self.openai_model)
         kwargs = dict(
             model=self.openai_model,
@@ -59,22 +83,24 @@ class OpenAIService:
         )
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
-        response = self.openai_client.chat.completions.create(**kwargs)
-        return response.choices[0].message.content
+
+        try:
+            response = self.openai_client.chat.completions.create(**kwargs)
+            return response.choices[0].message.content
+        except Exception as e:
+            self._log_provider_failure("openai", self.openai_model, e)
+            if self.has_gemini:
+                print(f"LLM_ROUTER_FALLBACK: OpenAI error ({str(e)}) -> falling back to Gemini")
+                try:
+                    return self.chat_completion(messages, temperature=temperature, max_tokens=max_tokens, provider="gemini", json_mode=json_mode)
+                except Exception as ge:
+                    print(f"Gemini fallback error: {ge}")
+            raise e
 
     def _resolve_gemini_model(self):
         if self._resolved_gemini_model:
             return self._resolved_gemini_model
-        preferred = self.gemini_model
-        # First, try preferred as-is.
-        try:
-            genai.GenerativeModel(preferred)
-            self._resolved_gemini_model = preferred
-            return self._resolved_gemini_model
-        except Exception:
-            pass
-
-        # Then choose from models available to this key.
+        
         candidates = []
         try:
             for m in genai.list_models():
@@ -83,25 +109,23 @@ class OpenAIService:
                     name = getattr(m, "name", "")
                     if name:
                         candidates.append(name.replace("models/", ""))
-        except Exception:
-            # If listing models fails, keep configured fallback.
-            self._resolved_gemini_model = preferred
-            return self._resolved_gemini_model
+        except Exception as e:
+            print(f"Gemini list_models warning: {e}")
 
         priority_order = [
-            preferred,
-            "gemini-1.5-flash",
-            "gemini-1.5-pro",
-            "gemini-2.0-flash",
             "gemini-2.5-flash",
-            "gemini-pro",
+            "gemini-flash-latest",
+            "gemini-3.5-flash",
+            "gemini-pro-latest",
+            "gemini-2.5-pro",
+            "gemini-1.5-flash",
         ]
         for p in priority_order:
             if p in candidates:
                 self._resolved_gemini_model = p
                 return self._resolved_gemini_model
 
-        self._resolved_gemini_model = candidates[0] if candidates else preferred
+        self._resolved_gemini_model = candidates[0] if candidates else "gemini-2.5-flash"
         return self._resolved_gemini_model
 
     def chat_completion(self, messages, temperature=0.3, max_tokens=2000, provider="openai", json_mode=False):
@@ -161,17 +185,35 @@ class OpenAIService:
                 return (response.text or "").strip()
             except Exception as e:
                 self._log_provider_failure("gemini", model_name, e)
-                print("LLM_ROUTER_FALLBACK: from=gemini to=openai")
-                return self._get_openai_response(messages, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode)
+                if self.openai_client and provider != "gemini":
+                    print("LLM_ROUTER_FALLBACK: from=gemini to=openai")
+                    return self._get_openai_response(messages, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode)
+                raise e
 
         # Default OpenAI path
         return self._get_openai_response(messages, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode)
 
-    def generate_text(self, prompt, system_prompt=None, temperature=0.3, max_tokens=2000, provider="openai"):
-        """Generate text from a prompt."""
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-        return self.chat_completion(messages, temperature, max_tokens, provider=provider)
+    def generate_text(self, prompt, system_prompt=None, temperature=0.3, max_tokens=2000, provider="openai", agent_name="MYGO_Agent"):
+        """Generate text from a prompt, tracing through LangChain & LangGraph execution engine."""
+        def _execute():
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            return self.chat_completion(messages, temperature, max_tokens, provider=provider)
+
+        try:
+            from services.langchain_agent_service import LangGraphExecutionEngine
+            return LangGraphExecutionEngine.execute_agent_workflow(
+                agent_name=agent_name,
+                user_prompt=prompt,
+                system_prompt=system_prompt or "",
+                llm_provider=provider,
+                execution_fn=_execute
+            )
+        except Exception as e:
+            # Fallback to direct execution if engine fails
+            print(f"LangGraph execution wrapper fallback notice: {e}")
+            return _execute()
+
 

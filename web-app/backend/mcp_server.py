@@ -82,48 +82,52 @@ def get_tool_schema(tool_name: str) -> dict:
 
 # FastMCP server setup (optional - for native MCP protocol)
 try:
-    from mcp.server import Server
-    from mcp.server.stdio import stdio_server
-    from mcp.types import Tool, TextContent
-    
-    app = Server("abap-ai-ecosystem")
-    
-    @app.list_tools()
-    async def handle_list_tools():
-        """List available MCP tools"""
-        tools = []
-        for name, tool_data in TOOLS.items():
-            schema = tool_data["schema"]
-            tools.append(Tool(
-                name=schema["name"],
-                description=schema["description"],
-                inputSchema=schema["parameters"]
-            ))
-        return tools
-    
-    @app.call_tool()
-    async def handle_call_tool(name: str, arguments: dict):
-        """Execute an MCP tool"""
-        try:
-            result = execute_tool(name, arguments)
-            # Convert result to string if needed
-            if isinstance(result, dict):
-                result = json.dumps(result, indent=2)
-            return [TextContent(type="text", text=str(result))]
-        except Exception as e:
-            return [TextContent(type="text", text=f"Error: {str(e)}")]
-    
+    try:
+        from mcp.server.fastmcp import FastMCP
+        app = FastMCP("abap-ai-ecosystem")
+    except Exception:
+        from mcp.server import Server
+        app = Server("abap-ai-ecosystem")
+
+    if hasattr(app, "list_tools"):
+        @app.list_tools()
+        async def handle_list_tools():
+            """List available MCP tools"""
+            from mcp.types import Tool
+            tools = []
+            for name, tool_data in TOOLS.items():
+                schema = tool_data["schema"]
+                tools.append(Tool(
+                    name=schema["name"],
+                    description=schema["description"],
+                    inputSchema=schema["parameters"]
+                ))
+            return tools
+
+    if hasattr(app, "call_tool"):
+        @app.call_tool()
+        async def handle_call_tool(name: str, arguments: dict):
+            """Execute an MCP tool"""
+            from mcp.types import TextContent
+            try:
+                result = execute_tool(name, arguments)
+                if isinstance(result, dict):
+                    result = json.dumps(result, indent=2)
+                return [TextContent(type="text", text=str(result))]
+            except Exception as e:
+                return [TextContent(type="text", text=f"Error: {str(e)}")]
+
     async def main():
         """Run the MCP server"""
+        from mcp.server.stdio import stdio_server
         async with stdio_server() as (read_stream, write_stream):
             await app.run(read_stream, write_stream, app.create_initialization_options())
-    
+
     MCP_AVAILABLE = True
-    
-except ImportError:
+
+except Exception as e:
     MCP_AVAILABLE = False
-    print("Note: MCP SDK not installed. HTTP endpoints still available.")
-    print("Install with: pip install mcp")
+    print(f"Note: Native MCP SDK setup skipped ({e}). HTTP endpoints still available.")
 
 
 if __name__ == "__main__":

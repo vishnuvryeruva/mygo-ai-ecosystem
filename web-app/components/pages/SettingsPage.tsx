@@ -2,14 +2,16 @@
 
 import { useState, useEffect } from 'react'
 import axios from 'axios'
+import ObservabilityPanel from './ObservabilityPanel'
 
 /* ─── Tab definitions ──────────────────────────────────── */
 const settingsTabs = [
     { id: 'ai-preferences', label: 'AI Preferences', icon: '🤖' },
     { id: 'prompts', label: 'Manage Prompts', icon: '💬' },
     { id: 'sources', label: 'Manage Sources', icon: '⚙️' },
+    { id: 'sap-adt-mcp', label: 'SAP ADT MCP Credentials', icon: '🔌' },
     { id: 'roles', label: 'Manage Roles', icon: '🔑' },
-    { id: 'credits', label: 'Manage AI Credits', icon: '⚡' },
+    { id: 'credits', label: 'AI Observability', icon: '📊' },
     { id: 'users', label: 'User Management', icon: '👥' },
 ]
 
@@ -119,7 +121,7 @@ const emptyConnection: ConnectionForm = {
     clientSecret: '',
     apiEndpoint: '',
     tokenUrl: '',
-    sapClient: '100',
+    sapClient: '300',
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -137,9 +139,39 @@ export default function SettingsPage() {
     /* API key state — values are masked on load, real on edit */
     const [apiKeys, setApiKeys] = useState<Record<string, string>>({ openai: '', claude: '', gemini: '' })
     const [showKey, setShowKey] = useState<Record<string, boolean>>({ openai: false, claude: false, gemini: false })
-    /* Per-agent provider preferences */
+    /* Per-agent provider preferences & available models */
     const [agentProviders, setAgentProviders] = useState<Record<string, string>>({})
+    const [availableModels, setAvailableModels] = useState<Record<string, string[]>>({ openai: [], claude: [], gemini: [] })
+    const [selectedModels, setSelectedModels] = useState<Record<string, string>>({ openai: 'gpt-4o', claude: 'claude-3-5-sonnet-20241022', gemini: 'gemini-2.5-flash' })
+    const [fetchingModels, setFetchingModels] = useState<Record<string, boolean>>({ openai: false, claude: false, gemini: false })
     const [saveMessage, setSaveMessage] = useState('')
+
+    const handleFetchModels = async (providerId: string) => {
+        setFetchingModels(prev => ({ ...prev, [providerId]: true }))
+        try {
+            const token = localStorage.getItem('mygo-token')
+            const apiKey = apiKeys[providerId] || ''
+            const res = await axios.post('/api/llm/models', {
+                provider: providerId,
+                api_key: apiKey
+            }, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            })
+            if (res.data.success && Array.isArray(res.data.models)) {
+                setAvailableModels(prev => ({ ...prev, [providerId]: res.data.models }))
+                if (res.data.models.length > 0 && !selectedModels[providerId]) {
+                    setSelectedModels(prev => ({ ...prev, [providerId]: res.data.models[0] }))
+                }
+                setSaveMessage(`Fetched ${res.data.models.length} available models for ${providerId.toUpperCase()}.`)
+                setTimeout(() => setSaveMessage(''), 3000)
+            }
+        } catch (err: any) {
+            console.error(`Failed to fetch models for ${providerId}:`, err)
+            alert(err?.response?.data?.error || `Could not fetch models for ${providerId}`)
+        } finally {
+            setFetchingModels(prev => ({ ...prev, [providerId]: false }))
+        }
+    }
 
     /* Prompts state */
     const [activeScenario, setActiveScenario] = useState('ask-yoda')
@@ -154,6 +186,39 @@ export default function SettingsPage() {
     const [isTestingConnection, setIsTestingConnection] = useState(false)
     const [isSavingConnection, setIsSavingConnection] = useState(false)
     const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
+
+    /* SAP ADT MCP Credentials State */
+    const [mcpDescription, setMcpDescription] = useState('')
+    const [mcpSystemId, setMcpSystemId] = useState('')
+    const [mcpAppServer, setMcpAppServer] = useState('')
+    const [mcpInstanceNo, setMcpInstanceNo] = useState('')
+    const [mcpHttpsPort, setMcpHttpsPort] = useState('')
+    const [mcpSaprouterString, setMcpSaprouterString] = useState('')
+    const [mcpSapClient, setMcpSapClient] = useState('')
+    const [mcpUsername, setMcpUsername] = useState('')
+    const [mcpPassword, setMcpPassword] = useState('')
+
+    const [mcpShowPassword, setMcpShowPassword] = useState(false)
+    const [mcpDestination, setMcpDestination] = useState('')
+    const [mcpTesting, setMcpTesting] = useState(false)
+    const [mcpSaving, setMcpSaving] = useState(false)
+    const [mcpSaveMessage, setMcpSaveMessage] = useState('')
+    const [mcpTestResult, setMcpTestResult] = useState<{
+        success: boolean
+        message: string
+        destinations?: any[]
+        endpoint?: string
+    } | null>(null)
+
+    /* ADT Tool Test Bench State */
+    const [activeToolTab, setActiveToolTab] = useState<'FETCH_CODE' | 'RUN_UNIT_TESTS' | 'RUN_ATC' | 'DESTINATIONS'>('FETCH_CODE')
+    const [testObjectName, setTestObjectName] = useState('CL_ABAP_TYPEDESCR')
+    const [testObjectType, setTestObjectType] = useState<'CLASS' | 'PROGRAM'>('CLASS')
+    const [isExecutingTool, setIsExecutingTool] = useState(false)
+    const [toolResult, setToolResult] = useState<any>(null)
+    const [toolError, setToolError] = useState<string>('')
+
+
 
     /* Roles state */
     const [roles, setRoles] = useState<Role[]>([])
@@ -171,7 +236,9 @@ export default function SettingsPage() {
     }, [])
 
     useEffect(() => {
-        if (activeTab === 'sources') {
+        if (activeTab === 'sap-adt-mcp') {
+            refreshMcpSettings()
+        } else if (activeTab === 'sources') {
             refreshSources()
         } else if (activeTab === 'roles') {
             refreshRoles()
@@ -196,16 +263,13 @@ export default function SettingsPage() {
         try {
             const token = localStorage.getItem('mygo-token')
             if (!token) {
-                console.log('No token found in localStorage')
                 setIsLoadingAuth(false)
                 return
             }
 
-            console.log('Fetching current user with token:', token.substring(0, 20) + '...')
             const res = await axios.get('/api/auth/me', {
                 headers: { Authorization: `Bearer ${token}` }
             })
-            console.log('Current user fetched:', res.data)
             setCurrentUser(res.data)
             setSelectedLlmProvider((res.data?.llm_provider || 'openai') as 'openai' | 'claude' | 'gemini')
             setApiKeys({ openai: res.data?.api_keys?.openai || '', claude: res.data?.api_keys?.claude || '', gemini: res.data?.api_keys?.gemini || '' })
@@ -229,6 +293,260 @@ export default function SettingsPage() {
             setIsLoadingSources(false)
         }
     }
+
+    const computeEffectiveSapUrl = (server: string, inst: string, portOverride: string) => {
+        let s = (server || '').trim()
+        if (!s) return ''
+        if (!s.startsWith('http://') && !s.startsWith('https://')) {
+            s = `https://${s}`
+        }
+        if (!s.includes(':', 6)) {
+            const p = portOverride.trim() || (inst.trim() ? `443${inst.trim()}` : '44300')
+            s = `${s}:${p}`
+        }
+        return s
+    }
+
+    const refreshMcpSettings = async () => {
+        try {
+            const token = localStorage.getItem('mygo-token') || localStorage.getItem('token')
+            const headers = token ? { Authorization: `Bearer ${token}` } : {}
+            const res = await axios.get('/api/sources', { headers })
+            const sourceList: Source[] = res.data.sources || []
+            const mcpSource = sourceList.find(s => s.type === 'SAP_ADT_MCP' || s.type === 'SAP_ADT')
+            if (mcpSource) {
+                const sourceDetailRes = await axios.get(`/api/sources/${mcpSource.id}`, { headers })
+                const detail = sourceDetailRes.data || {}
+                const cfg = detail.config || {}
+                if (cfg.description) setMcpDescription(cfg.description)
+                if (cfg.systemId) setMcpSystemId(cfg.systemId)
+                if (cfg.appServer) setMcpAppServer(cfg.appServer)
+                if (cfg.instanceNo) setMcpInstanceNo(cfg.instanceNo)
+                if (cfg.httpsPort) setMcpHttpsPort(cfg.httpsPort)
+                if (cfg.saprouterString || cfg.routerString) setMcpSaprouterString(cfg.saprouterString || cfg.routerString)
+                if (cfg.sapClient) setMcpSapClient(cfg.sapClient)
+                if (cfg.username) setMcpUsername(cfg.username)
+                if (cfg.apiEndpoint && !cfg.appServer) setMcpAppServer(cfg.apiEndpoint)
+                if (cfg.destination) setMcpDestination(cfg.destination)
+            }
+        } catch (err) {
+            console.error('Failed to load MCP settings:', err)
+        }
+    }
+
+
+    const handleApplyPreset = (preset: 'HMT' | 'HMF' | 'HMP' | 'MSP' | 'HMD' | 'CUSTOM') => {
+        if (preset === 'HMT') {
+            // HMT: VPN-only private system. Must route through SAProuter.
+            setMcpDescription('HMT S4 HANA 2021 (VPN)')
+            setMcpSystemId('HMT')
+            setMcpAppServer('192.168.171.43')
+            setMcpInstanceNo('00')
+            setMcpHttpsPort('44300')
+            setMcpSaprouterString('/H/50.198.15.124/H/')
+            setMcpSapClient('300')
+        } else if (preset === 'HMF') {
+            // HMF: Port 44330 on Web Dispatcher (confirmed via port scan)
+            setMcpDescription('HMF S4 HANA Fun (Public)')
+            setMcpSystemId('HMF')
+            setMcpAppServer('mygowebdisp.mygoconsulting.com')
+            setMcpInstanceNo('30')
+            setMcpHttpsPort('44330')
+            setMcpSaprouterString('')
+            setMcpSapClient('300')
+        } else if (preset === 'HMP') {
+            // HMP: Port 44320 on Web Dispatcher (confirmed via port scan)
+            setMcpDescription('HMP S4 HANA (Public)')
+            setMcpSystemId('HMP')
+            setMcpAppServer('mygowebdisp.mygoconsulting.com')
+            setMcpInstanceNo('20')
+            setMcpHttpsPort('44320')
+            setMcpSaprouterString('')
+            setMcpSapClient('300')
+        } else if (preset === 'MSP') {
+            // MSP: Port 44300 on Web Dispatcher (confirmed via port scan)
+            setMcpDescription('MSP S4 HANA (Public)')
+            setMcpSystemId('MSP')
+            setMcpAppServer('mygowebdisp.mygoconsulting.com')
+            setMcpInstanceNo('00')
+            setMcpHttpsPort('44300')
+            setMcpSaprouterString('')
+            setMcpSapClient('300')
+        } else if (preset === 'HMD') {
+            // HMD: Port 44350 on Web Dispatcher (confirmed via port scan)
+            setMcpDescription('HMD S4 HANA Dev (Public)')
+            setMcpSystemId('HMD')
+            setMcpAppServer('mygowebdisp.mygoconsulting.com')
+            setMcpInstanceNo('50')
+            setMcpHttpsPort('44350')
+            setMcpSaprouterString('')
+            setMcpSapClient('300')
+        }
+    }
+
+    const handleTestMcpConnection = async () => {
+        setMcpTesting(true)
+        setMcpTestResult(null)
+        try {
+            const token = localStorage.getItem('mygo-token') || localStorage.getItem('token')
+            const headers = token ? { Authorization: `Bearer ${token}` } : {}
+            const effectiveUrl = computeEffectiveSapUrl(mcpAppServer, mcpInstanceNo, mcpHttpsPort)
+            
+            const payload = {
+                mode: 'DIRECT_SAP',
+                sapHost: effectiveUrl,
+                sapClient: mcpSapClient,
+                sapRouter: mcpSaprouterString,
+                systemId: mcpSystemId,
+                instanceNo: mcpInstanceNo,
+                username: mcpUsername,
+                password: mcpPassword,
+                destination: mcpDestination
+            }
+            
+            const res = await axios.post('/api/sap/mcp/test-connection', payload, { headers })
+
+            if (res.data.success) {
+                const dests = res.data.destinations || []
+                const formattedDests = Array.isArray(dests)
+                    ? dests.map((d: any) => typeof d === 'string' ? d : (d.name || d.destination || JSON.stringify(d)))
+                    : []
+                setMcpTestResult({
+                    success: true,
+                    message: res.data.message || `Successfully authenticated with SAP ${mcpSystemId}!`,
+                    destinations: formattedDests,
+                    endpoint: res.data.endpoint || effectiveUrl
+                })
+            } else {
+                setMcpTestResult({
+                    success: false,
+                    message: res.data.error || 'Could not authenticate with SAP ADT'
+                })
+            }
+        } catch (err: any) {
+            console.error('Error testing connection:', err)
+            setMcpTestResult({
+                success: false,
+                message: err?.response?.data?.error || err.message || 'Could not reach SAP ADT System'
+            })
+        } finally {
+            setMcpTesting(false)
+        }
+    }
+
+
+    const handleSaveMcpSettings = async () => {
+        setMcpSaving(true)
+        setMcpSaveMessage('')
+        try {
+            const token = localStorage.getItem('mygo-token') || localStorage.getItem('token')
+            const headers = token ? { Authorization: `Bearer ${token}` } : {}
+            
+            const res = await axios.get('/api/sources', { headers })
+            const sourceList: Source[] = res.data.sources || []
+            const existingMcp = sourceList.find(s => s.type === 'SAP_ADT_MCP' || s.type === 'SAP_ADT')
+            
+            const effectiveUrl = computeEffectiveSapUrl(mcpAppServer, mcpInstanceNo, mcpHttpsPort)
+
+            // NOTE: Password is NEVER saved to permanent database
+            const payload = {
+                sourceType: 'SAP_ADT_MCP',
+                sourceName: mcpDescription || 'SAP ADT Direct Connection',
+                authType: 'Basic Auth',
+                mode: 'DIRECT_SAP',
+                description: mcpDescription,
+                systemId: mcpSystemId,
+                appServer: mcpAppServer,
+                instanceNo: mcpInstanceNo,
+                httpsPort: mcpHttpsPort,
+                saprouterString: mcpSaprouterString,
+                sapHost: effectiveUrl,
+                sapClient: mcpSapClient,
+                username: mcpUsername,
+                password: '', // ZERO STORAGE GUARANTEE: Never store password in DB
+                apiEndpoint: effectiveUrl,
+                destination: mcpDestination
+            }
+            
+            if (existingMcp) {
+                await axios.put(`/api/sources/${existingMcp.id}`, payload, { headers })
+            } else {
+                await axios.post('/api/sources', payload, { headers })
+            }
+
+            // Cache password in sessionStorage for current browser session
+            if (mcpPassword && typeof window !== 'undefined') {
+                sessionStorage.setItem('mygo_ephemeral_sap_creds', JSON.stringify({
+                    sapHost: effectiveUrl,
+                    sapRouter: mcpSaprouterString,
+                    sapClient: mcpSapClient,
+                    username: mcpUsername,
+                    password: mcpPassword
+                }))
+            }
+            
+            setMcpSaveMessage('Configuration saved!')
+            setTimeout(() => setMcpSaveMessage(''), 4000)
+        } catch (err: any) {
+            console.error('Error saving MCP settings:', err)
+            alert(err?.response?.data?.error || 'Failed to save SAP ADT Configuration')
+        } finally {
+            setMcpSaving(false)
+        }
+    }
+
+    const handleExecuteAdtTool = async () => {
+        setIsExecutingTool(true)
+        setToolResult(null)
+        setToolError('')
+        
+        try {
+            const token = localStorage.getItem('mygo-token') || localStorage.getItem('token')
+            const headers = token ? { Authorization: `Bearer ${token}` } : {}
+            const effectiveUrl = computeEffectiveSapUrl(mcpAppServer, mcpInstanceNo, mcpHttpsPort)
+            const ephemeralCreds = {
+                sapHost: effectiveUrl,
+                sapClient: mcpSapClient,
+                username: mcpUsername,
+                password: mcpPassword,
+                sapRouter: mcpSaprouterString
+            }
+            
+            if (activeToolTab === 'FETCH_CODE') {
+                const res = await axios.post('/api/sap/mcp/fetch-code', {
+                    object_name: testObjectName,
+                    object_type: testObjectType,
+                    sap_credentials: ephemeralCreds
+                }, { headers })
+                setToolResult(res.data)
+            } else if (activeToolTab === 'RUN_UNIT_TESTS') {
+                const res = await axios.post('/api/sap/mcp/call-tool', {
+                    tool_name: 'abap_run_unit_tests',
+                    arguments: { objectUri: testObjectName },
+                    sap_credentials: ephemeralCreds
+                }, { headers })
+                setToolResult(res.data)
+            } else if (activeToolTab === 'RUN_ATC') {
+                const res = await axios.post('/api/sap/mcp/run-atc', {
+                    object_name: testObjectName,
+                    sap_credentials: ephemeralCreds
+                }, { headers })
+                setToolResult(res.data)
+            } else if (activeToolTab === 'DESTINATIONS') {
+                const res = await axios.post('/api/sap/mcp/destinations', {
+                    sap_credentials: ephemeralCreds
+                }, { headers })
+                setToolResult(res.data)
+            }
+        } catch (err: any) {
+            console.error('ADT Tool execution error:', err)
+            setToolError(err?.response?.data?.error || err.message || 'Failed to execute tool on SAP ADT')
+        } finally {
+            setIsExecutingTool(false)
+        }
+    }
+
+
 
     const refreshRoles = async () => {
         setIsLoadingRoles(true)
@@ -531,7 +849,7 @@ export default function SettingsPage() {
                                                 </span>
                                             </div>
                                             <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0, marginBottom: 8 }}>{p.hint}</p>
-                                            {/* API key input */}
+                                            {/* API key input & Fetch Models Button */}
                                             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                                                 <input
                                                     type={showKey[p.id] ? 'text' : 'password'}
@@ -548,6 +866,52 @@ export default function SettingsPage() {
                                                 >
                                                     {showKey[p.id] ? '🙈' : '👁️'}
                                                 </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleFetchModels(p.id)}
+                                                    disabled={fetchingModels[p.id]}
+                                                    style={{
+                                                        fontSize: 12,
+                                                        fontWeight: 600,
+                                                        padding: '6px 12px',
+                                                        borderRadius: 6,
+                                                        border: '1px solid var(--primary)',
+                                                        background: 'var(--primary)',
+                                                        color: '#fff',
+                                                        cursor: fetchingModels[p.id] ? 'wait' : 'pointer',
+                                                        opacity: fetchingModels[p.id] ? 0.7 : 1,
+                                                        whiteSpace: 'nowrap'
+                                                    }}
+                                                >
+                                                    {fetchingModels[p.id] ? '⏳ Fetching...' : '🔍 Fetch Models'}
+                                                </button>
+                                            </div>
+
+                                            {/* Preferred Model Dropdown */}
+                                            <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(0,0,0,0.02)', padding: '6px 10px', borderRadius: 6, border: '1px border-slate-100' }}>
+                                                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                                    Preferred Model:
+                                                </label>
+                                                <select
+                                                    value={selectedModels[p.id] || ''}
+                                                    onChange={e => setSelectedModels(prev => ({ ...prev, [p.id]: e.target.value }))}
+                                                    style={{ flex: 1, fontSize: 12, fontWeight: 600, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--glass-border)', background: 'var(--input-bg, #fff)' }}
+                                                >
+                                                    {availableModels[p.id] && availableModels[p.id].length > 0 ? (
+                                                        availableModels[p.id].map(m => (
+                                                            <option key={m} value={m}>{m}</option>
+                                                        ))
+                                                    ) : (
+                                                        <option value={selectedModels[p.id] || (p.id === 'openai' ? 'gpt-4o' : p.id === 'gemini' ? 'gemini-2.5-flash' : 'claude-3-5-sonnet-20241022')}>
+                                                            {selectedModels[p.id] || (p.id === 'openai' ? 'gpt-4o' : p.id === 'gemini' ? 'gemini-2.5-flash' : 'claude-3-5-sonnet-20241022')} (Default)
+                                                        </option>
+                                                    )}
+                                                </select>
+                                                {availableModels[p.id] && availableModels[p.id].length > 0 && (
+                                                    <span style={{ fontSize: 11, color: '#16a34a', fontWeight: 600 }}>
+                                                        ✓ {availableModels[p.id].length} models fetched
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -752,6 +1116,7 @@ export default function SettingsPage() {
                                                 <option value="CALM">SAP Cloud ALM</option>
                                                 <option value="BTP">SAP BTP</option>
                                                 <option value="SAP_ADT">SAP ADT Direct Connection</option>
+                                                <option value="SAP_ADT_MCP">SAP ADT MCP Server (Local/Remote)</option>
                                                 <option value="SharePoint">SharePoint</option>
                                                 <option value="JIRA">JIRA</option>
                                             </select>
@@ -777,11 +1142,75 @@ export default function SettingsPage() {
                                                 <option value="Basic Authentication">Basic Authentication</option>
                                             </select>
                                         </div>
+                                        {connectionForm.sourceType === 'SAP_ADT' && (
+                                            <div className="settings-form-group">
+                                                <label>SAP System Preset</label>
+                                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 4 }}>
+                                                    <button
+                                                        type="button"
+                                                        className="btn btn-secondary"
+                                                        style={{
+                                                            fontSize: 11,
+                                                            padding: '6px 8px',
+                                                            fontWeight: 600,
+                                                            border: connectionForm.sapClient === '300' && connectionForm.apiEndpoint.includes('171.43') ? '2px solid #FF682C' : '1px solid var(--glass-border)',
+                                                            background: connectionForm.sapClient === '300' && connectionForm.apiEndpoint.includes('171.43') ? 'rgba(255,104,44,0.1)' : undefined
+                                                        }}
+                                                        onClick={() => setConnectionForm({
+                                                            ...connectionForm,
+                                                            sourceName: 'SAP S/4HANA (HMT)',
+                                                            apiEndpoint: 'https://192.168.171.43:44300',
+                                                            sapClient: '300'
+                                                        })}
+                                                    >
+                                                        ⚡ HMT (Client 300)
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        className="btn btn-secondary"
+                                                        style={{
+                                                            fontSize: 11,
+                                                            padding: '6px 8px',
+                                                            fontWeight: 600,
+                                                            border: connectionForm.sapClient === '300' && connectionForm.apiEndpoint.includes('mygohanafun') ? '2px solid #FF682C' : '1px solid var(--glass-border)',
+                                                            background: connectionForm.sapClient === '300' && connectionForm.apiEndpoint.includes('mygohanafun') ? 'rgba(255,104,44,0.1)' : undefined
+                                                        }}
+                                                        onClick={() => setConnectionForm({
+                                                            ...connectionForm,
+                                                            sourceName: 'SAP HANA Fun (HMF)',
+                                                            apiEndpoint: 'https://mygohanafun.mygoconsulting.com:44300',
+                                                            sapClient: '300'
+                                                        })}
+                                                    >
+                                                        ⚡ HMF (Client 300)
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        className="btn btn-secondary"
+                                                        style={{
+                                                            fontSize: 11,
+                                                            padding: '6px 8px',
+                                                            fontWeight: 600,
+                                                            border: connectionForm.apiEndpoint.includes('mygowebdisp') ? '2px solid #FF682C' : '1px solid var(--glass-border)',
+                                                            background: connectionForm.apiEndpoint.includes('mygowebdisp') ? 'rgba(255,104,44,0.1)' : undefined
+                                                        }}
+                                                        onClick={() => setConnectionForm({
+                                                            ...connectionForm,
+                                                            sourceName: 'SAP Web Dispatcher (MSP)',
+                                                            apiEndpoint: 'https://mygowebdisp.mygoconsulting.com:44300',
+                                                            sapClient: '300'
+                                                        })}
+                                                    >
+                                                        🌐 WebDisp (MSP)
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
                                         <div className="settings-form-group">
                                             <label>{connectionForm.sourceType === 'SAP_ADT' ? 'SAP ADT Endpoint Host URL *' : 'API Endpoint URL *'}</label>
                                             <input
                                                 type="text"
-                                                placeholder={connectionForm.sourceType === 'SAP_ADT' ? "https://sapdev.company.com:44300" : "https://<tenant>.alm.cloud.sap"}
+                                                placeholder={connectionForm.sourceType === 'SAP_ADT' ? "https://192.168.171.43:44300" : "https://<tenant>.alm.cloud.sap"}
                                                 value={connectionForm.apiEndpoint}
                                                 onChange={e => setConnectionForm({ ...connectionForm, apiEndpoint: e.target.value })}
                                             />
@@ -802,7 +1231,7 @@ export default function SettingsPage() {
                                                 <label>SAP Client ID *</label>
                                                 <input
                                                     type="text"
-                                                    placeholder="e.g. 100"
+                                                    placeholder="e.g. 300"
                                                     value={connectionForm.sapClient || ''}
                                                     onChange={e => setConnectionForm({ ...connectionForm, sapClient: e.target.value })}
                                                 />
@@ -1057,6 +1486,405 @@ export default function SettingsPage() {
                         )}
                     </div>
                 )
+
+            case 'credits':
+                return <ObservabilityPanel />
+
+            case 'sap-adt-mcp':
+                return (
+                    <div style={{ maxWidth: 840, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+                        {/* ── Page Header Card */}
+                        <div style={{
+                            background: 'linear-gradient(135deg, #ffffff 0%, #fff7f3 100%)',
+                            border: '1px solid rgba(255,104,44,0.2)',
+                            borderRadius: 16,
+                            padding: '24px 28px',
+                            boxShadow: '0 4px 20px rgba(255,104,44,0.06)'
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                                    <div style={{
+                                        width: 48, height: 48, borderRadius: 12,
+                                        background: 'linear-gradient(135deg, #FF682C 0%, #d64a13 100%)',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontSize: 24, color: '#fff', boxShadow: '0 4px 14px rgba(255,104,44,0.35)'
+                                    }}>🔌</div>
+                                    <div>
+                                        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: '#1B2426', letterSpacing: '-0.02em' }}>
+                                            SAP System Connection
+                                        </h2>
+                                        <p style={{ margin: 0, fontSize: 13, color: '#64748b', marginTop: 2 }}>
+                                            Direct REST API connection for ABAP Development Tools (ADT) & Agent Workflows
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <div style={{
+                                        display: 'flex', alignItems: 'center', gap: 6,
+                                        padding: '6px 12px', borderRadius: 20,
+                                        background: mcpTestResult?.success ? '#f0fdf4' : '#f8fafc',
+                                        border: mcpTestResult?.success ? '1px solid #86efac' : '1px solid #e2e8f0'
+                                    }}>
+                                        <div style={{
+                                            width: 8, height: 8, borderRadius: '50%',
+                                            background: mcpTestResult?.success ? '#16a34a' : '#94a3b8'
+                                        }} />
+                                        <span style={{ fontSize: 12, fontWeight: 700, color: mcpTestResult?.success ? '#15803d' : '#64748b' }}>
+                                            {mcpTestResult?.success ? 'ADT CONNECTED' : 'NOT CONNECTED'}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* ── System Connection Parameters & Logon Grid */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                            
+                            {/* Step 1: System Parameters */}
+                            <div style={{
+                                background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14,
+                                overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column'
+                            }}>
+                                <div style={{
+                                    padding: '14px 18px',
+                                    background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
+                                    borderBottom: '1px solid #e2e8f0',
+                                    display: 'flex', alignItems: 'center', gap: 10
+                                }}>
+                                    <div style={{
+                                        width: 26, height: 26, borderRadius: 6, background: '#FF682C', color: '#fff',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontSize: 12, fontWeight: 800
+                                    }}>1</div>
+                                    <span style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>System Parameters</span>
+                                </div>
+                                <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
+                                    <div>
+                                        <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>Description</label>
+                                        <input type="text" value={mcpDescription}
+                                            onChange={e => setMcpDescription(e.target.value)}
+                                            style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                        />
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                                        <div>
+                                            <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>System ID</label>
+                                            <input type="text" value={mcpSystemId}
+                                                onChange={e => setMcpSystemId(e.target.value.toUpperCase())}
+                                                maxLength={3}
+                                                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>Instance No.</label>
+                                            <input type="text" value={mcpInstanceNo}
+                                                onChange={e => {
+                                                    const val = e.target.value.replace(/\D/g, '').slice(0, 2)
+                                                    setMcpInstanceNo(val)
+                                                    if (val.length === 2) setMcpHttpsPort(`443${val}`)
+                                                }}
+                                                maxLength={2}
+                                                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>Application Server (Host / IP)</label>
+                                        <input type="text" value={mcpAppServer}
+                                            onChange={e => setMcpAppServer(e.target.value)}
+                                            style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                        />
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                                        <div>
+                                            <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>Client</label>
+                                            <input type="text" value={mcpSapClient}
+                                                onChange={e => setMcpSapClient(e.target.value)}
+                                                maxLength={3}
+                                                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>HTTPS Port</label>
+                                            <input type="text" value={mcpHttpsPort}
+                                                onChange={e => setMcpHttpsPort(e.target.value)}
+                                                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Step 2: Logon Credentials */}
+                            <div style={{
+                                background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14,
+                                overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column'
+                            }}>
+                                <div style={{
+                                    padding: '14px 18px',
+                                    background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
+                                    borderBottom: '1px solid #e2e8f0',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+                                }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                        <div style={{
+                                            width: 26, height: 26, borderRadius: 6,
+                                            background: mcpTestResult?.success ? '#16a34a' : '#64748b',
+                                            color: '#fff', display: 'flex', alignItems: 'center',
+                                            justifyContent: 'center', fontSize: 12, fontWeight: 800
+                                        }}>{mcpTestResult?.success ? '✓' : '2'}</div>
+                                        <span style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>Logon Credentials</span>
+                                    </div>
+                                    <span style={{ fontSize: 10, fontWeight: 700, color: '#15803d', background: 'rgba(22,163,74,0.08)', padding: '3px 8px', borderRadius: 12, border: '1px solid rgba(22,163,74,0.2)' }}>
+                                        🔐 SESSION ONLY
+                                    </span>
+                                </div>
+                                <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14, flex: 1 }}>
+                                    <div>
+                                        <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>User ID</label>
+                                        <input type="text" value={mcpUsername}
+                                            onChange={e => setMcpUsername(e.target.value.toUpperCase())}
+                                            autoComplete="username"
+                                            style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, textTransform: 'uppercase', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>Password</label>
+                                        <div style={{ display: 'flex', gap: 6 }}>
+                                            <input
+                                                type={mcpShowPassword ? 'text' : 'password'}
+                                                value={mcpPassword}
+                                                onChange={e => { setMcpPassword(e.target.value); if (mcpTestResult) setMcpTestResult(null) }}
+                                                autoComplete="current-password"
+                                                style={{ flex: 1, padding: '9px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                            />
+                                            <button type="button" onClick={() => setMcpShowPassword(!mcpShowPassword)}
+                                                style={{ padding: '0 12px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#64748b', cursor: 'pointer', fontSize: 13 }}
+                                            >{mcpShowPassword ? '🙈' : '👁️'}</button>
+                                        </div>
+                                        <p style={{ margin: '6px 0 0', fontSize: 11, color: '#94a3b8' }}>
+                                            Password is held in browser memory only and never persisted to the database.
+                                        </p>
+                                    </div>
+
+                                    {/* Action Buttons */}
+                                    <div style={{ marginTop: 'auto', display: 'flex', gap: 10 }}>
+                                        <button
+                                            type="button"
+                                            onClick={handleTestMcpConnection}
+                                            disabled={mcpTesting || !mcpUsername || !mcpPassword}
+                                            style={{
+                                                flex: 1, padding: '10px 16px', borderRadius: 8,
+                                                border: '1.5px solid rgba(255,104,44,0.5)',
+                                                background: (!mcpUsername || !mcpPassword) ? '#f8fafc' : '#fff5f0',
+                                                color: (!mcpUsername || !mcpPassword) ? '#94a3b8' : '#d64a13',
+                                                fontSize: 13, fontWeight: 700,
+                                                cursor: (!mcpUsername || !mcpPassword) ? 'not-allowed' : 'pointer',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                                                opacity: (!mcpUsername || !mcpPassword) ? 0.5 : 1
+                                            }}
+                                        >
+                                            {mcpTesting ? '🔍 Testing...' : '🔍 Test Connection'}
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            onClick={async () => { if (!mcpTestResult?.success) return; await handleSaveMcpSettings() }}
+                                            disabled={mcpSaving || !mcpTestResult?.success}
+                                            style={{
+                                                flex: 1, padding: '10px 16px', borderRadius: 8, border: 'none',
+                                                background: mcpTestResult?.success ? 'linear-gradient(135deg, #FF682C 0%, #d64a13 100%)' : '#e2e8f0',
+                                                color: mcpTestResult?.success ? '#fff' : '#94a3b8',
+                                                fontSize: 13, fontWeight: 700,
+                                                cursor: mcpTestResult?.success ? 'pointer' : 'not-allowed',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                                                boxShadow: mcpTestResult?.success ? '0 4px 14px rgba(255,104,44,0.35)' : 'none'
+                                            }}
+                                        >
+                                            {mcpSaving ? '💾 Saving...' : '💾 Save'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Test Status Banner */}
+                        {mcpTestResult && (
+                            <div style={{
+                                padding: '14px 18px', borderRadius: 10,
+                                border: mcpTestResult.success ? '1px solid #86efac' : '1px solid #fca5a5',
+                                background: mcpTestResult.success ? '#f0fdf4' : '#fef2f2',
+                                display: 'flex', alignItems: 'flex-start', gap: 12
+                            }}>
+                                <span style={{ fontSize: 18, flexShrink: 0 }}>{mcpTestResult.success ? '✅' : '❌'}</span>
+                                <div style={{ flex: 1 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: mcpTestResult.success ? '#15803d' : '#991b1b' }}>
+                                        {mcpTestResult.success ? `Connected to SAP ${mcpSystemId} (Client ${mcpSapClient})` : 'Connection Failed'}
+                                    </div>
+                                    <div style={{ fontSize: 12, color: mcpTestResult.success ? '#166534' : '#b91c1c', marginTop: 2 }}>
+                                        {mcpTestResult.message}
+                                    </div>
+                                </div>
+                                {mcpSaveMessage && (
+                                    <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 700, alignSelf: 'center' }}>✓ {mcpSaveMessage}</span>
+                                )}
+                            </div>
+                        )}
+
+                        {/* ── Interactive Live ADT Tool Test Bench & Explorer ── */}
+                        <div style={{
+                            background: '#ffffff',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: 16,
+                            overflow: 'hidden',
+                            boxShadow: '0 4px 20px rgba(0,0,0,0.04)'
+                        }}>
+                            <div style={{
+                                padding: '16px 22px',
+                                background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+                                color: '#ffffff',
+                                display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                    <span style={{ fontSize: 18 }}>🧪</span>
+                                    <div>
+                                        <div style={{ fontSize: 14, fontWeight: 700 }}>Live ADT Tool Test Bench & Inspector</div>
+                                        <div style={{ fontSize: 11, color: '#94a3b8' }}>Test and verify SAP ADT REST services live</div>
+                                    </div>
+                                </div>
+                                <span style={{ fontSize: 11, background: 'rgba(255,255,255,0.1)', padding: '4px 10px', borderRadius: 12, color: '#cbd5e1' }}>
+                                    SAP ADT v1.0
+                                </span>
+                            </div>
+
+                            <div style={{ padding: '20px 22px' }}>
+                                {/* Tool Selector Tabs */}
+                                <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+                                    {[
+                                        { id: 'FETCH_CODE', label: '📄 Fetch ABAP Code', desc: 'Read live class or program source' },
+                                        { id: 'RUN_UNIT_TESTS', label: '⚡ Run Unit Tests', desc: 'Execute ABAP Unit tests' },
+                                        { id: 'RUN_ATC', label: '🛡️ Run ATC Checks', desc: 'Static code quality analysis' },
+                                        { id: 'DESTINATIONS', label: '🌐 System Destinations', desc: 'List configured ADT routes' },
+                                    ].map(tool => (
+                                        <button
+                                            key={tool.id}
+                                            type="button"
+                                            onClick={() => { setActiveToolTab(tool.id as any); setToolResult(null); setToolError(''); }}
+                                            style={{
+                                                padding: '8px 14px', borderRadius: 8,
+                                                border: activeToolTab === tool.id ? '1.5px solid #FF682C' : '1px solid #e2e8f0',
+                                                background: activeToolTab === tool.id ? '#fff5f0' : '#f8fafc',
+                                                color: activeToolTab === tool.id ? '#d64a13' : '#475569',
+                                                fontSize: 12, fontWeight: activeToolTab === tool.id ? 700 : 500,
+                                                cursor: 'pointer', transition: 'all 0.15s'
+                                            }}
+                                        >
+                                            {tool.label}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {/* Tool Parameters Input Bar */}
+                                {activeToolTab !== 'DESTINATIONS' && (
+                                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16 }}>
+                                        {activeToolTab === 'FETCH_CODE' && (
+                                            <select
+                                                value={testObjectType}
+                                                onChange={e => setTestObjectType(e.target.value as any)}
+                                                style={{ padding: '9px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 6, background: '#fff', color: '#1e293b', fontWeight: 600 }}
+                                            >
+                                                <option value="CLASS">Class (OO)</option>
+                                                <option value="PROGRAM">Program / Report</option>
+                                            </select>
+                                        )}
+                                        <input
+                                            type="text"
+                                            value={testObjectName}
+                                            onChange={e => setTestObjectName(e.target.value.toUpperCase())}
+                                            style={{ flex: 1, padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', textTransform: 'uppercase', border: '1px solid #cbd5e1', borderRadius: 6, background: '#fff', color: '#1e293b' }}
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={handleExecuteAdtTool}
+                                            disabled={isExecutingTool || !testObjectName}
+                                            style={{
+                                                padding: '9px 20px', borderRadius: 6, border: 'none',
+                                                background: 'linear-gradient(135deg, #FF682C 0%, #d64a13 100%)',
+                                                color: '#fff', fontSize: 13, fontWeight: 700,
+                                                cursor: isExecutingTool ? 'not-allowed' : 'pointer',
+                                                boxShadow: '0 2px 8px rgba(255,104,44,0.3)',
+                                                display: 'flex', alignItems: 'center', gap: 6
+                                            }}
+                                        >
+                                            {isExecutingTool ? '⏳ Executing...' : '🚀 Execute Tool'}
+                                        </button>
+                                    </div>
+                                )}
+
+                                {activeToolTab === 'DESTINATIONS' && (
+                                    <div style={{ marginBottom: 16 }}>
+                                        <button
+                                            type="button"
+                                            onClick={handleExecuteAdtTool}
+                                            disabled={isExecutingTool}
+                                            style={{
+                                                padding: '9px 20px', borderRadius: 6, border: 'none',
+                                                background: 'linear-gradient(135deg, #FF682C 0%, #d64a13 100%)',
+                                                color: '#fff', fontSize: 13, fontWeight: 700,
+                                                cursor: isExecutingTool ? 'not-allowed' : 'pointer',
+                                                boxShadow: '0 2px 8px rgba(255,104,44,0.3)',
+                                                display: 'flex', alignItems: 'center', gap: 6
+                                            }}
+                                        >
+                                            {isExecutingTool ? '⏳ Fetching...' : '🔍 Query Active Destinations'}
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* Error Output */}
+                                {toolError && (
+                                    <div style={{ padding: '12px 16px', borderRadius: 8, background: '#fef2f2', border: '1px solid #fca5a5', color: '#991b1b', fontSize: 12, marginBottom: 12 }}>
+                                        <strong>Error:</strong> {toolError}
+                                    </div>
+                                )}
+
+                                {/* Result Viewer */}
+                                {toolResult && (
+                                    <div style={{
+                                        background: '#0f172a', borderRadius: 10, border: '1px solid #334155',
+                                        overflow: 'hidden', display: 'flex', flexDirection: 'column'
+                                    }}>
+                                        <div style={{
+                                            padding: '8px 14px', background: '#1e293b', borderBottom: '1px solid #334155',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+                                        }}>
+                                            <span style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8', fontFamily: 'monospace' }}>
+                                                {toolResult.object_name ? `${toolResult.object_type}: ${toolResult.object_name}` : 'OUTPUT RESULT'}
+                                            </span>
+                                            {toolResult.length && (
+                                                <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace' }}>
+                                                    {toolResult.length} bytes
+                                                </span>
+                                            )}
+                                        </div>
+                                        <pre style={{
+                                            margin: 0, padding: 16, maxHeight: 320, overflowY: 'auto',
+                                            fontSize: 12, fontFamily: 'Consolas, Monaco, monospace',
+                                            color: '#e2e8f0', lineHeight: 1.5, whiteSpace: 'pre-wrap'
+                                        }}>
+                                            {toolResult.code ? toolResult.code : JSON.stringify(toolResult, null, 2)}
+                                        </pre>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                    </div>
+                )
+
+
 
             default:
                 return null

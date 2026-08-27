@@ -19,6 +19,11 @@ export default function AskYodaModal({ onClose }: AskYodaModalProps) {
   const [loading, setLoading] = useState(false)
   const queryRef = useAutoResize(query, 4)
 
+  const getAuthConfig = () => {
+    const token = typeof window !== 'undefined' ? (localStorage.getItem('mygo-token') || localStorage.getItem('token')) : null
+    return token ? { headers: { Authorization: `Bearer ${token}` } } : {}
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!query.trim()) return
@@ -26,7 +31,7 @@ export default function AskYodaModal({ onClose }: AskYodaModalProps) {
     setLoading(true)
     setReferences([])
     try {
-      const response = await axios.post('/api/ask-yoda', { query })
+      const response = await axios.post('/api/ask-yoda', { query }, getAuthConfig())
       setAnswer(response.data.answer)
       setReferences(response.data.references || [])
     } catch (error) {

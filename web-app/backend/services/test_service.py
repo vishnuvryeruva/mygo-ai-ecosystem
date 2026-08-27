@@ -1,6 +1,13 @@
 from services.openai_service import OpenAIService
-from openpyxl import Workbook
-from docx import Document
+try:
+    from openpyxl import Workbook
+except ImportError:
+    Workbook = None
+
+try:
+    from docx import Document
+except ImportError:
+    Document = None
 import io
 import json
 import re

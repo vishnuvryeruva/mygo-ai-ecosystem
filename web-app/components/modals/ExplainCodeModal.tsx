@@ -52,7 +52,7 @@ export default function ExplainCodeModal({
   const [showGhSection, setShowGhSection] = useState(false)
 
   const getAuthConfig = () => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('mygo-token') : null
+    const token = typeof window !== 'undefined' ? (localStorage.getItem('mygo-token') || localStorage.getItem('token')) : null
     return token ? { headers: { Authorization: `Bearer ${token}` } } : {}
   }
 
@@ -141,7 +141,7 @@ export default function ExplainCodeModal({
         code: activeCode,
         code_type: codeType,
         program_name: activeProgramName
-      })
+      }, getAuthConfig())
       setExplanation(response.data.explanation)
       // Reset modernisation state on new explanation
       setModerniseStep('none')

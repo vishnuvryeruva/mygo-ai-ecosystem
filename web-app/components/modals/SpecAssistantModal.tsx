@@ -40,6 +40,11 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
   const [almError, setAlmError] = useState('')
   const [almSuccessDoc, setAlmSuccessDoc] = useState<any>(null)
 
+  const getAuthConfig = () => {
+    const token = typeof window !== 'undefined' ? (localStorage.getItem('mygo-token') || localStorage.getItem('token')) : null
+    return token ? { headers: { Authorization: `Bearer ${token}` } } : {}
+  }
+
   // Check for context and prefilled spec from Solution Advisor (Create Functional Spec flow)
   useEffect(() => {
     const context = sessionStorage.getItem('solutionAdvisorContext')
@@ -66,7 +71,7 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
           type: 'functional',
           requirements: context,
           format: 'preview'
-        })
+        }, getAuthConfig())
         if (!cancelled) {
           setSpecContent(response.data?.spec ?? '')
           setRefinementMode(true)
@@ -105,7 +110,7 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
         type: specType,
         requirements,
         format: 'preview'
-      })
+      }, getAuthConfig())
       setSpecContent(response.data.spec)
       setRefinementMode(true)
     } catch (error) {
@@ -129,7 +134,7 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
         type: specType,
         requirements: `${requirements}\n\n[Previous Specification]:\n${specContent}\n\n[Refinement Request]:\n${userRequest}`,
         format: 'preview'
-      })
+      }, getAuthConfig())
 
       setSpecContent(response.data.spec)
       setRefinementHistory(prev => [...prev, {
@@ -279,11 +284,13 @@ export default function SpecAssistantModal({ onClose }: SpecAssistantModalProps)
 
     setDownloadLoading(true)
     try {
+      const authConfig = getAuthConfig()
       const response = await axios.post('/api/generate-spec', {
         type: specType,
         requirements,
         format: format
       }, {
+        ...authConfig,
         responseType: 'blob'
       })
 
