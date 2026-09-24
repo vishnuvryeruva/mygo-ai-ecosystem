@@ -5,6 +5,7 @@ import axios from 'axios'
 import AIAgentsDropdown from '@/components/AIAgentsDropdown'
 import { fetchSelectedDocumentsPlainText } from '@/lib/documentContent'
 import SyncSourceModal from '@/components/modals/SyncSourceModal'
+import FileUploadModal from '@/components/modals/FileUploadModal'
 
 interface Document {
     id: string
@@ -113,6 +114,7 @@ export default function DocumentHubPage() {
 
     const [showSyncModal, setShowSyncModal] = useState(false)
     const [syncModalType, setSyncModalType] = useState<'documents' | 'requirements'>('documents')
+    const [showUploadModal, setShowUploadModal] = useState(false)
 
     const [selectedDocumentIds, setSelectedDocumentIds] = useState<Set<string>>(new Set())
     const [isDeleting, setIsDeleting] = useState(false)
@@ -215,21 +217,30 @@ export default function DocumentHubPage() {
         }
     }, [documents, moduleOptions])
 
-    // Load filter options once on mount (unfiltered, large page)
-    useEffect(() => {
-        if (optionsLoaded.current) return
-        optionsLoaded.current = true
+    const refreshFilterOptions = useCallback(() => {
         axios.get('/api/documents?page=1&page_size=1000').then(res => {
             const docs: any[] = res.data.documents ?? []
             setSourceOptions(Array.from(new Set<string>(docs.map(d => d.source).filter(Boolean))).sort())
             setTypeOptions(Array.from(new Set<string>(docs.map(d => d.type || d.doc_type).filter(Boolean))).sort())
             setProjectOptions(Array.from(new Set<string>(docs.map(d => d.project).filter(p => p && p !== 'N/A'))).sort())
         }).catch(() => {})
+    }, [])
+
+    // Load filter options once on mount (unfiltered, large page)
+    useEffect(() => {
+        if (optionsLoaded.current) return
+        optionsLoaded.current = true
+        refreshFilterOptions()
 
         axios.get('/api/sap-modules').then(res => {
             setModuleOptions(res.data.modules ?? [])
         }).catch(() => {})
-    }, [])
+    }, [refreshFilterOptions])
+
+    const handleUploadComplete = useCallback(() => {
+        refreshFilterOptions()
+        fetchDocuments(1)
+    }, [refreshFilterOptions, fetchDocuments])
 
     // Re-fetch when filters change (reset to page 1)
     useEffect(() => {
@@ -571,6 +582,14 @@ export default function DocumentHubPage() {
                     </div>
                 </div>
                 <div className="flex gap-3">
+                    <button className="btn btn-primary" onClick={() => setShowUploadModal(true)}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 8 }}>
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="17 8 12 3 7 8" />
+                            <line x1="12" y1="3" x2="12" y2="15" />
+                        </svg>
+                        Upload Document
+                    </button>
                     <button className="btn btn-primary" onClick={() => { setSyncModalType('documents'); setShowSyncModal(true) }}>
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 8 }}>
                             <path d="M21 2v6h-6" />
@@ -1009,6 +1028,13 @@ export default function DocumentHubPage() {
                 onSyncComplete={fetchDocuments}
                 syncType={syncModalType}
             />
+
+            {showUploadModal && (
+                <FileUploadModal
+                    onClose={() => setShowUploadModal(false)}
+                    onUploadComplete={handleUploadComplete}
+                />
+            )}
         </div>
     )
 }
