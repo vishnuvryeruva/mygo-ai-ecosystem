@@ -159,7 +159,7 @@ export default function FileUploadModal({ onClose, onUploadComplete }: FileUploa
                 return
             }
 
-            const destLabel = [uploadToYoda && 'Yoda (our database)', uploadToAlm && 'Cloud ALM'].filter(Boolean).join(' and ')
+            const destLabel = [uploadToYoda && 'Yoda', uploadToAlm && 'Cloud ALM'].filter(Boolean).join(' and ')
             setSuccessMessage(`Successfully uploaded ${selectedFiles.length} document(s) to ${destLabel}.`)
             setShowSuccessDialog(true)
             setSelectedFiles([])
@@ -276,8 +276,8 @@ export default function FileUploadModal({ onClose, onUploadComplete }: FileUploa
                                     className="mt-1"
                                 />
                                 <div>
-                                    <p className="text-heading font-medium">Yoda (our database)</p>
-                                    <p className="text-sm text-muted mt-0.5">Store only in Document Hub for Ask Yoda. Nothing is sent outside our database.</p>
+                                    <p className="text-heading font-medium">Yoda</p>
+                                    <p className="text-sm text-muted mt-0.5">Store only in Document Hub for Ask Yoda.</p>
                                 </div>
                             </label>
                             <label className="flex items-start gap-3 cursor-pointer p-2 rounded-lg hover:bg-white/5">
