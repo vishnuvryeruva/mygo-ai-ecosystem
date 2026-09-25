@@ -23,7 +23,8 @@ interface Project {
 export default function FileUploadModal({ onClose, onUploadComplete }: FileUploadModalProps) {
     const [selectedFiles, setSelectedFiles] = useState<File[]>([])
     const [uploading, setUploading] = useState(false)
-    const [uploadDestination, setUploadDestination] = useState<'dms' | 'alm' | 'both'>('dms')
+    const [uploadToYoda, setUploadToYoda] = useState(true)
+    const [uploadToAlm, setUploadToAlm] = useState(false)
     const [uploadProgress, setUploadProgress] = useState<string>('')
     
     // Cloud ALM configuration
@@ -38,10 +39,10 @@ export default function FileUploadModal({ onClose, onUploadComplete }: FileUploa
 
     // Fetch sources when Cloud ALM upload is selected
     useEffect(() => {
-        if (uploadDestination === 'alm' || uploadDestination === 'both') {
+        if (uploadToAlm) {
             fetchSources()
         }
-    }, [uploadDestination])
+    }, [uploadToAlm])
 
     // Fetch projects when source is selected
     useEffect(() => {
@@ -100,7 +101,12 @@ export default function FileUploadModal({ onClose, onUploadComplete }: FileUploa
             return
         }
 
-        if ((uploadDestination === 'alm' || uploadDestination === 'both') && (!selectedSourceId || !selectedProjectId)) {
+        if (!uploadToYoda && !uploadToAlm) {
+            alert('Please select at least one destination')
+            return
+        }
+
+        if (uploadToAlm && (!selectedSourceId || !selectedProjectId)) {
             alert('Please select a source and project for Cloud ALM upload')
             return
         }
@@ -111,23 +117,23 @@ export default function FileUploadModal({ onClose, onUploadComplete }: FileUploa
         try {
             const errors: string[] = []
 
-            if (uploadDestination === 'dms' || uploadDestination === 'both') {
+            if (uploadToYoda) {
                 const formData = new FormData()
                 selectedFiles.forEach(file => {
                     formData.append('files', file)
                 })
 
-                setUploadProgress('Uploading to DMS...')
+                setUploadProgress('Uploading to Yoda...')
                 try {
                     await axios.post('/api/upload-documents', formData, {
                         headers: { 'Content-Type': 'multipart/form-data' }
                     })
-                } catch (dmsError: any) {
-                    errors.push(dmsError?.response?.data?.error || 'Failed to upload to DMS.')
+                } catch (yodaError: any) {
+                    errors.push(yodaError?.response?.data?.error || 'Failed to upload to Yoda.')
                 }
             }
 
-            if (uploadDestination === 'alm' || uploadDestination === 'both') {
+            if (uploadToAlm) {
                 setUploadProgress('Syncing to Cloud ALM...')
                 try {
                     for (const file of selectedFiles) {
@@ -146,19 +152,19 @@ export default function FileUploadModal({ onClose, onUploadComplete }: FileUploa
                 }
             }
 
+            setUploadProgress('')
+
             if (errors.length > 0) {
                 alert(errors.join(' '))
+                return
             }
 
-            setUploadProgress('')
-            const destLabel =
-                uploadDestination === 'dms' ? 'DMS (Document Hub)' :
-                uploadDestination === 'alm' ? 'Cloud ALM' :
-                'DMS and Cloud ALM'
+            const destLabel = [uploadToYoda && 'Yoda (our database)', uploadToAlm && 'Cloud ALM'].filter(Boolean).join(' and ')
             setSuccessMessage(`Successfully uploaded ${selectedFiles.length} document(s) to ${destLabel}.`)
             setShowSuccessDialog(true)
             setSelectedFiles([])
-            setUploadDestination('dms')
+            setUploadToYoda(true)
+            setUploadToAlm(false)
             setSelectedSourceId('')
             setSelectedProjectId('')
         } catch (error: any) {
@@ -261,30 +267,35 @@ export default function FileUploadModal({ onClose, onUploadComplete }: FileUploa
                     <div className="glass-subtle p-4 mb-6">
                         <p className="text-heading font-medium mb-3">Upload destination</p>
                         <div className="space-y-2">
-                            {([
-                                { value: 'dms' as const, label: 'DMS (Document Hub)', description: 'Store in your knowledge base for AI search' },
-                                { value: 'alm' as const, label: 'Cloud ALM', description: 'Push documents to your connected Cloud ALM project' },
-                                { value: 'both' as const, label: 'Both', description: 'Upload to Document Hub and Cloud ALM' },
-                            ]).map(option => (
-                                <label key={option.value} className="flex items-start gap-3 cursor-pointer p-2 rounded-lg hover:bg-white/5">
-                                    <input
-                                        type="radio"
-                                        name="upload-destination"
-                                        value={option.value}
-                                        checked={uploadDestination === option.value}
-                                        onChange={() => setUploadDestination(option.value)}
-                                        disabled={uploading}
-                                        className="mt-1"
-                                    />
-                                    <div>
-                                        <p className="text-heading font-medium">{option.label}</p>
-                                        <p className="text-sm text-muted mt-0.5">{option.description}</p>
-                                    </div>
-                                </label>
-                            ))}
+                            <label className="flex items-start gap-3 cursor-pointer p-2 rounded-lg hover:bg-white/5">
+                                <input
+                                    type="checkbox"
+                                    checked={uploadToYoda}
+                                    onChange={(e) => setUploadToYoda(e.target.checked)}
+                                    disabled={uploading}
+                                    className="mt-1"
+                                />
+                                <div>
+                                    <p className="text-heading font-medium">Yoda (our database)</p>
+                                    <p className="text-sm text-muted mt-0.5">Store only in Document Hub for Ask Yoda. Nothing is sent outside our database.</p>
+                                </div>
+                            </label>
+                            <label className="flex items-start gap-3 cursor-pointer p-2 rounded-lg hover:bg-white/5">
+                                <input
+                                    type="checkbox"
+                                    checked={uploadToAlm}
+                                    onChange={(e) => setUploadToAlm(e.target.checked)}
+                                    disabled={uploading}
+                                    className="mt-1"
+                                />
+                                <div>
+                                    <p className="text-heading font-medium">Cloud ALM</p>
+                                    <p className="text-sm text-muted mt-0.5">Push documents to your connected Cloud ALM project</p>
+                                </div>
+                            </label>
                         </div>
 
-                        {(uploadDestination === 'alm' || uploadDestination === 'both') && (
+                        {uploadToAlm && (
                             <div className="mt-4 pt-4 border-t border-[var(--glass-border)] space-y-4">
                                 {loadingSources ? (
                                     <div className="flex items-center gap-2 text-sm text-muted">
@@ -359,9 +370,9 @@ export default function FileUploadModal({ onClose, onUploadComplete }: FileUploa
                     <div className="glass-subtle p-4">
                         <h4 className="font-medium text-indigo-300 mb-2">ℹ️ How it works</h4>
                         <ul className="text-sm text-muted space-y-1">
-                            <li>• DMS uploads store documents in Document Hub for AI-powered search</li>
-                            <li>• Cloud ALM uploads push documents to your connected SAP Cloud ALM project</li>
-                            <li>• Choose &quot;Both&quot; to keep documents in Document Hub and sync them to Cloud ALM</li>
+                            <li>• Yoda stores documents only in our database (Document Hub) for AI-powered search</li>
+                            <li>• Cloud ALM pushes documents to your connected SAP Cloud ALM project</li>
+                            <li>• Check both to keep a copy in Yoda and send the same files to Cloud ALM</li>
                         </ul>
                     </div>
                 </div>
@@ -377,7 +388,7 @@ export default function FileUploadModal({ onClose, onUploadComplete }: FileUploa
                     <button
                         onClick={handleUpload}
                         className="btn btn-primary"
-                        disabled={uploading || selectedFiles.length === 0}
+                        disabled={uploading || selectedFiles.length === 0 || (!uploadToYoda && !uploadToAlm)}
                     >
                         {uploading ? 'Uploading...' : `Upload ${selectedFiles.length > 0 ? `(${selectedFiles.length})` : ''}`}
                     </button>
