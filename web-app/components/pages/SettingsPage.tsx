@@ -16,38 +16,11 @@ const settingsTabs = [
 ]
 
 /* ─── Prompts data ─────────────────────────────────────── */
-const aiScenarios = [
-    { id: 'ask-yoda', title: 'Ask Yoda - RAG Q&A', subtitle: 'System prompt used for answering questions using RAG (Retrieval Augmented Generation)', active: true },
-    { id: 'solution-advisor', title: 'Solution Advisor Agent', subtitle: 'System prompt used for gathering requirements and producing solution guidance', active: true },
-    { id: 'code-quality', title: 'Code Quality Advisor', subtitle: 'Prompts for code quality analysis and recommendations', active: false },
-    { id: 'code-explanation', title: 'Code Explanation', subtitle: 'Prompts for explaining code functionality', active: false },
-    { id: 'llm-prompt', title: 'LLM Prompt Generator', subtitle: 'Prompts for generating optimized LLM prompts for code generation', active: false },
-    { id: 'func-spec', title: 'Functional Specification Generator', subtitle: 'Prompts for generating functional specification documents', active: false },
-    { id: 'tech-spec', title: 'Technical Specification Generator', subtitle: 'Prompts for generating technical specification documents', active: false },
-]
-
-const defaultSystemPrompts: Record<string, string> = {
-    'ask-yoda': `You are Yoda, a wise AI assistant with access to a knowledge base of SAP documents, specifications, blueprints, and test cases. Provide accurate, helpful answers based on the provided context.
-If the context doesn't contain enough information, say so clearly.
-Always cite relevant documents when answering.`,
-    'solution-advisor': `You are an expert SAP Solution Architect helping users design solutions.
-Your PRIMARY goal is to PROVIDE ANSWERS AND SOLUTIONS, not to ask questions.
-
-When a user describes their requirements:
-1. Acknowledge their requirements and provide a concise initial solution approach (3-5 sentences)
-2. Include specific SAP recommendations: modules, transactions, BAPIs, or function modules
-3. ONLY set needs_clarification to true if a CRITICAL piece of information is missing that would fundamentally change the solution
-
-RULES:
-- If requirements are at least 60% clear, proceed with a solution and note assumptions
-- If you must ask, ask only ONE critical question
-- Keep the response concise — the full detailed solution is generated in the next step
-- Default to needs_clarification: false
-
-You MUST return a JSON object with these three keys:
-  "needs_clarification": a boolean, true or false
-  "clarifications": plain text only — your concise solution approach or clarifying question. NEVER put JSON, code blocks, or markdown fences inside this field.
-  "summary": plain text only — one sentence describing the requirement`,
+interface PromptConfig {
+    name: string
+    system: string
+    user_template?: string
+    description: string
 }
 
 /* ─── Roles default data ───────────────────────────────── */
@@ -145,10 +118,13 @@ export default function SettingsPage() {
     const [agentProviders, setAgentProviders] = useState<Record<string, string>>({})
     const [saveMessage, setSaveMessage] = useState('')
 
-    /* Prompts state */
-    const [activeScenario, setActiveScenario] = useState('ask-yoda')
-    const [scenarioPrompts, setScenarioPrompts] = useState<Record<string, string>>(defaultSystemPrompts)
-    const [systemPrompt, setSystemPrompt] = useState(defaultSystemPrompts['ask-yoda'])
+    /* Prompts state — loaded from the backend so the editor matches runtime prompts */
+    const [promptConfigs, setPromptConfigs] = useState<Record<string, PromptConfig>>({})
+    const [savedPromptConfigs, setSavedPromptConfigs] = useState<Record<string, PromptConfig>>({})
+    const [activeScenario, setActiveScenario] = useState('')
+    const [isLoadingPrompts, setIsLoadingPrompts] = useState(false)
+    const [isSavingPrompt, setIsSavingPrompt] = useState(false)
+    const [promptSaveMessage, setPromptSaveMessage] = useState('')
 
     /* Sources state */
     const [sources, setSources] = useState<Source[]>([])
@@ -175,7 +151,9 @@ export default function SettingsPage() {
     }, [])
 
     useEffect(() => {
-        if (activeTab === 'sources') {
+        if (activeTab === 'prompts' && Object.keys(savedPromptConfigs).length === 0) {
+            refreshPrompts()
+        } else if (activeTab === 'sources') {
             refreshSources()
         } else if (activeTab === 'roles') {
             refreshRoles()
@@ -191,9 +169,67 @@ export default function SettingsPage() {
         }
     }, [showAddConnection])
 
-    useEffect(() => {
-        setSystemPrompt(scenarioPrompts[activeScenario] || '')
-    }, [activeScenario, scenarioPrompts])
+    const refreshPrompts = async () => {
+        setIsLoadingPrompts(true)
+        try {
+            const res = await axios.get('/api/prompts')
+            const prompts = (res.data.prompts || {}) as Record<string, PromptConfig>
+            setSavedPromptConfigs(prompts)
+            setPromptConfigs(prompts)
+            setActiveScenario(current => (current && prompts[current] ? current : Object.keys(prompts)[0] || ''))
+        } catch (err) {
+            console.error('Failed to fetch prompts:', err)
+        } finally {
+            setIsLoadingPrompts(false)
+        }
+    }
+
+    const updateActivePrompt = (field: 'system' | 'user_template', value: string) => {
+        setPromptConfigs(prev => {
+            const current = prev[activeScenario]
+            if (!current) return prev
+            return { ...prev, [activeScenario]: { ...current, [field]: value } }
+        })
+        setPromptSaveMessage('')
+    }
+
+    const handleSavePrompt = async () => {
+        const config = promptConfigs[activeScenario]
+        if (!config) return
+
+        setIsSavingPrompt(true)
+        setPromptSaveMessage('')
+        try {
+            await axios.put(`/api/prompts/${activeScenario}`, {
+                prompt_type: 'system',
+                prompt: config.system ?? '',
+            })
+            if ('user_template' in config) {
+                await axios.put(`/api/prompts/${activeScenario}`, {
+                    prompt_type: 'user_template',
+                    prompt: config.user_template ?? '',
+                })
+            }
+            setSavedPromptConfigs(prev => ({
+                ...prev,
+                [activeScenario]: { ...config },
+            }))
+            setPromptSaveMessage('Prompt saved. This agent will use it on the next run.')
+            setTimeout(() => setPromptSaveMessage(''), 4000)
+        } catch (err: any) {
+            console.error('Failed to save prompt:', err)
+            setPromptSaveMessage(err.response?.data?.error || 'Failed to save prompt.')
+        } finally {
+            setIsSavingPrompt(false)
+        }
+    }
+
+    const handleResetPrompt = () => {
+        const saved = savedPromptConfigs[activeScenario]
+        if (!saved) return
+        setPromptConfigs(prev => ({ ...prev, [activeScenario]: { ...saved } }))
+        setPromptSaveMessage('')
+    }
 
     const fetchCurrentUser = async () => {
         setIsLoadingAuth(true)
@@ -615,55 +651,86 @@ export default function SettingsPage() {
             }
 
             /* ── MANAGE PROMPTS ─────────────────────── */
-            case 'prompts':
+            case 'prompts': {
+                const scenarioIds = Object.keys(promptConfigs)
+                const activePrompt = promptConfigs[activeScenario]
                 return (
                     <div className="settings-prompts-layout">
                         <div className="settings-scenarios-panel">
                             <h3 className="settings-panel-title">AI Scenarios</h3>
                             <div className="settings-scenarios-list">
-                                {aiScenarios.map((scenario) => (
+                                {isLoadingPrompts && scenarioIds.length === 0 ? (
+                                    <div className="p-4 text-sm text-gray-500">Loading prompts...</div>
+                                ) : scenarioIds.map((scenarioId) => (
                                     <button
-                                        key={scenario.id}
-                                        className={`settings-scenario-item ${activeScenario === scenario.id ? 'active' : ''}`}
-                                        onClick={() => setActiveScenario(scenario.id)}
+                                        key={scenarioId}
+                                        className={`settings-scenario-item ${activeScenario === scenarioId ? 'active' : ''}`}
+                                        onClick={() => {
+                                            setActiveScenario(scenarioId)
+                                            setPromptSaveMessage('')
+                                        }}
                                     >
-                                        <div className="settings-scenario-title">{scenario.title}</div>
-                                        <div className="settings-scenario-subtitle">{scenario.subtitle}</div>
+                                        <div className="settings-scenario-title">{promptConfigs[scenarioId].name}</div>
+                                        <div className="settings-scenario-subtitle">{promptConfigs[scenarioId].description}</div>
                                     </button>
                                 ))}
                             </div>
                         </div>
                         <div className="settings-editor-panel">
-                            <h2 className="settings-editor-heading">{aiScenarios.find(s => s.id === activeScenario)?.title}</h2>
-                            <p className="settings-editor-desc">
-                                {aiScenarios.find(s => s.id === activeScenario)?.subtitle}
-                            </p>
-                            <h3 className="settings-panel-title" style={{ marginTop: 24 }}>System Prompt</h3>
-                            <p className="settings-editor-desc">This defines the AI&apos;s role and behavior for this scenario.</p>
-                            <textarea
-                                className="settings-prompt-textarea"
-                                value={systemPrompt}
-                                onChange={(e) => {
-                                    const nextPrompt = e.target.value
-                                    setSystemPrompt(nextPrompt)
-                                    setScenarioPrompts(prev => ({ ...prev, [activeScenario]: nextPrompt }))
-                                }}
-                                rows={10}
-                            />
-                            <div className="settings-editor-actions">
-                                <button className="btn btn-primary">Save Changes</button>
-                                <button className="btn btn-secondary">Reset to Saved</button>
-                            </div>
-                            <div className="settings-info-box">
-                                <span className="settings-info-icon">⚠️</span>
-                                <div>
-                                    <strong>Note</strong>
-                                    <p>Changes to prompts are stored in memory and will be reset when the backend restarts. For persistent changes, modify the prompts in the backend configuration file.</p>
+                            {activePrompt ? (
+                                <>
+                                    <h2 className="settings-editor-heading">{activePrompt.name}</h2>
+                                    <p className="settings-editor-desc">{activePrompt.description}</p>
+                                    <h3 className="settings-panel-title" style={{ marginTop: 24 }}>System Prompt</h3>
+                                    <p className="settings-editor-desc">This defines the AI&apos;s role and behavior for this scenario. It is the same prompt the backend sends for this agent.</p>
+                                    <textarea
+                                        className="settings-prompt-textarea"
+                                        value={activePrompt.system || ''}
+                                        onChange={(e) => updateActivePrompt('system', e.target.value)}
+                                        rows={10}
+                                    />
+                                    {'user_template' in activePrompt && (
+                                        <>
+                                            <h3 className="settings-panel-title" style={{ marginTop: 24 }}>User Prompt Template</h3>
+                                            <p className="settings-editor-desc">Template sent with each request. Keep {'{placeholders}'} such as {'{code}'} or {'{requirements}'} so the agent can fill them in.</p>
+                                            <textarea
+                                                className="settings-prompt-textarea"
+                                                value={activePrompt.user_template || ''}
+                                                onChange={(e) => updateActivePrompt('user_template', e.target.value)}
+                                                rows={12}
+                                            />
+                                        </>
+                                    )}
+                                    <div className="settings-editor-actions">
+                                        <button className="btn btn-primary" onClick={handleSavePrompt} disabled={isSavingPrompt}>
+                                            {isSavingPrompt ? 'Saving...' : 'Save Changes'}
+                                        </button>
+                                        <button className="btn btn-secondary" onClick={handleResetPrompt} disabled={isSavingPrompt}>
+                                            Reset to Saved
+                                        </button>
+                                        {promptSaveMessage && (
+                                            <span style={{ fontSize: 13, color: promptSaveMessage.startsWith('Prompt saved') ? '#16a34a' : '#dc2626' }}>
+                                                {promptSaveMessage}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="settings-info-box">
+                                        <span className="settings-info-icon">⚠️</span>
+                                        <div>
+                                            <strong>Note</strong>
+                                            <p>Saving updates the prompt for this agent only. The next run of that agent uses the edited prompt.</p>
+                                        </div>
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="p-8 text-center text-gray-500">
+                                    {isLoadingPrompts ? 'Loading prompts...' : 'No prompts available.'}
                                 </div>
-                            </div>
+                            )}
                         </div>
                     </div>
                 )
+            }
 
             /* ── MANAGE SOURCES ─────────────────────── */
             case 'sources':

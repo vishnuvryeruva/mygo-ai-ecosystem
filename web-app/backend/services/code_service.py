@@ -1,4 +1,5 @@
 from services.openai_service import OpenAIService
+from config.prompts import get_prompt, render_prompt
 
 class CodeService:
     def __init__(self):
@@ -6,31 +7,17 @@ class CodeService:
     
     def explain_code(self, code, code_type='ABAP', program_name='', llm_provider='openai'):
         """Explain what ABAP code does"""
-        
-        system_prompt = """You are an expert SAP ABAP developer and educator.
-        Explain code in simple, clear terms that help developers understand what the code does.
-        Focus on functionality, not implementation details.
-        
-        CRITICAL INSTRUCTION: If the code provided is wrapped in a JSON structure (like an SAP OData response), 
-        you must locate and extract the actual ABAP source code hidden within the JSON fields (e.g., inside "SourceCode", "source", "results", etc.) 
-        and base your ENTIRE explanation solely on that ABAP code, ignoring the JSON wrapper itself."""
-        
-        user_prompt = f"""Explain what the following {code_type} code does.
-        
-{f'Program/Class Name: {program_name}' if program_name else ''}
 
-Code:
-```{code_type.lower()}
-{code}
-```
-
-Please provide:
-1. A brief overview (2-3 sentences)
-2. Main functionality
-3. Key components and their purpose
-4. Any important patterns or practices used
-
-Keep the explanation clear and concise, suitable for developers at various skill levels."""
+        system_prompt = get_prompt('code_explain', 'system')
+        program_line = f"Program/Class Name: {program_name}" if program_name else ""
+        user_prompt = render_prompt(
+            'code_explain',
+            'user_template',
+            code_type=code_type,
+            code_type_lower=code_type.lower(),
+            program_line=program_line,
+            code=code,
+        )
         
         explanation = self.openai_service.generate_text(
             user_prompt,

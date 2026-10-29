@@ -37,12 +37,10 @@ class TestService:
         
         # Check if we have a template to use
         try:
-            from config.prompts import get_prompt
+            from config.prompts import render_prompt
             prompt_key = f'test_{test_type}'
-            user_template = get_prompt(prompt_key, 'user_template')
-            if user_template:
-                user_prompt = user_template.format(code=code)
-            else:
+            user_prompt = render_prompt(prompt_key, 'user_template', code=code)
+            if not user_prompt:
                 raise ValueError("No template found")
         except:
             # For SAP Cloud ALM format, use structured prompt

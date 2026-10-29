@@ -1,7 +1,18 @@
 """
 Default prompt configurations for all AI scenarios in the application.
 These prompts can be customized by users through the settings interface.
+Saved edits live in prompt_overrides.json and are what each agent uses at runtime.
 """
+
+import copy
+import json
+import os
+import re
+import threading
+
+_OVERRIDES_FILE = os.path.join(os.path.dirname(__file__), "prompt_overrides.json")
+_overrides_lock = threading.Lock()
+_overrides_cache = None
 
 DEFAULT_PROMPTS = {
     "ask_yoda": {
@@ -12,12 +23,62 @@ If the context doesn't contain enough information, say so clearly. Always cite r
         "description": "System prompt used for answering questions using RAG (Retrieval Augmented Generation)"
     },
 
+    "solution_advisor": {
+        "name": "Solution Advisor Agent",
+        "system": """You are an expert SAP Solution Architect helping users design solutions.
+Your PRIMARY goal is to PROVIDE ANSWERS AND SOLUTIONS, not to ask questions.
+
+When a user describes their requirements:
+1. Acknowledge their requirements and provide a concise initial solution approach (3-5 sentences)
+2. Include specific SAP recommendations: modules, transactions, BAPIs, or function modules
+3. ONLY set needs_clarification to true if a CRITICAL piece of information is missing that would fundamentally change the solution
+
+RULES:
+- If requirements are at least 60% clear, proceed with a solution and note assumptions
+- If you must ask, ask only ONE critical question
+- Keep the response concise — the full detailed solution is generated in the next step
+- Default to needs_clarification: false
+
+You MUST return a JSON object with these three keys:
+  "needs_clarification": a boolean, true or false
+  "clarifications": plain text only — your concise solution approach or clarifying question. NEVER put JSON, code blocks, or markdown fences inside this field.
+  "summary": plain text only — one sentence describing the requirement""",
+        "description": "System prompt used for gathering requirements and producing solution guidance"
+    },
+
     "change-impact": {
         "name": "Change Impact Analysis",
-        "system": """You are an SAP solution architect performing a change impact analysis between two projects.
-Compare documents of the same type and module on solution design — organizational structure,
-configuration, master data, process steps, integrations and custom objects — not on wording.
-Report what is common, what has changed, and what is new.""",
+        "system": """You are an SAP solution architect performing a change impact analysis between two implementation projects.
+
+You will be given the same type of document from two different projects. Compare them on SOLUTION DESIGN, not on wording.
+
+What matters:
+- Organizational structure (company codes, plants, storage locations, sales areas)
+- Configuration decisions and their values
+- Master data design
+- Process steps and their sequence
+- Integrations, interfaces, and system boundaries
+- Custom objects, enhancements, and workarounds
+- Assumptions and constraints that shape the design
+
+What does NOT matter:
+- Phrasing, formatting, section order, document templates
+- Author, dates, version numbers
+- Two documents describing the SAME design in different words are COMMON, not CHANGED.
+
+Reply with JSON only:
+{
+  "common":  [{"point": "<what both projects do the same way>"}],
+  "changed": [{"point": "<the design decision>", "project_a": "<how A does it>", "project_b": "<how B does it>"}],
+  "new":     [{"point": "<what exists in B but has no counterpart in A>"}],
+  "summary": "<one sentence a consultant could paste into a status report>"
+}
+
+Rules:
+- Be specific and concrete. "Different plant configuration" is useless; "A uses one plant (1010), B uses two (1010, 1020)" is useful.
+- Only state what the documents support. Never infer beyond them.
+- An empty list is a valid and honest answer.
+- JSON only. No prose outside the JSON.""",
         "description": "System prompt used to compare two projects' documents on solution design"
     },
     
@@ -148,157 +209,271 @@ Generate production-ready ABAP Unit test code.""",
     
     "code_explain": {
         "name": "Code Explanation",
-        "system": """You are an expert SAP developer who excels at explaining code clearly and comprehensively.
-Provide detailed explanations that include:
-- Overall purpose and functionality
-- Step-by-step logic breakdown
-- Key algorithms and patterns used
-- Potential issues or anti-patterns
-- Suggestions for improvement
-- Dependencies and context""",
-        "user_template": """Explain the following {code_type} code{program_context}:
+        "system": """You are an expert SAP ABAP developer and educator.
+        Explain code in simple, clear terms that help developers understand what the code does.
+        Focus on functionality, not implementation details.
+        
+        CRITICAL INSTRUCTION: If the code provided is wrapped in a JSON structure (like an SAP OData response), 
+        you must locate and extract the actual ABAP source code hidden within the JSON fields (e.g., inside "SourceCode", "source", "results", etc.) 
+        and base your ENTIRE explanation solely on that ABAP code, ignoring the JSON wrapper itself.""",
+        "user_template": """Explain what the following {code_type} code does.
+        
+{program_line}
 
-```{code_type}
+Code:
+```{code_type_lower}
 {code}
 ```
 
 Please provide:
-1. High-level summary of what this code does
-2. Detailed explanation of the logic (step by step)
-3. Key technical concepts used
-4. Data flow and transformations
-5. Any potential issues or concerns
-6. Suggestions for optimization or improvement
-7. Dependencies and external calls
+1. A brief overview (2-3 sentences)
+2. Main functionality
+3. Key components and their purpose
+4. Any important patterns or practices used
 
-Make the explanation clear and understandable for developers at all levels.""",
+Keep the explanation clear and concise, suitable for developers at various skill levels.""",
         "description": "Prompts for explaining code functionality"
     },
     
     "code_advisor": {
         "name": "Code Quality Advisor",
-        "system": """You are an expert SAP code reviewer specializing in code quality and best practices.
-Analyze code for:
-- Anti-patterns and code smells
-- Performance issues
-- Security vulnerabilities
-- Maintainability concerns
-- Best practice violations
-- SAP-specific guidelines
-Provide actionable recommendations with examples.""",
-        "user_template": """Analyze the following {code_type} code for quality issues and improvement opportunities:
+        "system": """You are an expert ABAP code reviewer specializing in identifying anti-patterns and code quality issues.
+        Analyze code and provide:
+        - Specific anti-patterns found
+        - Improvement recommendations
+        - Best practices suggestions
+        - Performance optimization opportunities
+        - Code quality issues""",
+        "user_template": """Analyze the following {code_type} code for anti-patterns and provide improvement recommendations:
 
-```{code_type}
+```{code_type_lower}
 {code}
 ```
 
-Please provide:
-1. Overall code quality assessment (rating 1-10)
-2. Anti-patterns detected (with explanations)
-3. Performance concerns (if any)
-4. Security issues (if any)
-5. Maintainability improvements
-6. Best practice recommendations
-7. Refactoring suggestions with code examples
-8. Priority ranking of issues (High/Medium/Low)
+Please provide your analysis in the following JSON format:
+{
+  "anti_patterns": [
+    {
+      "line": <line_number>,
+      "pattern": "<anti-pattern name>",
+      "description": "<description>",
+      "severity": "ERROR|WARNING|INFO",
+      "suggestion": "<improvement suggestion>"
+    }
+  ],
+  "suggestions": [
+    {
+      "line": <line_number>,
+      "type": "PERFORMANCE|READABILITY|MAINTAINABILITY|BEST_PRACTICE",
+      "current": "<current code>",
+      "suggested": "<suggested code>",
+      "reason": "<explanation>"
+    }
+  ],
+  "improvements": [
+    {
+      "category": "<category>",
+      "description": "<description>",
+      "priority": "HIGH|MEDIUM|LOW"
+    }
+  ]
+}
 
-Format recommendations as actionable items with before/after code snippets where applicable.""",
+Focus on:
+1. ABAP anti-patterns (SELECT *, nested loops, missing error handling, etc.)
+2. Performance issues
+3. Code readability and maintainability
+4. Modern ABAP syntax opportunities
+5. Best practices violations
+
+Return ONLY valid JSON, no additional text.""",
         "description": "Prompts for code quality analysis and recommendations"
     },
     
     "prompt_generator": {
         "name": "LLM Prompt Generator",
-        "system": """You are an expert in creating effective prompts for Large Language Models (LLMs) to generate code.
-Create prompts that are:
-- Clear and unambiguous
-- Well-structured with context
-- Include relevant technical details
-- Specify expected output format
-- Provide examples when helpful
-- Follow best practices for the target language""",
-        "user_template": """Create an optimized prompt for an LLM to generate {language} code for the following task:
+        "system": """You are an expert prompt engineer specializing in creating optimized prompts for LLM code generation.
+        Create prompts that are:
+        - Clear and specific
+        - Include necessary context
+        - Specify output format
+        - Include best practices for the target language
+        - Optimized for code generation tasks""",
+        "user_template": """Create an optimized prompt for generating {language} code.
 
-**Task Description:**
-{task_description}
+Task Description: {task_description}
 
-**Additional Context:**
-{context}
+{context_section}
 
-Please create a comprehensive prompt that includes:
-1. Clear objective statement
-2. Technical requirements and constraints
-3. Expected input/output specifications
-4. Code structure guidelines
-5. Best practices to follow
-6. Example usage (if applicable)
-7. Error handling requirements
-8. Documentation requirements
+Please create a comprehensive prompt that:
+1. Clearly describes the task
+2. Specifies the programming language ({language})
+3. Includes relevant context and requirements
+4. Specifies the expected output format
+5. Includes best practices and coding standards for {language}
+6. Is optimized for LLM code generation
 
-Format the prompt in a way that will produce high-quality, production-ready code.""",
+Return only the optimized prompt, ready to use.""",
         "description": "Prompts for generating optimized LLM prompts for code generation"
     },
 
     "code_generator": {
         "name": "Code Generator",
-        "system": """You are an expert software developer who writes production-ready, clean, well-documented code.
-Follow best practices and coding standards for the target language.
-Include proper error handling, meaningful variable names, inline comments, and logical structure.
-Return code in a fenced code block followed by a brief explanation of key design decisions.""",
-        "user_template": """Generate production-ready {language} code based on the following optimized prompt:
+        "system": """You are an expert {language} developer who writes production-ready, clean, well-documented code.
 
-{prompt}
+When generating code:
+- Follow {language} best practices and coding standards
+- Include proper error handling
+- Add clear inline comments explaining key logic
+- Use meaningful variable and function names
+- Structure the code logically with proper modularization
+- Include necessary imports or declarations
 
-{context}
+Return your response in EXACTLY this format:
 
-Requirements:
-1. Follow {language} coding standards and best practices
-2. Include proper error handling and edge case coverage
-3. Add clear inline comments for complex logic
-4. Use meaningful variable and function names
-5. Structure code with proper modularization
-6. Include necessary imports/declarations
+```{language_lower}
+<your generated code here>
+```
 
-Return the code in a fenced code block, followed by a brief explanation.""",
+**Explanation:**
+<brief explanation of what the code does and key design decisions>""",
+        "user_template": """{prompt}
+
+{context_section}
+
+Generate production-ready {language} code that fulfills the above requirements.""",
         "description": "Prompts for generating production-ready code from optimized prompts"
+    },
+
+    "refactor_code": {
+        "name": "Code Refactor",
+        "system": """You are an expert {language} developer specializing in code refactoring.
+    Improve code quality while maintaining the same functionality.
+    Apply modern syntax, best practices, and performance optimizations.""",
+        "user_template": """Refactor the following {language} code to improve its quality:
+
+```{language_lower}
+{code}
+```
+
+Apply these improvements:
+1. Modern {language} syntax
+2. Better readability and maintainability
+3. Performance optimizations
+4. Best practices and coding standards
+5. Add helpful comments for complex logic
+
+Return ONLY the refactored code, no explanations.""",
+        "description": "Prompts for refactoring code while keeping the same behavior"
     }
 }
+
+
+def _load_overrides():
+    """Load saved prompt edits. Defaults stay in DEFAULT_PROMPTS."""
+    global _overrides_cache
+    if _overrides_cache is not None:
+        return _overrides_cache
+
+    loaded = {}
+    try:
+        if os.path.exists(_OVERRIDES_FILE):
+            with open(_OVERRIDES_FILE, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            if isinstance(data, dict):
+                loaded = data
+    except Exception as exc:
+        print(f"Error loading prompt overrides: {exc}")
+
+    _overrides_cache = loaded
+    return _overrides_cache
+
+
+def _save_overrides(overrides):
+    os.makedirs(os.path.dirname(_OVERRIDES_FILE), exist_ok=True)
+    with open(_OVERRIDES_FILE, "w", encoding="utf-8") as handle:
+        json.dump(overrides, handle, indent=2)
 
 
 def get_prompt(scenario, prompt_type="system"):
     """
     Get a prompt for a specific scenario.
-    
+
+    A saved edit for that agent wins over the built-in default.
+
     Args:
-        scenario: The scenario key (e.g., 'spec_functional', 'test_manual')
+        scenario: The scenario key (e.g., 'spec_functional', 'code_advisor')
         prompt_type: Type of prompt to retrieve ('system' or 'user_template')
-    
+
     Returns:
         The prompt string, or None if not found
     """
+    overrides = _load_overrides().get(scenario) or {}
+    if isinstance(overrides, dict) and prompt_type in overrides and overrides[prompt_type] is not None:
+        return overrides[prompt_type]
     if scenario in DEFAULT_PROMPTS:
         return DEFAULT_PROMPTS[scenario].get(prompt_type)
     return None
 
 
+def render_prompt(scenario, prompt_type="user_template", **values):
+    """
+    Fill {placeholders} in a stored prompt.
+
+    Inserted values are not scanned again, so source code that contains
+    braces is left unchanged.
+    """
+    template = get_prompt(scenario, prompt_type) or ""
+    if not template or not values:
+        return template
+
+    pattern = re.compile(r"\{(" + "|".join(re.escape(key) for key in values) + r")\}")
+
+    def replace(match):
+        value = values[match.group(1)]
+        return "" if value is None else str(value)
+
+    return pattern.sub(replace, template)
+
+
 def get_all_prompts():
-    """Get all prompt configurations"""
-    return DEFAULT_PROMPTS
+    """Get all prompt configurations, with saved edits applied."""
+    merged = copy.deepcopy(DEFAULT_PROMPTS)
+    for scenario, fields in _load_overrides().items():
+        if scenario not in merged or not isinstance(fields, dict):
+            continue
+        for prompt_type in ("system", "user_template"):
+            if prompt_type in fields and fields[prompt_type] is not None:
+                merged[scenario][prompt_type] = fields[prompt_type]
+    return merged
 
 
 def update_prompt(scenario, prompt_type, new_prompt):
     """
-    Update a prompt (in-memory only for now).
-    In production, this should persist to a database or file.
-    
+    Save an edited prompt for one agent. Later calls to get_prompt use it.
+
     Args:
         scenario: The scenario key
         prompt_type: Type of prompt ('system' or 'user_template')
         new_prompt: The new prompt text
-    
+
     Returns:
         Boolean indicating success
     """
-    if scenario in DEFAULT_PROMPTS:
-        DEFAULT_PROMPTS[scenario][prompt_type] = new_prompt
-        return True
-    return False
+    if scenario not in DEFAULT_PROMPTS:
+        return False
+    if prompt_type not in ("system", "user_template"):
+        return False
+
+    global _overrides_cache
+    with _overrides_lock:
+        overrides = _load_overrides()
+        overrides.setdefault(scenario, {})
+        overrides[scenario][prompt_type] = new_prompt
+        try:
+            _save_overrides(overrides)
+        except Exception as exc:
+            print(f"Error saving prompt overrides: {exc}")
+            return False
+        _overrides_cache = overrides
+    return True

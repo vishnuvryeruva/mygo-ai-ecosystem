@@ -209,8 +209,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
                                     <div className="glass-subtle p-4 border-l-4 border-yellow-500">
                                         <h4 className="font-medium text-yellow-600 dark:text-yellow-300 mb-2">⚠️ Note</h4>
                                         <p className="text-sm text-muted">
-                                            Changes to prompts are stored in memory and will be reset when the backend restarts.
-                                            For persistent changes, modify the prompts in the backend configuration file.
+                                            Saved prompts are used the next time that agent runs. Each agent keeps its own prompt.
                                         </p>
                                     </div>
                                 </>

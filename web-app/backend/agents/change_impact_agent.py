@@ -31,6 +31,7 @@ import math
 import re
 from concurrent.futures import ThreadPoolExecutor
 
+from config.prompts import get_prompt
 from config.sap_modules import MODULE_LABELS, UNCLASSIFIED
 from services.openai_service import OpenAIService
 
@@ -270,7 +271,7 @@ def compare_pair(pair: dict, project_a: str, project_b: str, llm_provider: str =
     try:
         raw = llm_service.chat_completion(
             messages=[
-                {'role': 'system', 'content': COMPARE_SYSTEM_PROMPT},
+                {'role': 'system', 'content': get_prompt('change-impact', 'system') or COMPARE_SYSTEM_PROMPT},
                 {'role': 'user', 'content': user_prompt},
             ],
             temperature=0.1,

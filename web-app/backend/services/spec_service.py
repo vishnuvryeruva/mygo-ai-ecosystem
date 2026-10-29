@@ -36,12 +36,10 @@ class SpecService:
         
         # Check if we have a template to use
         try:
-            from config.prompts import get_prompt
+            from config.prompts import render_prompt
             prompt_key = f'spec_{spec_type}'
-            user_template = get_prompt(prompt_key, 'user_template')
-            if user_template:
-                user_prompt = user_template.format(requirements=requirements)
-            else:
+            user_prompt = render_prompt(prompt_key, 'user_template', requirements=requirements)
+            if not user_prompt:
                 raise ValueError("No template found")
         except:
             user_prompt = f"""Generate a {spec_type} specification document based on the following requirements:

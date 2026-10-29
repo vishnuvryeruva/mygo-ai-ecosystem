@@ -1055,7 +1055,9 @@ def get_prompts():
     """Get all prompt configurations"""
     try:
         prompts = get_all_prompts()
-        return jsonify({"prompts": prompts})
+        # Preserve scenario order. jsonify sorts object keys.
+        payload = json.dumps({"prompts": prompts}, ensure_ascii=False)
+        return app.response_class(payload, mimetype='application/json')
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

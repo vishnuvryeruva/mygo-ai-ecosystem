@@ -45,3 +45,4 @@ ENV/
 .venv
 vector_db/
 sources.json
+backend/config/prompt_overrides.json

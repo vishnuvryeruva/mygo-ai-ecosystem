@@ -5,6 +5,7 @@ Conversational advisor to gather requirements, explore existing solutions, and p
 
 import json
 import re
+from config.prompts import get_prompt
 from services.openai_service import OpenAIService
 
 llm_service = OpenAIService()
@@ -83,7 +84,7 @@ def gather_requirements(user_input: str, llm_provider: str = "openai") -> dict:
     """
     response_text = llm_service.chat_completion(
         messages=[
-            {"role": "system", "content": REQUIREMENTS_SYSTEM_PROMPT},
+            {"role": "system", "content": get_prompt("solution_advisor", "system") or REQUIREMENTS_SYSTEM_PROMPT},
             {"role": "user", "content": user_input},
         ],
         temperature=0.2,

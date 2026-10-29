@@ -1,4 +1,5 @@
 from services.openai_service import OpenAIService
+from config.prompts import get_prompt, render_prompt
 
 class PromptService:
     def __init__(self):
@@ -6,30 +7,16 @@ class PromptService:
     
     def generate_prompt(self, language, task_description, context='', llm_provider='openai'):
         """Generate optimized prompts for LLM code generation"""
-        
-        system_prompt = """You are an expert prompt engineer specializing in creating optimized prompts for LLM code generation.
-        Create prompts that are:
-        - Clear and specific
-        - Include necessary context
-        - Specify output format
-        - Include best practices for the target language
-        - Optimized for code generation tasks"""
-        
-        user_prompt = f"""Create an optimized prompt for generating {language} code.
 
-Task Description: {task_description}
-
-{f'Additional Context: {context}' if context else ''}
-
-Please create a comprehensive prompt that:
-1. Clearly describes the task
-2. Specifies the programming language ({language})
-3. Includes relevant context and requirements
-4. Specifies the expected output format
-5. Includes best practices and coding standards for {language}
-6. Is optimized for LLM code generation
-
-Return only the optimized prompt, ready to use."""
+        system_prompt = get_prompt('prompt_generator', 'system')
+        context_section = f"Additional Context: {context}" if context else ""
+        user_prompt = render_prompt(
+            'prompt_generator',
+            'user_template',
+            language=language,
+            task_description=task_description,
+            context_section=context_section,
+        )
         
         prompt = self.openai_service.generate_text(
             user_prompt,
@@ -53,30 +40,20 @@ Return only the optimized prompt, ready to use."""
             dict with 'code', 'explanation', and 'language'
         """
         
-        system_prompt = f"""You are an expert {language} developer who writes production-ready, clean, well-documented code.
-
-When generating code:
-- Follow {language} best practices and coding standards
-- Include proper error handling
-- Add clear inline comments explaining key logic
-- Use meaningful variable and function names
-- Structure the code logically with proper modularization
-- Include necessary imports or declarations
-
-Return your response in EXACTLY this format:
-
-```{language.lower()}
-<your generated code here>
-```
-
-**Explanation:**
-<brief explanation of what the code does and key design decisions>"""
-
-        user_prompt = f"""{prompt}
-
-{f'Additional Context: {context}' if context else ''}
-
-Generate production-ready {language} code that fulfills the above requirements."""
+        system_prompt = render_prompt(
+            'code_generator',
+            'system',
+            language=language,
+            language_lower=language.lower(),
+        )
+        context_section = f"Additional Context: {context}" if context else ""
+        user_prompt = render_prompt(
+            'code_generator',
+            'user_template',
+            prompt=prompt,
+            context_section=context_section,
+            language=language,
+        )
 
         result = self.openai_service.generate_text(
             user_prompt,

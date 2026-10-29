@@ -7,6 +7,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from config.prompts import render_prompt
 from services.openai_service import OpenAIService
 
 TOOL_NAME = "refactor_code"
@@ -25,24 +26,18 @@ def refactor_code_tool(code: str, language: str = "ABAP") -> str:
     """
     openai_service = OpenAIService()
     
-    system_prompt = f"""You are an expert {language} developer specializing in code refactoring.
-    Improve code quality while maintaining the same functionality.
-    Apply modern syntax, best practices, and performance optimizations."""
-    
-    user_prompt = f"""Refactor the following {language} code to improve its quality:
-
-```{language.lower()}
-{code}
-```
-
-Apply these improvements:
-1. Modern {language} syntax
-2. Better readability and maintainability
-3. Performance optimizations
-4. Best practices and coding standards
-5. Add helpful comments for complex logic
-
-Return ONLY the refactored code, no explanations."""
+    system_prompt = render_prompt(
+        "refactor_code",
+        "system",
+        language=language,
+    )
+    user_prompt = render_prompt(
+        "refactor_code",
+        "user_template",
+        language=language,
+        language_lower=language.lower(),
+        code=code,
+    )
 
     refactored = openai_service.generate_text(
         user_prompt,
