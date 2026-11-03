@@ -36,7 +36,8 @@ Return only the optimized prompt, ready to use."""
             system_prompt=system_prompt,
             temperature=0.5,
             max_tokens=1500,
-            provider=llm_provider
+            provider=llm_provider,
+            agent_name="Prompt Generator"
         )
         
         return prompt
@@ -83,7 +84,8 @@ Generate production-ready {language} code that fulfills the above requirements."
             system_prompt=system_prompt,
             temperature=0.3,
             max_tokens=4000,
-            provider=llm_provider
+            provider=llm_provider,
+            agent_name="Prompt Generator"
         )
         
         # Parse the response to separate code and explanation

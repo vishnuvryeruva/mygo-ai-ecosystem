@@ -44,7 +44,7 @@ export default function SapPasswordModal({
     onConfirm,
     systemId = 'SAP',
     username = '',
-    client = '100',
+    client = '',
     title = 'SAP Authentication Required',
     description = 'Please enter your SAP password to execute live ADT tools.'
 }: SapPasswordModalProps) {

@@ -16,6 +16,7 @@ import SettingsModal from '@/components/modals/SettingsModal'
 import SyncSourceModal from '@/components/modals/SyncSourceModal'
 import FileUploadModal from '@/components/modals/FileUploadModal'
 import CapPromptGeneratorModal from '@/components/modals/CapPromptGeneratorModal'
+import { PageHeaderProvider } from '@/context/PageHeaderContext'
 
 export default function AuthenticatedLayout({
     children,
@@ -31,7 +32,7 @@ export default function AuthenticatedLayout({
     const [minimizedChats, setMinimizedChats] = useState<string[]>([])
     const [currentUserName, setCurrentUserName] = useState('')
     // Code Advisor modal initial data
-    const [codeAdvisorData, setCodeAdvisorData] = useState<{ code: string; codeType: string } | null>(null)
+    const [codeAdvisorData, setCodeAdvisorData] = useState<{ code: string; codeType: string; programName?: string } | null>(null)
     // Sync Source modal state
     const [syncSourceModalOpen, setSyncSourceModalOpen] = useState(false)
     const [preSelectedSourceId, setPreSelectedSourceId] = useState<string | null>(null)
@@ -39,6 +40,8 @@ export default function AuthenticatedLayout({
     const [explainCodeData, setExplainCodeData] = useState<{ code: string; codeType: string; programName?: string } | null>(null)
     // Solution Advisor modal initial data
     const [solutionAdvisorData, setSolutionAdvisorData] = useState<{ requirements: string } | null>(null)
+    // Test Case Generator modal initial data
+    const [testCaseData, setTestCaseData] = useState<{ code?: string } | null>(null)
     // Prompt Studio modal initial data
     const [promptStudioData, setPromptStudioData] = useState<{ 
         prompt: string; 
@@ -102,7 +105,7 @@ export default function AuthenticatedLayout({
         const handler = (e: Event) => {
             const detail = (e as CustomEvent).detail
             if (detail?.code !== undefined && detail?.codeType !== undefined) {
-                setCodeAdvisorData({ code: detail.code, codeType: detail.codeType })
+                setCodeAdvisorData({ code: detail.code, codeType: detail.codeType, programName: detail.programName })
                 setActiveModal('code-advisor')
             }
         }
@@ -170,6 +173,50 @@ export default function AuthenticatedLayout({
         return () => window.removeEventListener('prompt-studio-open', handler)
     }, [])
 
+    // Listen for spec-assistant-open events with initial requirements
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent).detail
+            if (detail?.requirements !== undefined) {
+                sessionStorage.setItem('solutionAdvisorContext', detail.requirements)
+                if (detail.autoGenerate !== false) {
+                    sessionStorage.setItem('specAssistantAutoGenerate', '1')
+                }
+                setActiveModal('spec-assistant')
+            }
+        }
+        window.addEventListener('spec-assistant-open', handler)
+        return () => window.removeEventListener('spec-assistant-open', handler)
+    }, [])
+
+    // Listen for test-case-generator-open events with initial code/doc
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent).detail
+            const content = detail?.code || detail?.requirements || ''
+            if (content) {
+                sessionStorage.setItem('testCaseContext', content)
+                setTestCaseData({ code: content })
+                setActiveModal('test-case-generator')
+            }
+        }
+        window.addEventListener('test-case-generator-open', handler)
+        return () => window.removeEventListener('test-case-generator-open', handler)
+    }, [])
+
+    // Listen for ask-yoda-open events
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent).detail
+            handleAgentSelect('ask-yoda')
+            if (detail?.query) {
+                window.dispatchEvent(new CustomEvent('chatbot-query', { detail: { query: detail.query, agentId: 'ask-yoda' } }))
+            }
+        }
+        window.addEventListener('ask-yoda-open', handler)
+        return () => window.removeEventListener('ask-yoda-open', handler)
+    }, [handleAgentSelect])
+
     const handleQuickAction = (actionId: string) => {
         // Ask Yoda opens the chatbot widget
         if (actionId === 'ask-yoda') {
@@ -190,6 +237,7 @@ export default function AuthenticatedLayout({
         setPromptStudioData(null)
         setSolutionAdvisorData(null)
         setExplainCodeData(null)
+        setTestCaseData(null)
     }
 
     const closeSyncSourceModal = () => {
@@ -230,22 +278,23 @@ export default function AuthenticatedLayout({
     }, [])
 
     return (
-        <div className="app-layout">
-            <Sidebar />
+        <PageHeaderProvider>
+            <div className="app-layout">
+                <Sidebar />
 
-            <div className="app-main">
-                <TopHeader
-                    onSettingsClick={() => router.push('/settings')}
-                    userName={userInitials}
-                />
+                <div className="app-main">
+                    <TopHeader
+                        onSettingsClick={() => router.push('/settings')}
+                        userName={userInitials}
+                    />
 
-                <div className="app-content">
-                    {children}
+                    <div className="app-content">
+                        {children}
+                    </div>
                 </div>
-            </div>
 
-            {/* Quick Actions FAB */}
-            <QuickActionsFAB onAction={handleQuickAction} activeAgent={expandedAgent} />
+                {/* Quick Actions FAB */}
+                <QuickActionsFAB onAction={handleQuickAction} activeAgent={expandedAgent} />
 
             {/* Modals */}
             {activeModal === 'solution-advisor' && (
@@ -277,13 +326,19 @@ export default function AuthenticatedLayout({
                     initialProgramName={explainCodeData?.programName}
                 />
             )}
-            {activeModal === 'test-case-generator' && <TestCaseGeneratorModal onClose={closeModal} />}
+            {activeModal === 'test-case-generator' && (
+                <TestCaseGeneratorModal 
+                    onClose={closeModal} 
+                    initialCode={testCaseData?.code}
+                />
+            )}
             {activeModal === 'document-upload' && <FileUploadModal onClose={closeModal} />}
             {activeModal === 'code-advisor' && (
                 <CodeAdvisorModal 
                     onClose={closeModal} 
                     initialCode={codeAdvisorData?.code}
                     initialCodeType={codeAdvisorData?.codeType}
+                    initialProgramName={codeAdvisorData?.programName}
                 />
             )}
             {activeModal === 'settings' && <SettingsModal onClose={closeModal} />}
@@ -313,6 +368,7 @@ export default function AuthenticatedLayout({
                 onDismissBubble={handleDismissBubble}
             />
         </div>
+    </PageHeaderProvider>
     )
 }
 

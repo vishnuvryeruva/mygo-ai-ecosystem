@@ -23,6 +23,24 @@ import os
 from typing import Dict, Any, List, Optional
 
 
+def _odata_quote(value: str) -> str:
+    """Escape a value for use inside a single-quoted OData string literal."""
+    return str(value or "").replace("'", "''")
+
+
+def _odata_rows(data: Any) -> List[Dict[str, Any]]:
+    """Extract the row list from an OData v2 (d.results) or v4 (value) payload."""
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        rows = data.get("value")
+        if rows is None:
+            rows = (data.get("d") or {}).get("results")
+        if isinstance(rows, list):
+            return rows
+    return []
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # EmbeddedADTMCPClient
 # Wraps DirectADTClient; exposes a unified MCP-style tool interface.
@@ -40,29 +58,35 @@ class EmbeddedADTMCPClient:
 
     def __init__(self, api_endpoint: str, client: str = "300",
                  username: str = "", password: str = "",
-                 sap_router: Optional[str] = None):
+                 sap_router: Optional[str] = None,
+                 btp_proxy_config: Optional[dict] = None):
         from services.sap_adt_service import DirectADTClient
         self.api_endpoint = api_endpoint
         self.client_id = client or "300"
         self.username = username
         self.password = password
         self.sap_router = sap_router or ""
+        self.btp_proxy_config = btp_proxy_config or {}
         self.direct_client = DirectADTClient(
             api_endpoint=api_endpoint,
             client=self.client_id,
             username=username,
             password=password,
-            sap_router=sap_router
+            sap_router=sap_router,
+            btp_proxy_config=self.btp_proxy_config
         )
         self._connected = False
+        self._last_error = ""
 
     def _ensure_connected(self) -> bool:
         """Connect and obtain CSRF token if not already done."""
         if not self._connected:
             try:
                 self._connected = self.direct_client.connect()
+                self._last_error = ""
             except Exception as e:
                 print(f"EmbeddedADTMCPClient: connect() failed: {e}")
+                self._last_error = str(e)
                 self._connected = False
         return self._connected
 
@@ -90,14 +114,22 @@ class EmbeddedADTMCPClient:
                             "destinations": [dest, "DEFAULT_ADT"]
                         }
                     }
-                return {"success": False,
-                        "error": f"Cannot authenticate with SAP at {self.api_endpoint}"}
+                err_msg = self._last_error or f"Cannot authenticate with SAP at {self.api_endpoint}"
+                return {"success": False, "error": err_msg}
 
             # ── Package / repository browsing ─────────────────────────────
             elif tool_name == "abap_package_contents":
                 pkg = args.get("packageName") or args.get("package_name") or ""
                 self._ensure_connected()
                 result = self.direct_client.fetch_package_contents(pkg)
+                return {"success": result.get("success", False), "result": result}
+
+            # ── Repository object search ──────────────────────────────────
+            elif tool_name in ("abap_repository_search", "search_objects"):
+                q = args.get("query") or args.get("pattern") or ""
+                limit = int(args.get("maxResults") or args.get("limit") or 20)
+                self._ensure_connected()
+                result = self.direct_client.search_objects(q, max_results=limit)
                 return {"success": result.get("success", False), "result": result}
 
             # ── Source code read ──────────────────────────────────────────
@@ -253,6 +285,20 @@ class EmbeddedADTMCPClient:
         """List all ABAP objects in a package via the ADT nodestructure endpoint."""
         return self.call_tool("abap_package_contents", {"packageName": package_name})
 
+    def list_all_packages(self) -> List[Dict[str, str]]:
+        """List all packages from SAP system via root nodestructure."""
+        if not self._ensure_connected():
+            return []
+        try:
+            return self.direct_client.list_all_packages()
+        except Exception as e:
+            print(f"EmbeddedADTMCPClient.list_all_packages error: {e}")
+            return []
+
+    def search_objects(self, query: str, max_results: int = 20) -> Dict[str, Any]:
+        """Search for objects in SAP system via ADT quickSearch."""
+        return self.call_tool("abap_repository_search", {"query": query, "maxResults": max_results})
+
     def write_source_code(self, object_name: str, object_type: str,
                           source_code: str) -> Dict[str, Any]:
         """Write ABAP source code to SAP via ADT REST PUT."""
@@ -329,6 +375,9 @@ class ADTMCPRouter:
         result = router.push_code("ZCL_SALES_ORDER", "CLAS", modern_code)
     """
 
+    # Object types served by the BTP CatalogService (ObjlistSet / sourcecodeSet)
+    BTP_CODE_TYPES = ("PROG", "CLAS", "FUGR", "INTF")
+
     def __init__(self, adt_client: Optional[EmbeddedADTMCPClient] = None,
                  btp_config: Optional[dict] = None):
         self._adt = adt_client
@@ -344,7 +393,10 @@ class ADTMCPRouter:
         adt_client = None
         btp_config = None
         try:
-            from services import source_config_service
+            try:
+                from services import source_config_service
+            except ImportError:
+                from backend.services import source_config_service
             sources = source_config_service.list_sources()
 
             # SAP ADT source → primary
@@ -360,15 +412,31 @@ class ADTMCPRouter:
                     username   = cfg.get("username") or cfg.get("clientId") or ""
                     password   = cfg.get("password") or cfg.get("clientSecret") or ""
                     sap_router = cfg.get("sapRouter") or cfg.get("routerString") or ""
-                    if sap_host and username and password:
+                    
+                    btp_proxy = cfg.get("btpProxyConfig") or cfg.get("btp_proxy_config") or {}
+                    if not btp_proxy and cfg.get("connectivityHost"):
+                        btp_proxy = {
+                            "connectivity_host": cfg.get("connectivityHost"),
+                            "connectivity_port": cfg.get("connectivityPort", "20003"),
+                            "connectivity_client_id": cfg.get("connectivityClientId"),
+                            "connectivity_client_secret": cfg.get("connectivityClientSecret"),
+                            "connectivity_token_url": cfg.get("connectivityTokenUrl"),
+                            "scc_location_id": cfg.get("sccLocationId", "")
+                        }
+
+                    if cfg.get("connectionMode") == "BTP" or cfg.get("mode") == "BTP_DESTINATION" or (cfg.get("tokenUrl") and cfg.get("clientId") and not cfg.get("appServer") and not btp_proxy):
+                        btp_config = cfg
+                        print(f"ADTMCPRouter: Active SAP Connection configured via SAP BTP Destination ({cfg.get('destination', 'S4H_HMF_ADT')})")
+                    elif sap_host and username and password:
                         adt_client = EmbeddedADTMCPClient(
                             api_endpoint=sap_host, client=sap_client,
                             username=username, password=password,
-                            sap_router=sap_router or None
+                            sap_router=sap_router or None,
+                            btp_proxy_config=btp_proxy or None
                         )
-                        print(f"ADTMCPRouter: EmbeddedADTMCPClient → {sap_host}")
+                        print(f"ADTMCPRouter: EmbeddedADTMCPClient -> {sap_host} (Proxy: {bool(btp_proxy)})")
 
-            # BTP source → fallback
+            # BTP source -> fallback
             btp_source = next(
                 (s for s in sources if s.get("type") == "BTP"), None
             )
@@ -382,18 +450,59 @@ class ADTMCPRouter:
 
         # Env-var fallback for ADT
         if not adt_client:
-            sap_host   = os.getenv("SAP_ADT_HOST") or os.getenv("SAP_HOST", "")
-            username   = os.getenv("SAP_USERNAME", "")
-            password   = os.getenv("SAP_PASSWORD", "")
-            sap_client = os.getenv("SAP_CLIENT", "300")
-            if sap_host and username and password:
-                adt_client = EmbeddedADTMCPClient(
-                    api_endpoint=sap_host, client=sap_client,
-                    username=username, password=password
-                )
-                print(f"ADTMCPRouter: EmbeddedADTMCPClient (env) → {sap_host}")
+            conn_mode = (os.getenv("SAP_CONNECTION_MODE") or "").upper()
+            if conn_mode in ("BTP_CLOUD_CONNECTOR", "SCC") or os.getenv("BTP_CONNECTIVITY_HOST"):
+                virtual_proto = os.getenv("SAP_VIRTUAL_PROTOCOL", "http")
+                virtual_host = os.getenv("SAP_VIRTUAL_HOST", "mygohanafun2")
+                virtual_port = os.getenv("SAP_VIRTUAL_PORT", "8000")
+                sap_host = f"{virtual_proto}://{virtual_host}:{virtual_port}"
+                username = os.getenv("SAP_USERNAME", "")
+                password = os.getenv("SAP_PASSWORD", "")
+                sap_client = os.getenv("SAP_CLIENT", "300")
+                btp_proxy = {
+                    "connectivity_host": os.getenv("BTP_CONNECTIVITY_HOST", ""),
+                    "connectivity_port": os.getenv("BTP_CONNECTIVITY_PORT", "20003"),
+                    "connectivity_client_id": os.getenv("BTP_CONNECTIVITY_CLIENT_ID", ""),
+                    "connectivity_client_secret": os.getenv("BTP_CONNECTIVITY_CLIENT_SECRET", ""),
+                    "connectivity_token_url": os.getenv("BTP_CONNECTIVITY_TOKEN_URL", ""),
+                    "scc_location_id": os.getenv("BTP_SCC_LOCATION_ID", "")
+                }
+                if username and password and (btp_proxy["connectivity_host"] or sap_host):
+                    adt_client = EmbeddedADTMCPClient(
+                        api_endpoint=sap_host, client=sap_client,
+                        username=username, password=password,
+                        btp_proxy_config=btp_proxy if btp_proxy["connectivity_host"] else None
+                    )
+                    print(f"ADTMCPRouter: EmbeddedADTMCPClient (BTP Cloud Connector env -> {sap_host})")
+
+            if not adt_client:
+                sap_host   = os.getenv("SAP_ADT_HOST") or os.getenv("SAP_HOST", "")
+                username   = os.getenv("SAP_USERNAME", "")
+                password   = os.getenv("SAP_PASSWORD", "")
+                sap_client = os.getenv("SAP_CLIENT", "300")
+                if sap_host and username and password:
+                    adt_client = EmbeddedADTMCPClient(
+                        api_endpoint=sap_host, client=sap_client,
+                        username=username, password=password
+                    )
+                    print(f"ADTMCPRouter: EmbeddedADTMCPClient (env) -> {sap_host}")
 
         return cls(adt_client=adt_client, btp_config=btp_config)
+
+    @classmethod
+    def for_source(cls, source: Optional[dict]) -> "ADTMCPRouter":
+        """Build a router bound to one specific configured source (BTP or SAP ADT)."""
+        if not source:
+            return cls.from_source_config()
+        src_type = (source.get("type") or "").upper()
+        cfg = source.get("config") or {}
+        if src_type == "BTP":
+            return cls(btp_config=cfg)
+        if src_type in ("SAP_ADT", "SAP_ADT_MCP"):
+            if cfg.get("connectionMode") == "BTP" or cfg.get("mode") == "BTP_DESTINATION":
+                return cls(btp_config=cfg)
+            return cls.from_ephemeral_creds(cfg)
+        return cls.from_source_config()
 
     @classmethod
     def from_ephemeral_creds(cls, creds: dict) -> "ADTMCPRouter":
@@ -403,11 +512,24 @@ class ADTMCPRouter:
         username   = creds.get("username") or creds.get("sap_username") or ""
         password   = creds.get("password") or creds.get("sap_password") or ""
         sap_router = creds.get("sapRouter") or creds.get("routerString") or ""
+        
+        btp_proxy = creds.get("btpProxyConfig") or creds.get("btp_proxy_config") or {}
+        if not btp_proxy and creds.get("connectivityHost"):
+            btp_proxy = {
+                "connectivity_host": creds.get("connectivityHost"),
+                "connectivity_port": creds.get("connectivityPort", "20003"),
+                "connectivity_client_id": creds.get("connectivityClientId"),
+                "connectivity_client_secret": creds.get("connectivityClientSecret"),
+                "connectivity_token_url": creds.get("connectivityTokenUrl"),
+                "scc_location_id": creds.get("sccLocationId", "")
+            }
+
         if sap_host and username and password:
             return cls(adt_client=EmbeddedADTMCPClient(
                 api_endpoint=sap_host, client=sap_client,
                 username=username, password=password,
-                sap_router=sap_router or None
+                sap_router=sap_router or None,
+                btp_proxy_config=btp_proxy or None
             ))
         return cls()
 
@@ -419,7 +541,10 @@ class ADTMCPRouter:
         if not self._btp_config:
             return None
         try:
-            from services.btp_service import BTPService
+            try:
+                from services.btp_service import BTPService
+            except ImportError:
+                from backend.services.btp_service import BTPService
             return BTPService(self._btp_config)
         except Exception as e:
             print(f"ADTMCPRouter: BTPService init error: {e}")
@@ -467,18 +592,26 @@ class ADTMCPRouter:
 
         btp = self._get_btp_service()
         if btp:
-            try:
-                data = btp.fetch_data(
-                    entity_set="sourcecodeSet",
-                    filter_query=f"Object eq '{object_name.upper()}'"
-                )
-                items = data.get("value") or data.get("d", {}).get("results", [])
-                if isinstance(items, list) and items:
-                    lines = [str(i.get("Line") or i.get("line") or "") for i in items]
-                    return {"success": True, "source_code": "\n".join(lines),
-                            "object_name": object_name, "source": "BTP"}
-            except Exception as e:
-                print(f"ADTMCPRouter.fetch_code BTP error: {e}")
+            # BTP CatalogService.sourcecodeSet exposes ObjectName / ObjectType / Line / LineNumber.
+            # Both ObjectType and ObjectName are required (a name-only filter returns 400),
+            # so an unknown type is resolved by trying the code-bearing types in turn.
+            name = _odata_quote(object_name.strip().upper())
+            otype = (object_type or "").strip().upper()
+            candidates = [otype] if otype in self.BTP_CODE_TYPES else []
+            candidates += [t for t in self.BTP_CODE_TYPES if t not in candidates]
+            for candidate in candidates:
+                filter_query = f"ObjectType eq '{candidate}' and ObjectName eq '{name}'"
+                try:
+                    data = btp.fetch_data(entity_set="sourcecodeSet", filter_query=filter_query, top="5000")
+                    items = _odata_rows(data)
+                    if items:
+                        items.sort(key=lambda i: int(i.get("LineNumber") or 0))
+                        lines = [str(i.get("Line") or "") for i in items]
+                        return {"success": True, "source_code": "\n".join(lines),
+                                "object_name": object_name, "object_type": candidate,
+                                "source": "BTP"}
+                except Exception as e:
+                    print(f"ADTMCPRouter.fetch_code BTP error ({filter_query}): {e}")
 
         return {"success": False, "source_code": None,
                 "error": f"Could not fetch source for '{object_name}' from ADT or BTP."}
@@ -508,24 +641,75 @@ class ADTMCPRouter:
         btp = self._get_btp_service()
         if btp:
             try:
-                data = btp.fetch_data(entity_set="objectsSet")
-                items = data.get("value") or data.get("d", {}).get("results", [])
-                if isinstance(items, list):
-                    objects = [
-                        {
-                            "name": (i.get("Object") or i.get("Objname") or "").upper(),
-                            "type": (i.get("ObjType") or i.get("Type") or "PROG").upper(),
-                            "description": i.get("Description") or i.get("Desc") or ""
-                        }
-                        for i in items if i.get("Object") or i.get("Objname")
-                    ]
-                    return {"success": True, "package": package_name,
-                            "objects": objects, "total": len(objects), "source": "BTP"}
+                objects = self._btp_list_objects(btp, package_name)
+                return {"success": True, "package": package_name,
+                        "objects": objects, "total": len(objects), "source": "BTP"}
             except Exception as e:
                 print(f"ADTMCPRouter.list_package BTP error: {e}")
 
         return {"success": True, "package": package_name, "objects": [], "total": 0,
                 "source": "SAP_ADT", "notice": "No objects found in package."}
+
+    def search_objects(self, query: str, max_results: int = 20) -> dict:
+        """Search for objects in SAP system via ADT quickSearch."""
+        if self._adt:
+            try:
+                res = self._adt.search_objects(query, max_results=max_results)
+                inner = res.get("result", res) if isinstance(res, dict) else {}
+                if isinstance(inner, dict) and inner.get("success"):
+                    return inner
+            except Exception as e:
+                print(f"ADTMCPRouter.search_objects error: {e}")
+
+        btp = self._get_btp_service()
+        if btp:
+            # The BTP service rejects startswith()/contains(), so match names locally
+            try:
+                import fnmatch
+                pattern = (query or "*").strip().upper()
+                if not any(c in pattern for c in "*?"):
+                    pattern = f"{pattern}*"
+                # Unfiltered ObjlistSet only returns ~100 rows inside the gateway's 30s timeout,
+                # so this is a best-effort match over that page.
+                objects = [o for o in self._btp_list_objects(btp, "", top=100)
+                           if fnmatch.fnmatchcase(o["name"], pattern)][:max_results]
+                return {"success": True, "query": query, "objects": objects,
+                        "total": len(objects), "source": "BTP"}
+            except Exception as e:
+                print(f"ADTMCPRouter.search_objects BTP error: {e}")
+
+        return {"success": False, "query": query, "objects": [], "error": "Search unavailable"}
+
+    @staticmethod
+    def _btp_list_objects(btp, package_name: str = "", top: int = 1000) -> List[Dict[str, str]]:
+        """List code objects from BTP CatalogService.ObjlistSet (Objname/Objtype/Package/Objdesc)."""
+        filter_parts = ["(Objtype eq 'PROG' or Objtype eq 'FUGR' or Objtype eq 'CLAS')"]
+        pkg = (package_name or "").strip().upper()
+        if pkg and pkg not in ("OBJLISTSET", "OBJECTSSET") and "*" not in pkg:
+            filter_parts.append(f"Package eq '{_odata_quote(pkg)}'")
+        else:
+            # Without a package filter the service times out above ~100 rows
+            top = min(top, 100)
+        data = btp.fetch_data(entity_set="ObjlistSet", filter_query=" and ".join(filter_parts), top=str(top))
+        return [
+            {
+                "name": (i.get("Objname") or "").upper(),
+                "type": (i.get("Objtype") or "PROG").upper(),
+                "package": i.get("Package") or "",
+                "description": i.get("Objdesc") or "",
+                "createdBy": i.get("Createby") or "",
+            }
+            for i in _odata_rows(data) if i.get("Objname")
+        ]
+
+    def list_all_packages(self) -> List[Dict[str, str]]:
+        """List all packages from SAP system via ADT root nodestructure."""
+        if self._adt:
+            try:
+                return self._adt.list_all_packages()
+            except Exception as e:
+                print(f"ADTMCPRouter.list_all_packages error: {e}")
+        return []
 
 
     # ─────────────────────────────────────────────────────────────────────
@@ -624,7 +808,8 @@ class ADTMCPRouter:
                 "connected": result.get("success", False),
                 "host": getattr(self._adt.direct_client, "host", "unknown"),
                 "btp_available": self._btp_config is not None,
-                "details": result.get("result", {})
+                "details": result.get("result", {}),
+                "error": result.get("error")
             }
         except Exception as e:
             return {"success": False, "connected": False, "error": str(e)}

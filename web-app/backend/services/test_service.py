@@ -116,7 +116,8 @@ Generate at least 5-10 comprehensive test cases."""
             system_prompt=system_prompt,
             temperature=0.4,
             max_tokens=3000,
-            provider=llm_provider
+            provider=llm_provider,
+            agent_name="Test Case Generator"
         )
         
         if format_type == 'excel':

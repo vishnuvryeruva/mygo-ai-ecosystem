@@ -149,9 +149,10 @@ export default function ExplainCodeModal({
       setModerniseCode('')
       setModerniseExplanation('')
       setShowGhSection(false)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error explaining code:', error)
-      alert('Error explaining code. Please try again.')
+      const errorMsg = error?.response?.data?.error || error?.message || 'Error explaining code. Please check your network connection.'
+      setExplanation(`> ⚠️ **Unable to complete AI explanation**\n>\n> ${errorMsg}\n\nPlease verify your connection and try again.`)
     } finally {
       setLoading(false)
     }

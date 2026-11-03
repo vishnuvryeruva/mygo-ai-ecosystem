@@ -317,9 +317,50 @@ class CALMService:
         except Exception as e:
             self._using_demo_data = True
             self._last_error = str(e)
-            print(f"Error listing documents (using demo data): {e}")
-            return {'documents': self._get_demo_documents(), 'isDemo': True, 'error': str(e)}
-    
+    def list_document_versions(self, document_id: str) -> List[Dict]:
+        """
+        List all versions of a document from Cloud ALM.
+        Versions share the same displayId and projectId but have unique uuids.
+        """
+        try:
+            doc = self.get_document(document_id)
+            display_id = doc.get('displayId')
+            project_id = doc.get('projectId')
+            title = doc.get('title')
+
+            if not display_id and not (title and project_id):
+                return [doc]
+
+            filter_parts = []
+            if project_id:
+                filter_parts.append(f"projectId eq {project_id}")
+            if display_id:
+                filter_parts.append(f"displayId eq '{display_id}'")
+            elif title:
+                safe_title = title.replace("'", "''")
+                filter_parts.append(f"title eq '{safe_title}'")
+
+            encoded_filter = urllib.parse.quote(" and ".join(filter_parts))
+            url = (
+                f"{self.api_endpoint}/api/calm-documents/v1/Documents"
+                f"?$filter={encoded_filter}&$orderby=version asc"
+            )
+
+            token = self._get_access_token()
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json',
+            }
+            response = requests.get(url, headers=headers, timeout=60)
+            response.raise_for_status()
+            versions = response.json().get('value', [])
+            return versions if versions else [doc]
+        except Exception as e:
+            print(f"Error listing document versions from CALM: {e}")
+            demo_docs = self._get_demo_documents()
+            matching = [d for d in demo_docs if d.get('displayId') and d.get('displayId') == (doc.get('displayId') if 'doc' in locals() else '')]
+            return matching if matching else [doc if 'doc' in locals() else {'id': document_id, 'version': 1, 'isLatest': True}]
+
     def get_document(self, document_id: str) -> Dict:
         """
         Get a single document by ID, including its content field
@@ -668,45 +709,87 @@ class CALMService:
         return [
             {
                 'id': 'doc-1',
+                'uuid': 'doc-1',
                 'name': 'FIN_FSpec_GeneralLedger_V1.2.docx',
+                'title': 'FIN_FSpec_GeneralLedger_V1.2.docx',
+                'displayId': 'D-100',
                 'type': 'Functional Spec',
                 'size': '1.4 MB',
-                'lastUpdated': '2026-01-20'
+                'lastUpdated': '2026-01-20',
+                'version': 2,
+                'isLatest': True,
+            },
+            {
+                'id': 'doc-1-v1',
+                'uuid': 'doc-1-v1',
+                'name': 'FIN_FSpec_GeneralLedger_V1.2.docx',
+                'title': 'FIN_FSpec_GeneralLedger_V1.2.docx',
+                'displayId': 'D-100',
+                'type': 'Functional Spec',
+                'size': '1.2 MB',
+                'lastUpdated': '2026-01-10',
+                'version': 1,
+                'isLatest': False,
             },
             {
                 'id': 'doc-2',
+                'uuid': 'doc-2',
                 'name': 'SCM_TSpec_InventoryManagement_API.pdf',
+                'title': 'SCM_TSpec_InventoryManagement_API.pdf',
+                'displayId': 'D-101',
                 'type': 'Technical Spec',
                 'size': '850 KB',
-                'lastUpdated': '2026-01-19'
+                'lastUpdated': '2026-01-19',
+                'version': 1,
+                'isLatest': True,
             },
             {
                 'id': 'doc-3',
+                'uuid': 'doc-3',
                 'name': 'O2C_ProcessFlow_Diagram_V4.drawio',
+                'title': 'O2C_ProcessFlow_Diagram_V4.drawio',
+                'displayId': 'D-102',
                 'type': 'Process Flow',
                 'size': '3.2 MB',
-                'lastUpdated': '2026-01-18'
+                'lastUpdated': '2026-01-18',
+                'version': 1,
+                'isLatest': True,
             },
             {
                 'id': 'doc-4',
+                'uuid': 'doc-4',
                 'name': 'HR_FSpec_PayrollProcessing.docx',
+                'title': 'HR_FSpec_PayrollProcessing.docx',
+                'displayId': 'D-103',
                 'type': 'Functional Spec',
                 'size': '1.8 MB',
-                'lastUpdated': '2026-01-17'
+                'lastUpdated': '2026-01-17',
+                'version': 1,
+                'isLatest': True,
             },
             {
                 'id': 'doc-5',
+                'uuid': 'doc-5',
                 'name': 'CRM_TSpec_CustomerDataIntegration.pdf',
+                'title': 'CRM_TSpec_CustomerDataIntegration.pdf',
+                'displayId': 'D-104',
                 'type': 'Technical Spec',
                 'size': '620 KB',
-                'lastUpdated': '2026-01-15'
+                'lastUpdated': '2026-01-15',
+                'version': 1,
+                'isLatest': True,
             },
             {
                 'id': 'doc-6',
+                'uuid': 'doc-6',
                 'name': 'FitGap_CoreFinance_Analysis.xlsx',
+                'title': 'FitGap_CoreFinance_Analysis.xlsx',
+                'displayId': 'D-105',
                 'type': 'Fit/Gap',
                 'size': '245 KB',
-                'lastUpdated': '2026-01-14'
+                'lastUpdated': '2026-01-14',
+                'version': 1,
+                'isLatest': True,
             }
         ]
 

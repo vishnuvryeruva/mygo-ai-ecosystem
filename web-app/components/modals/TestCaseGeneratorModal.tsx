@@ -8,6 +8,7 @@ import { useAutoResize } from '@/hooks/useAutoResize'
 
 interface TestCaseGeneratorModalProps {
   onClose: () => void
+  initialCode?: string
 }
 
 interface Source { id: string; name: string; type: string }
@@ -36,11 +37,23 @@ interface TestCase {
 
 type AlmUploadStep = 'idle' | 'form' | 'uploading' | 'success' | 'error'
 
-export default function TestCaseGeneratorModal({ onClose }: TestCaseGeneratorModalProps) {
-  const [code, setCode] = useState('')
+export default function TestCaseGeneratorModal({ onClose, initialCode }: TestCaseGeneratorModalProps) {
+  const [code, setCode] = useState(initialCode || '')
   const [testType, setTestType] = useState('manual')
   const codeRef = useAutoResize(code, 8)
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (initialCode) {
+      setCode(initialCode)
+    } else {
+      const stored = sessionStorage.getItem('testCaseContext')
+      if (stored) {
+        setCode(stored)
+        sessionStorage.removeItem('testCaseContext')
+      }
+    }
+  }, [initialCode])
   const [testCases, setTestCases] = useState('')
   const [testCasesStructured, setTestCasesStructured] = useState<TestCase[]>([])
   const [downloadLoading, setDownloadLoading] = useState(false)

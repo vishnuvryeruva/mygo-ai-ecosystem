@@ -281,13 +281,15 @@ class BTPService:
             
             # If we reached here, try a direct filter on sourcecodeSet as a last resort
             try:
-                print(f"[BTP] Last resort: filtering sourcecodeSet for Object='{object_key}'")
-                fallback_url = base_url + f"/sourcecodeSet?$filter=Object eq '{object_key}'"
+                print(f"[BTP] Last resort: filtering sourcecodeSet for ObjectName='{object_key}'")
+                safe_key = str(object_key).upper().replace("'", "''")
+                fallback_url = base_url + f"/sourcecodeSet?$filter=ObjectName eq '{safe_key}'&$top=5000"
                 resp = requests.get(fallback_url, headers=headers, timeout=15)
                 if resp.status_code == 200:
                     data = resp.json()
                     items = data.get('value', data.get('d', {}).get('results', []))
                     if isinstance(items, list) and len(items) > 0:
+                        items.sort(key=lambda i: int(i.get('LineNumber') or 0))
                         lines = [str(item.get('Line', item.get('line', ''))) for item in items]
                         return "\n".join(lines)
             except:

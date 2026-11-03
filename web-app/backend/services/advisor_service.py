@@ -82,7 +82,8 @@ Return ONLY valid JSON, no additional text."""
             system_prompt=system_prompt,
             temperature=0.2,
             max_tokens=3000,
-            provider=llm_provider
+            provider=llm_provider,
+            agent_name="Solution Advisor"
         )
         
         # Parse JSON response
@@ -152,6 +153,13 @@ Return ONLY valid JSON, no additional text."""
             # Step 3: Activate
             obj_uri = router._build_adt_uri(object_name, object_type)
             act_res = router._adt.activate_objects([obj_uri])
+            if not act_res.get("success"):
+                return {
+                    "success": False,
+                    "error": f"SAP activation failed: {act_res.get('error', 'Syntax or activation error')}",
+                    "activation_details": act_res,
+                    "object_name": object_name
+                }
 
             # Step 4: ATC post-write quality check
             atc_res = {}
@@ -173,14 +181,13 @@ Return ONLY valid JSON, no additional text."""
             }
 
         except Exception as e:
-            print(f"push_fixes_to_sap notice: {e}")
-
-        # Standalone AI fallback when ADT is offline
-        return {
-            "success": True,
-            "mode": "STANDALONE_AI",
-            "message": f"AI Code Fix ready for {object_name} (SAP ADT offline). Copy and paste into your SAP system.",
-            "transport_request": transport_request or "AI_SIMULATED_TR",
-            "code": code
-        }
+            print(f"push_fixes_to_sap error: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "success": False,
+                "error": str(e),
+                "message": f"Failed to push {object_name} to SAP: {str(e)}",
+                "object_name": object_name
+            }
 

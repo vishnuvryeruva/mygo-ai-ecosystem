@@ -67,7 +67,8 @@ Format the output in a clear, professional manner suitable for a Word document."
             system_prompt=system_prompt,
             temperature=0.4,
             max_tokens=3000,
-            provider=llm_provider
+            provider=llm_provider,
+            agent_name="Spec Assistant"
         )
         
         if format_type == 'docx':
@@ -133,7 +134,8 @@ Return ONLY valid JSON."""
             system_prompt=system_prompt,
             temperature=0.2,
             max_tokens=3500,
-            provider=llm_provider
+            provider=llm_provider,
+            agent_name="Spec Assistant"
         )
 
         try:
@@ -169,7 +171,8 @@ Return ONLY valid JSON."""
 
     def deploy_rap_artifacts_to_sap(self, artifacts: dict, app_name: str,
                                      package_name: str = "$TMP",
-                                     transport_request: str = "") -> dict:
+                                     transport_request: str = "",
+                                     sap_credentials: dict = None) -> dict:
         """
         Push all AI-generated RAP/CDS artifacts directly into SAP via ADTMCPRouter.
         Uses the create → write source → activate pipeline for each artifact.
@@ -181,6 +184,7 @@ Return ONLY valid JSON."""
             app_name:          Base name for the application (used to derive object names)
             package_name:      Target SAP package (default $TMP)
             transport_request: Optional transport request number
+            sap_credentials:   Optional ephemeral SAP credentials dict
 
         Returns:
             {
@@ -195,7 +199,10 @@ Return ONLY valid JSON."""
             }
         """
         from services.sap_adt_mcp_service import ADTMCPRouter
-        router = ADTMCPRouter.from_source_config()
+        if sap_credentials:
+            router = ADTMCPRouter.from_ephemeral_creds(sap_credentials)
+        else:
+            router = ADTMCPRouter.from_source_config()
 
         if not router.is_adt_available():
             return {

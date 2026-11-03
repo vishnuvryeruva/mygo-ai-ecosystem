@@ -41,49 +41,6 @@ export function clearStoredSapCredentials(): void {
     } catch (e) {}
 }
 
-export const SAP_SYSTEM_PRESETS = [
-    {
-        id: 'HMT',
-        name: 'HMT (S/4 2021)',
-        client: '300',
-        host: 'https://192.168.171.43:44300',
-        router: '/H/50.198.15.124/H/',
-        badge: 'HMT · 300'
-    },
-    {
-        id: 'HMF',
-        name: 'HMF (HANA Fun)',
-        client: '300',
-        host: 'https://mygohanafun.mygoconsulting.com:44300',
-        router: '/H/50.198.15.124/H/',
-        badge: 'HMF · 300'
-    },
-    {
-        id: 'HMP',
-        name: 'WebDisp (HMP)',
-        client: '300',
-        host: 'https://mygowebdisp.mygoconsulting.com:44320',
-        router: '',
-        badge: 'Port 44320'
-    },
-    {
-        id: 'MSP',
-        name: 'WebDisp (MSP)',
-        client: '300',
-        host: 'https://mygowebdisp.mygoconsulting.com:44300',
-        router: '',
-        badge: 'Port 44300'
-    },
-    {
-        id: 'CUSTOM',
-        name: 'Custom URL',
-        client: '300',
-        host: '',
-        router: '',
-        badge: 'Manual'
-    }
-]
-
 interface SapCredentialsModalProps {
     isOpen: boolean
     onClose: () => void
@@ -97,13 +54,12 @@ export default function SapCredentialsModal({
     onClose,
     onConfirm,
     toolName = 'SAP ADT Tool',
-    title = 'SAP ADT Authentication Required'
+    title = 'SAP ADT Authentication'
 }: SapCredentialsModalProps) {
-    const [selectedSystem, setSelectedSystem] = useState<string>('HMT')
-    const [sapHost, setSapHost] = useState('https://192.168.171.43:44300')
-    const [sapRouter, setSapRouter] = useState('/H/50.198.15.124/H/')
-    const [sapClient, setSapClient] = useState('300')
-    const [username, setUsername] = useState('TPALLAMREDDY')
+    const [sapHost, setSapHost] = useState('')
+    const [sapRouter, setSapRouter] = useState('')
+    const [sapClient, setSapClient] = useState('')
+    const [username, setUsername] = useState('')
     const [password, setPassword] = useState('')
     const [showPassword, setShowPassword] = useState(false)
     const [rememberSession, setRememberSession] = useState(true)
@@ -115,20 +71,9 @@ export default function SapCredentialsModal({
             if (saved) {
                 setSapHost(saved.sapHost || '')
                 setSapRouter(saved.sapRouter || '')
-                setSapClient(saved.sapClient || '300')
+                setSapClient(saved.sapClient || '')
                 setUsername(saved.username || '')
                 setPassword(saved.password || '')
-                if (saved.sapHost?.includes('171.43')) {
-                    setSelectedSystem('HMT')
-                } else if (saved.sapHost?.includes('mygohanafun') || saved.sapHost?.includes('171.41')) {
-                    setSelectedSystem('HMF')
-                } else if (saved.sapHost?.includes('44320')) {
-                    setSelectedSystem('HMP')
-                } else if (saved.sapHost?.includes('mygowebdisp')) {
-                    setSelectedSystem('MSP')
-                } else {
-                    setSelectedSystem('CUSTOM')
-                }
             } else {
                 // Fetch saved configuration from server
                 fetch('/api/sources')
@@ -153,22 +98,16 @@ export default function SapCredentialsModal({
         }
     }, [isOpen])
 
-    const handleSelectSystem = (presetId: string) => {
-        setSelectedSystem(presetId)
-        const preset = SAP_SYSTEM_PRESETS.find(p => p.id === presetId)
-        if (preset && preset.id !== 'CUSTOM') {
-            setSapHost(preset.host)
-            setSapRouter(preset.router)
-            setSapClient(preset.client)
-        }
-    }
-
     if (!isOpen) return null
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault()
         if (!sapHost.trim()) {
             setError('SAP Host URL is required.')
+            return
+        }
+        if (!sapClient.trim()) {
+            setError('SAP Client ID is required.')
             return
         }
         if (!username.trim() || !password.trim()) {
@@ -179,7 +118,7 @@ export default function SapCredentialsModal({
         const creds: SapCredentials = {
             sapHost: sapHost.trim(),
             sapRouter: sapRouter.trim(),
-            sapClient: sapClient.trim() || '300',
+            sapClient: sapClient.trim(),
             username: username.trim(),
             password: password
         }
@@ -234,35 +173,6 @@ export default function SapCredentialsModal({
                         </div>
                     )}
 
-                    {/* SAP System Preset Selector (HMT vs HMF vs WebDisp vs Custom) */}
-                    <div>
-                        <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider mb-2 block">
-                            Target SAP System
-                        </label>
-                        <div className="grid grid-cols-4 gap-2">
-                            {SAP_SYSTEM_PRESETS.map((preset) => {
-                                const isSelected = selectedSystem === preset.id
-                                return (
-                                    <button
-                                        key={preset.id}
-                                        type="button"
-                                        onClick={() => handleSelectSystem(preset.id)}
-                                        className={`px-2 py-2 rounded-xl border text-center transition-all flex flex-col items-center justify-center ${
-                                            isSelected
-                                                ? 'border-[#FF682C] bg-orange-50/80 text-[#FF682C] shadow-sm shadow-orange-100 font-black ring-1 ring-[#FF682C]'
-                                                : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 font-semibold'
-                                        }`}
-                                    >
-                                        <span className="text-xs font-bold">{preset.name}</span>
-                                        <span className={`text-[10px] mt-0.5 ${isSelected ? 'text-[#FF682C]' : 'text-slate-400'}`}>
-                                            {preset.badge}
-                                        </span>
-                                    </button>
-                                )
-                            })}
-                        </div>
-                    </div>
-
                     {/* SAP Host URL */}
                     <div>
                         <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider mb-1.5 block">
@@ -271,12 +181,9 @@ export default function SapCredentialsModal({
                         <input
                             type="text"
                             className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3.5 text-xs font-mono text-slate-800 outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-[#FF682C] transition-all"
-                            placeholder="https://192.168.171.43:44300"
+                            placeholder="https://your-sap-server:44300 or https://mygowebdisp.mygoconsulting.com:44330"
                             value={sapHost}
-                            onChange={e => {
-                                setSapHost(e.target.value)
-                                setSelectedSystem('CUSTOM')
-                            }}
+                            onChange={e => setSapHost(e.target.value)}
                         />
                     </div>
 
@@ -288,12 +195,12 @@ export default function SapCredentialsModal({
                         <input
                             type="text"
                             className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3.5 text-xs font-mono text-slate-800 outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-[#FF682C] transition-all"
-                            placeholder="/H/50.198.15.124/H/"
+                            placeholder="/H/router-host/H/ (leave blank if direct connection)"
                             value={sapRouter}
                             onChange={e => setSapRouter(e.target.value)}
                         />
                         <p className="text-[11px] text-slate-400 mt-1">
-                            Router gateway if connecting outside local network (e.g. /H/50.198.15.124/H/)
+                            Router gateway if connecting outside network (e.g. /H/50.198.15.124/H/)
                         </p>
                     </div>
 
@@ -306,7 +213,7 @@ export default function SapCredentialsModal({
                             <input
                                 type="text"
                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-[#FF682C] transition-all"
-                                placeholder="300"
+                                placeholder="e.g. 300, 100"
                                 value={sapClient}
                                 onChange={e => setSapClient(e.target.value)}
                             />

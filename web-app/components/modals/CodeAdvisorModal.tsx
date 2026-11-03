@@ -9,6 +9,7 @@ interface CodeAdvisorModalProps {
   onClose: () => void
   initialCode?: string
   initialCodeType?: string
+  initialProgramName?: string
 }
 
 interface Suggestion {
@@ -29,10 +30,10 @@ interface AntiPattern {
 
 import SapCredentialsModal, { SapCredentials, getStoredSapCredentials } from './SapCredentialsModal'
 
-export default function CodeAdvisorModal({ onClose, initialCode = '', initialCodeType = 'ABAP' }: CodeAdvisorModalProps) {
+export default function CodeAdvisorModal({ onClose, initialCode = '', initialCodeType = 'ABAP', initialProgramName = '' }: CodeAdvisorModalProps) {
   const [code, setCode] = useState(initialCode)
   const [codeType, setCodeType] = useState(initialCodeType)
-  const [programName, setProgramName] = useState('')
+  const [programName, setProgramName] = useState(initialProgramName)
   const codeRef = useAutoResize(code, 12)
   const [analysis, setAnalysis] = useState<{
     suggestions: Suggestion[]
@@ -62,7 +63,8 @@ export default function CodeAdvisorModal({ onClose, initialCode = '', initialCod
         try {
           const response = await axios.post('/api/analyze-code', {
             code: initialCode,
-            code_type: initialCodeType
+            code_type: initialCodeType,
+            program_name: initialProgramName
           }, getAuthConfig())
           setAnalysis(response.data)
         } catch (error) {
@@ -105,34 +107,40 @@ export default function CodeAdvisorModal({ onClose, initialCode = '', initialCod
   const [pushStatus, setPushStatus] = useState<string | null>(null)
 
   const handlePushToS4 = async (overrideCreds?: SapCredentials) => {
-    if (!programName && !code) {
-      alert('Please provide an Object/Program Name or Code to push.')
+    // Never write to SAP under a made-up object name
+    if (!programName.trim() || !code.trim()) {
+      alert('Please provide the SAP Object/Program Name and the code to push.')
       return
     }
 
     const credentialsToUse = overrideCreds || sapCreds || getStoredSapCredentials()
-    if (!credentialsToUse) {
-      setShowSapModal(true)
-      return
-    }
 
     setIsPushing(true)
     setPushStatus(null)
     try {
       const response = await axios.post('/api/sap/mcp/push-fix', {
-        object_name: programName || 'ZCL_MY_FIXED_CLASS',
+        object_name: programName.trim().toUpperCase(),
         code: code,
-        sap_credentials: credentialsToUse
+        sap_credentials: credentialsToUse || undefined
       }, getAuthConfig())
       if (response.data.success) {
         setPushed(true)
         setPushStatus(response.data.message || 'Successfully pushed to SAP system via ADT MCP!')
       } else {
-        alert(response.data.error || 'Failed to push to SAP system')
+        if (response.data.error && response.data.error.includes('not configured')) {
+          setShowSapModal(true)
+        } else {
+          alert(response.data.error || 'Failed to push to SAP system')
+        }
       }
     } catch (err: any) {
       console.error('Error pushing fixes to SAP:', err)
-      alert(err?.response?.data?.error || 'Failed to push fixes to SAP via ADT MCP.')
+      const msg = err?.response?.data?.error || err.message || 'Failed to push fixes to SAP.'
+      if (msg.includes('not configured') || msg.includes('credentials')) {
+        setShowSapModal(true)
+      } else {
+        alert(msg)
+      }
     } finally {
       setIsPushing(false)
     }

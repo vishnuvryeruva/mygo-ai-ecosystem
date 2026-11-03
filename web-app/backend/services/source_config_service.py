@@ -68,6 +68,7 @@ def list_sources() -> List[Dict]:
     for source in sources:
         if 'config' in source:
             source['config'].pop('clientSecret', None)
+            source['config'].pop('password', None)
     
     return sources
 
@@ -119,21 +120,39 @@ def create_source(data: Dict) -> Dict:
     """
     sources = _load_sources()
     
+    source_name = data.get('name') or data.get('sourceName') or 'New Source'
+    source_type = data.get('type') or data.get('sourceType') or 'CALM'
+    
+    # Extract config with support for multiple source types (CALM, BTP, SAP_ADT, SAP_ADT_MCP)
+    config = {
+        'apiEndpoint': data.get('apiEndpoint') or data.get('sapHost') or '',
+        'sapHost': data.get('sapHost') or data.get('apiEndpoint') or '',
+        'tokenUrl': data.get('tokenUrl', ''),
+        'clientId': data.get('clientId') or data.get('username') or '',
+        'username': data.get('username') or data.get('clientId') or '',
+        'clientSecret': data.get('clientSecret') or data.get('password') or '',
+        'password': data.get('password') or data.get('clientSecret') or '',
+        'authType': data.get('authType', 'OAuth 2.0'),
+        'sapClient': data.get('sapClient', '300' if 'ADT' in source_type.upper() else '100'),
+        'sapRouter': data.get('sapRouter') or data.get('saprouterString') or '',
+        'saprouterString': data.get('saprouterString') or data.get('sapRouter') or '',
+        'systemId': data.get('systemId', ''),
+        'instanceNo': data.get('instanceNo', ''),
+        'httpsPort': data.get('httpsPort', ''),
+        'appServer': data.get('appServer', ''),
+        'destination': data.get('destination', ''),
+        'mode': data.get('mode', 'DIRECT_SAP' if 'ADT' in source_type.upper() else 'ODATA'),
+        'description': data.get('description', '')
+    }
+    
     new_source = {
         'id': str(uuid.uuid4()),
-        'name': data.get('name', 'New Source'),
-        'type': data.get('type', 'CALM'),
+        'name': source_name,
+        'type': source_type,
         'status': 'disconnected',
         'lastSync': None,
         'createdAt': datetime.now().isoformat(),
-        'config': {
-            'apiEndpoint': data.get('apiEndpoint', ''),
-            'tokenUrl': data.get('tokenUrl', ''),
-            'clientId': data.get('clientId', ''),
-            'clientSecret': data.get('clientSecret', ''),
-            'authType': data.get('authType', 'OAuth 2.0'),
-            'sapClient': data.get('sapClient', '100')
-        }
+        'config': config
     }
     
     sources.append(new_source)
@@ -141,7 +160,7 @@ def create_source(data: Dict) -> Dict:
     
     # Remove sensitive data from response
     response = new_source.copy()
-    response['config'] = {k: v for k, v in new_source['config'].items() if k != 'clientSecret'}
+    response['config'] = {k: v for k, v in new_source['config'].items() if k not in ('clientSecret', 'password')}
     
     return response
 
@@ -162,28 +181,46 @@ def update_source(source_id: str, data: Dict) -> Optional[Dict]:
     for i, source in enumerate(sources):
         if source.get('id') == source_id:
             # Update fields
-            source['name'] = data.get('name', source['name'])
-            source['type'] = data.get('type', source['type'])
+            if data.get('name') or data.get('sourceName'):
+                source['name'] = data.get('name') or data.get('sourceName')
+            if data.get('type') or data.get('sourceType'):
+                source['type'] = data.get('type') or data.get('sourceType')
             
             if 'config' not in source:
                 source['config'] = {}
             
-            source['config']['apiEndpoint'] = data.get('apiEndpoint', source['config'].get('apiEndpoint', ''))
-            source['config']['tokenUrl'] = data.get('tokenUrl', source['config'].get('tokenUrl', ''))
-            source['config']['clientId'] = data.get('clientId', source['config'].get('clientId', ''))
-            source['config']['authType'] = data.get('authType', source['config'].get('authType', 'OAuth 2.0'))
-            source['config']['sapClient'] = data.get('sapClient', source['config'].get('sapClient', '100'))
+            # Common updates
+            for key in ('apiEndpoint', 'sapHost', 'tokenUrl', 'clientId', 'username',
+                        'authType', 'sapClient', 'sapRouter', 'saprouterString',
+                        'systemId', 'instanceNo', 'httpsPort', 'appServer',
+                        'destination', 'mode', 'description'):
+                if key in data and data[key] is not None:
+                    source['config'][key] = data[key]
             
-            # Only update secret if provided
-            if data.get('clientSecret'):
-                source['config']['clientSecret'] = data['clientSecret']
+            # If sapHost or apiEndpoint updated, sync both
+            if data.get('apiEndpoint') and not data.get('sapHost'):
+                source['config']['sapHost'] = data['apiEndpoint']
+            elif data.get('sapHost') and not data.get('apiEndpoint'):
+                source['config']['apiEndpoint'] = data['sapHost']
+                
+            # If username or clientId updated, sync both
+            if data.get('username') and not data.get('clientId'):
+                source['config']['clientId'] = data['username']
+            elif data.get('clientId') and not data.get('username'):
+                source['config']['username'] = data['clientId']
+            
+            # Only update secret/password if provided with a non-empty value
+            secret_val = data.get('clientSecret') or data.get('password')
+            if secret_val:
+                source['config']['clientSecret'] = secret_val
+                source['config']['password'] = secret_val
             
             sources[i] = source
             _save_sources(sources)
             
             # Remove sensitive data from response
             response = source.copy()
-            response['config'] = {k: v for k, v in source['config'].items() if k != 'clientSecret'}
+            response['config'] = {k: v for k, v in source['config'].items() if k not in ('clientSecret', 'password')}
             return response
     
     return None

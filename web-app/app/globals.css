@@ -423,7 +423,7 @@ body {
    ============================================ */
 
 .doc-hub-page {
-  padding: 32px 40px;
+  padding: 24px 40px 32px 40px;
   animation: fadeInContent 0.4s ease;
 }
 

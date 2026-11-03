@@ -111,6 +111,7 @@ interface ConnectionForm {
     apiEndpoint: string
     tokenUrl: string
     sapClient?: string
+    sapRouter?: string
 }
 
 const emptyConnection: ConnectionForm = {
@@ -121,7 +122,8 @@ const emptyConnection: ConnectionForm = {
     clientSecret: '',
     apiEndpoint: '',
     tokenUrl: '',
-    sapClient: '300',
+    sapClient: '',
+    sapRouter: '',
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -188,15 +190,25 @@ export default function SettingsPage() {
     const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
 
     /* SAP ADT MCP Credentials State */
+    const [mcpConnectionMode, setMcpConnectionMode] = useState<'DIRECT' | 'BTP'>('BTP')
     const [mcpDescription, setMcpDescription] = useState('')
     const [mcpSystemId, setMcpSystemId] = useState('')
     const [mcpAppServer, setMcpAppServer] = useState('')
     const [mcpInstanceNo, setMcpInstanceNo] = useState('')
     const [mcpHttpsPort, setMcpHttpsPort] = useState('')
     const [mcpSaprouterString, setMcpSaprouterString] = useState('')
-    const [mcpSapClient, setMcpSapClient] = useState('')
+    const [mcpSapClient, setMcpSapClient] = useState('300')
     const [mcpUsername, setMcpUsername] = useState('')
     const [mcpPassword, setMcpPassword] = useState('')
+
+    /* BTP Cloud Connector / Destination Mode State */
+    const [btpDestination, setBtpDestination] = useState('S4H_HMF_ADT')
+    const [btpApiEndpoint, setBtpApiEndpoint] = useState('')
+    const [btpTokenUrl, setBtpTokenUrl] = useState('')
+    const [btpClientId, setBtpClientId] = useState('')
+    const [btpClientSecret, setBtpClientSecret] = useState('')
+    const [btpShowSecret, setBtpShowSecret] = useState(false)
+    const [btpSapClient, setBtpSapClient] = useState('300')
 
     const [mcpShowPassword, setMcpShowPassword] = useState(false)
     const [mcpDestination, setMcpDestination] = useState('')
@@ -300,9 +312,15 @@ export default function SettingsPage() {
         if (!s.startsWith('http://') && !s.startsWith('https://')) {
             s = `https://${s}`
         }
-        if (!s.includes(':', 6)) {
-            const p = portOverride.trim() || (inst.trim() ? `443${inst.trim()}` : '44300')
-            s = `${s}:${p}`
+        const withoutProto = s.replace(/^https?:\/\//, '')
+        if (withoutProto.includes(':')) {
+            return s
+        }
+        if (portOverride.trim()) {
+            return `${s}:${portOverride.trim()}`
+        }
+        if (inst.trim()) {
+            return `${s}:443${inst.trim()}`
         }
         return s
     }
@@ -318,69 +336,38 @@ export default function SettingsPage() {
                 const sourceDetailRes = await axios.get(`/api/sources/${mcpSource.id}`, { headers })
                 const detail = sourceDetailRes.data || {}
                 const cfg = detail.config || {}
+                
+                // Set Connection Mode
+                if (cfg.connectionMode === 'BTP' || cfg.mode === 'BTP_DESTINATION' || (cfg.tokenUrl && cfg.clientId && !cfg.appServer)) {
+                    setMcpConnectionMode('BTP')
+                } else if (cfg.connectionMode === 'DIRECT' || cfg.appServer) {
+                    setMcpConnectionMode('DIRECT')
+                }
+
                 if (cfg.description) setMcpDescription(cfg.description)
                 if (cfg.systemId) setMcpSystemId(cfg.systemId)
                 if (cfg.appServer) setMcpAppServer(cfg.appServer)
                 if (cfg.instanceNo) setMcpInstanceNo(cfg.instanceNo)
                 if (cfg.httpsPort) setMcpHttpsPort(cfg.httpsPort)
                 if (cfg.saprouterString || cfg.routerString) setMcpSaprouterString(cfg.saprouterString || cfg.routerString)
-                if (cfg.sapClient) setMcpSapClient(cfg.sapClient)
+                if (cfg.sapClient) {
+                    setMcpSapClient(cfg.sapClient)
+                    setBtpSapClient(cfg.sapClient)
+                }
                 if (cfg.username) setMcpUsername(cfg.username)
                 if (cfg.apiEndpoint && !cfg.appServer) setMcpAppServer(cfg.apiEndpoint)
-                if (cfg.destination) setMcpDestination(cfg.destination)
+                if (cfg.destination) {
+                    setMcpDestination(cfg.destination)
+                    setBtpDestination(cfg.destination)
+                }
+                // BTP-specific configuration
+                if (cfg.apiEndpoint) setBtpApiEndpoint(cfg.apiEndpoint)
+                if (cfg.tokenUrl) setBtpTokenUrl(cfg.tokenUrl)
+                if (cfg.clientId) setBtpClientId(cfg.clientId)
+                if (cfg.clientSecret) setBtpClientSecret(cfg.clientSecret)
             }
         } catch (err) {
             console.error('Failed to load MCP settings:', err)
-        }
-    }
-
-
-    const handleApplyPreset = (preset: 'HMT' | 'HMF' | 'HMP' | 'MSP' | 'HMD' | 'CUSTOM') => {
-        if (preset === 'HMT') {
-            // HMT: VPN-only private system. Must route through SAProuter.
-            setMcpDescription('HMT S4 HANA 2021 (VPN)')
-            setMcpSystemId('HMT')
-            setMcpAppServer('192.168.171.43')
-            setMcpInstanceNo('00')
-            setMcpHttpsPort('44300')
-            setMcpSaprouterString('/H/50.198.15.124/H/')
-            setMcpSapClient('300')
-        } else if (preset === 'HMF') {
-            // HMF: Port 44330 on Web Dispatcher (confirmed via port scan)
-            setMcpDescription('HMF S4 HANA Fun (Public)')
-            setMcpSystemId('HMF')
-            setMcpAppServer('mygowebdisp.mygoconsulting.com')
-            setMcpInstanceNo('30')
-            setMcpHttpsPort('44330')
-            setMcpSaprouterString('')
-            setMcpSapClient('300')
-        } else if (preset === 'HMP') {
-            // HMP: Port 44320 on Web Dispatcher (confirmed via port scan)
-            setMcpDescription('HMP S4 HANA (Public)')
-            setMcpSystemId('HMP')
-            setMcpAppServer('mygowebdisp.mygoconsulting.com')
-            setMcpInstanceNo('20')
-            setMcpHttpsPort('44320')
-            setMcpSaprouterString('')
-            setMcpSapClient('300')
-        } else if (preset === 'MSP') {
-            // MSP: Port 44300 on Web Dispatcher (confirmed via port scan)
-            setMcpDescription('MSP S4 HANA (Public)')
-            setMcpSystemId('MSP')
-            setMcpAppServer('mygowebdisp.mygoconsulting.com')
-            setMcpInstanceNo('00')
-            setMcpHttpsPort('44300')
-            setMcpSaprouterString('')
-            setMcpSapClient('300')
-        } else if (preset === 'HMD') {
-            // HMD: Port 44350 on Web Dispatcher (confirmed via port scan)
-            setMcpDescription('HMD S4 HANA Dev (Public)')
-            setMcpSystemId('HMD')
-            setMcpAppServer('mygowebdisp.mygoconsulting.com')
-            setMcpInstanceNo('50')
-            setMcpHttpsPort('44350')
-            setMcpSaprouterString('')
-            setMcpSapClient('300')
         }
     }
 
@@ -390,18 +377,37 @@ export default function SettingsPage() {
         try {
             const token = localStorage.getItem('mygo-token') || localStorage.getItem('token')
             const headers = token ? { Authorization: `Bearer ${token}` } : {}
-            const effectiveUrl = computeEffectiveSapUrl(mcpAppServer, mcpInstanceNo, mcpHttpsPort)
             
-            const payload = {
-                mode: 'DIRECT_SAP',
-                sapHost: effectiveUrl,
-                sapClient: mcpSapClient,
-                sapRouter: mcpSaprouterString,
-                systemId: mcpSystemId,
-                instanceNo: mcpInstanceNo,
-                username: mcpUsername,
-                password: mcpPassword,
-                destination: mcpDestination
+            let payload: any
+            let targetEndpointDisplay = ''
+            
+            if (mcpConnectionMode === 'BTP') {
+                targetEndpointDisplay = btpApiEndpoint || btpTokenUrl
+                payload = {
+                    mode: 'BTP',
+                    connectionMode: 'BTP',
+                    destination: btpDestination || 'S4H_HMF_ADT',
+                    apiEndpoint: btpApiEndpoint,
+                    tokenUrl: btpTokenUrl,
+                    clientId: btpClientId,
+                    clientSecret: btpClientSecret,
+                    sapClient: btpSapClient || '300'
+                }
+            } else {
+                const effectiveUrl = computeEffectiveSapUrl(mcpAppServer, mcpInstanceNo, mcpHttpsPort)
+                targetEndpointDisplay = effectiveUrl
+                payload = {
+                    mode: 'DIRECT_SAP',
+                    connectionMode: 'DIRECT',
+                    sapHost: effectiveUrl,
+                    sapClient: mcpSapClient,
+                    sapRouter: mcpSaprouterString,
+                    systemId: mcpSystemId,
+                    instanceNo: mcpInstanceNo,
+                    username: mcpUsername,
+                    password: mcpPassword,
+                    destination: mcpDestination
+                }
             }
             
             const res = await axios.post('/api/sap/mcp/test-connection', payload, { headers })
@@ -413,21 +419,21 @@ export default function SettingsPage() {
                     : []
                 setMcpTestResult({
                     success: true,
-                    message: res.data.message || `Successfully authenticated with SAP ${mcpSystemId}!`,
+                    message: res.data.message || (mcpConnectionMode === 'BTP' ? `Successfully connected via BTP Destination ${btpDestination}!` : `Successfully authenticated with SAP ${mcpSystemId}!`),
                     destinations: formattedDests,
-                    endpoint: res.data.endpoint || effectiveUrl
+                    endpoint: res.data.endpoint || targetEndpointDisplay
                 })
             } else {
                 setMcpTestResult({
                     success: false,
-                    message: res.data.error || 'Could not authenticate with SAP ADT'
+                    message: res.data.error || 'Could not authenticate with SAP'
                 })
             }
         } catch (err: any) {
             console.error('Error testing connection:', err)
             setMcpTestResult({
                 success: false,
-                message: err?.response?.data?.error || err.message || 'Could not reach SAP ADT System'
+                message: err?.response?.data?.error || err.message || 'Could not reach SAP System'
             })
         } finally {
             setMcpTesting(false)
@@ -446,26 +452,56 @@ export default function SettingsPage() {
             const sourceList: Source[] = res.data.sources || []
             const existingMcp = sourceList.find(s => s.type === 'SAP_ADT_MCP' || s.type === 'SAP_ADT')
             
-            const effectiveUrl = computeEffectiveSapUrl(mcpAppServer, mcpInstanceNo, mcpHttpsPort)
-
-            // NOTE: Password is NEVER saved to permanent database
-            const payload = {
-                sourceType: 'SAP_ADT_MCP',
-                sourceName: mcpDescription || 'SAP ADT Direct Connection',
-                authType: 'Basic Auth',
-                mode: 'DIRECT_SAP',
-                description: mcpDescription,
-                systemId: mcpSystemId,
-                appServer: mcpAppServer,
-                instanceNo: mcpInstanceNo,
-                httpsPort: mcpHttpsPort,
-                saprouterString: mcpSaprouterString,
-                sapHost: effectiveUrl,
-                sapClient: mcpSapClient,
-                username: mcpUsername,
-                password: '', // ZERO STORAGE GUARANTEE: Never store password in DB
-                apiEndpoint: effectiveUrl,
-                destination: mcpDestination
+            let payload: any
+            
+            if (mcpConnectionMode === 'BTP') {
+                payload = {
+                    sourceType: 'SAP_ADT_MCP',
+                    sourceName: mcpDescription || `SAP BTP (${btpDestination || 'S4H_HMF_ADT'})`,
+                    authType: 'OAuth 2.0',
+                    mode: 'BTP_DESTINATION',
+                    connectionMode: 'BTP',
+                    description: mcpDescription || `SAP S/4HANA via BTP Destination ${btpDestination}`,
+                    destination: btpDestination || 'S4H_HMF_ADT',
+                    apiEndpoint: btpApiEndpoint,
+                    tokenUrl: btpTokenUrl,
+                    clientId: btpClientId,
+                    clientSecret: btpClientSecret,
+                    sapClient: btpSapClient || '300',
+                    systemId: mcpSystemId || 'HMF'
+                }
+            } else {
+                const effectiveUrl = computeEffectiveSapUrl(mcpAppServer, mcpInstanceNo, mcpHttpsPort)
+                payload = {
+                    sourceType: 'SAP_ADT_MCP',
+                    sourceName: mcpDescription || 'SAP ADT Direct Connection',
+                    authType: 'Basic Auth',
+                    mode: 'DIRECT_SAP',
+                    connectionMode: 'DIRECT',
+                    description: mcpDescription,
+                    systemId: mcpSystemId,
+                    appServer: mcpAppServer,
+                    instanceNo: mcpInstanceNo,
+                    httpsPort: mcpHttpsPort,
+                    saprouterString: mcpSaprouterString,
+                    sapHost: effectiveUrl,
+                    sapClient: mcpSapClient,
+                    username: mcpUsername,
+                    password: mcpPassword || '',
+                    apiEndpoint: effectiveUrl,
+                    destination: mcpDestination
+                }
+                
+                // Cache password in sessionStorage for current browser session if direct mode
+                if (mcpPassword && typeof window !== 'undefined') {
+                    sessionStorage.setItem('mygo_ephemeral_sap_creds', JSON.stringify({
+                        sapHost: effectiveUrl,
+                        sapRouter: mcpSaprouterString,
+                        sapClient: mcpSapClient,
+                        username: mcpUsername,
+                        password: mcpPassword
+                    }))
+                }
             }
             
             if (existingMcp) {
@@ -474,18 +510,7 @@ export default function SettingsPage() {
                 await axios.post('/api/sources', payload, { headers })
             }
 
-            // Cache password in sessionStorage for current browser session
-            if (mcpPassword && typeof window !== 'undefined') {
-                sessionStorage.setItem('mygo_ephemeral_sap_creds', JSON.stringify({
-                    sapHost: effectiveUrl,
-                    sapRouter: mcpSaprouterString,
-                    sapClient: mcpSapClient,
-                    username: mcpUsername,
-                    password: mcpPassword
-                }))
-            }
-            
-            setMcpSaveMessage('Configuration saved!')
+            setMcpSaveMessage('Configuration saved successfully!')
             setTimeout(() => setMcpSaveMessage(''), 4000)
         } catch (err: any) {
             console.error('Error saving MCP settings:', err)
@@ -636,8 +661,20 @@ export default function SettingsPage() {
                 tokenUrl: connectionForm.tokenUrl,
                 clientId: connectionForm.clientId,
                 clientSecret: connectionForm.clientSecret,
-                sapClient: connectionForm.sapClient
+                sapClient: connectionForm.sapClient,
+                sapRouter: connectionForm.sapRouter,
+                saprouterString: connectionForm.sapRouter
             })
+
+            if ((connectionForm.sourceType === 'SAP_ADT' || connectionForm.sourceType === 'SAP_ADT_MCP') && typeof window !== 'undefined') {
+                sessionStorage.setItem('mygo_ephemeral_sap_creds', JSON.stringify({
+                    sapHost: connectionForm.apiEndpoint,
+                    sapClient: connectionForm.sapClient || '',
+                    sapRouter: connectionForm.sapRouter || '',
+                    username: connectionForm.clientId,
+                    password: connectionForm.clientSecret
+                }))
+            }
 
             await refreshSources()
             setConnectionForm(emptyConnection)
@@ -1142,75 +1179,11 @@ export default function SettingsPage() {
                                                 <option value="Basic Authentication">Basic Authentication</option>
                                             </select>
                                         </div>
-                                        {connectionForm.sourceType === 'SAP_ADT' && (
-                                            <div className="settings-form-group">
-                                                <label>SAP System Preset</label>
-                                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 4 }}>
-                                                    <button
-                                                        type="button"
-                                                        className="btn btn-secondary"
-                                                        style={{
-                                                            fontSize: 11,
-                                                            padding: '6px 8px',
-                                                            fontWeight: 600,
-                                                            border: connectionForm.sapClient === '300' && connectionForm.apiEndpoint.includes('171.43') ? '2px solid #FF682C' : '1px solid var(--glass-border)',
-                                                            background: connectionForm.sapClient === '300' && connectionForm.apiEndpoint.includes('171.43') ? 'rgba(255,104,44,0.1)' : undefined
-                                                        }}
-                                                        onClick={() => setConnectionForm({
-                                                            ...connectionForm,
-                                                            sourceName: 'SAP S/4HANA (HMT)',
-                                                            apiEndpoint: 'https://192.168.171.43:44300',
-                                                            sapClient: '300'
-                                                        })}
-                                                    >
-                                                        ⚡ HMT (Client 300)
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        className="btn btn-secondary"
-                                                        style={{
-                                                            fontSize: 11,
-                                                            padding: '6px 8px',
-                                                            fontWeight: 600,
-                                                            border: connectionForm.sapClient === '300' && connectionForm.apiEndpoint.includes('mygohanafun') ? '2px solid #FF682C' : '1px solid var(--glass-border)',
-                                                            background: connectionForm.sapClient === '300' && connectionForm.apiEndpoint.includes('mygohanafun') ? 'rgba(255,104,44,0.1)' : undefined
-                                                        }}
-                                                        onClick={() => setConnectionForm({
-                                                            ...connectionForm,
-                                                            sourceName: 'SAP HANA Fun (HMF)',
-                                                            apiEndpoint: 'https://mygohanafun.mygoconsulting.com:44300',
-                                                            sapClient: '300'
-                                                        })}
-                                                    >
-                                                        ⚡ HMF (Client 300)
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        className="btn btn-secondary"
-                                                        style={{
-                                                            fontSize: 11,
-                                                            padding: '6px 8px',
-                                                            fontWeight: 600,
-                                                            border: connectionForm.apiEndpoint.includes('mygowebdisp') ? '2px solid #FF682C' : '1px solid var(--glass-border)',
-                                                            background: connectionForm.apiEndpoint.includes('mygowebdisp') ? 'rgba(255,104,44,0.1)' : undefined
-                                                        }}
-                                                        onClick={() => setConnectionForm({
-                                                            ...connectionForm,
-                                                            sourceName: 'SAP Web Dispatcher (MSP)',
-                                                            apiEndpoint: 'https://mygowebdisp.mygoconsulting.com:44300',
-                                                            sapClient: '300'
-                                                        })}
-                                                    >
-                                                        🌐 WebDisp (MSP)
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        )}
                                         <div className="settings-form-group">
-                                            <label>{connectionForm.sourceType === 'SAP_ADT' ? 'SAP ADT Endpoint Host URL *' : 'API Endpoint URL *'}</label>
+                                            <label>{connectionForm.sourceType === 'SAP_ADT' ? 'SAP ADT Host / Server URL *' : 'API Endpoint URL *'}</label>
                                             <input
                                                 type="text"
-                                                placeholder={connectionForm.sourceType === 'SAP_ADT' ? "https://192.168.171.43:44300" : "https://<tenant>.alm.cloud.sap"}
+                                                placeholder={connectionForm.sourceType === 'SAP_ADT' ? "e.g. https://your-sap-server:44300 or https://mygowebdisp.mygoconsulting.com:44330" : "https://<tenant>.alm.cloud.sap"}
                                                 value={connectionForm.apiEndpoint}
                                                 onChange={e => setConnectionForm({ ...connectionForm, apiEndpoint: e.target.value })}
                                             />
@@ -1227,15 +1200,26 @@ export default function SettingsPage() {
                                             </div>
                                         )}
                                         {connectionForm.sourceType === 'SAP_ADT' && (
-                                            <div className="settings-form-group">
-                                                <label>SAP Client ID *</label>
-                                                <input
-                                                    type="text"
-                                                    placeholder="e.g. 300"
-                                                    value={connectionForm.sapClient || ''}
-                                                    onChange={e => setConnectionForm({ ...connectionForm, sapClient: e.target.value })}
-                                                />
-                                            </div>
+                                            <>
+                                                <div className="settings-form-group">
+                                                    <label>SAP Client ID *</label>
+                                                    <input
+                                                        type="text"
+                                                        placeholder="e.g. 300, 100"
+                                                        value={connectionForm.sapClient || ''}
+                                                        onChange={e => setConnectionForm({ ...connectionForm, sapClient: e.target.value })}
+                                                    />
+                                                </div>
+                                                <div className="settings-form-group">
+                                                    <label>SAProuter String (Optional)</label>
+                                                    <input
+                                                        type="text"
+                                                        placeholder="e.g. /H/router-host/H/ (leave blank if direct connection)"
+                                                        value={connectionForm.sapRouter || ''}
+                                                        onChange={e => setConnectionForm({ ...connectionForm, sapRouter: e.target.value })}
+                                                    />
+                                                </div>
+                                            </>
                                         )}
                                         <div className="settings-form-group">
                                             <label>
@@ -1539,176 +1523,471 @@ export default function SettingsPage() {
                             </div>
                         </div>
 
-                        {/* ── System Connection Parameters & Logon Grid */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                            
-                            {/* Step 1: System Parameters */}
-                            <div style={{
-                                background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14,
-                                overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column'
-                            }}>
+                        {/* ── Connection Mode Selector ── */}
+                        <div style={{
+                            background: '#fff',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: 14,
+                            padding: '6px',
+                            display: 'flex',
+                            gap: 6,
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.02)'
+                        }}>
+                            <button
+                                type="button"
+                                onClick={() => { setMcpConnectionMode('BTP'); setMcpTestResult(null); }}
+                                style={{
+                                    flex: 1,
+                                    padding: '12px 16px',
+                                    borderRadius: 10,
+                                    border: mcpConnectionMode === 'BTP' ? '1.5px solid #FF682C' : '1px solid transparent',
+                                    background: mcpConnectionMode === 'BTP' ? 'linear-gradient(135deg, #fff7f3 0%, #ffedd5 100%)' : 'transparent',
+                                    color: mcpConnectionMode === 'BTP' ? '#c2410c' : '#64748b',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: 10,
+                                    transition: 'all 0.2s ease'
+                                }}
+                            >
+                                <span style={{ fontSize: 18 }}>☁️</span>
+                                <div style={{ textAlign: 'left' }}>
+                                    <div style={{ fontSize: 13, fontWeight: 700 }}>SAP BTP Cloud Connector (Destination)</div>
+                                    <div style={{ fontSize: 11, opacity: 0.85 }}>Zero VPN • Secure BTP Tunnel • S/4HANA ADT & OData</div>
+                                </div>
+                                {mcpConnectionMode === 'BTP' && (
+                                    <span style={{ marginLeft: 'auto', fontSize: 10, background: '#FF682C', color: '#fff', padding: '3px 8px', borderRadius: 12, fontWeight: 700, letterSpacing: '0.04em' }}>
+                                        RECOMMENDED
+                                    </span>
+                                )}
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => { setMcpConnectionMode('DIRECT'); setMcpTestResult(null); }}
+                                style={{
+                                    flex: 1,
+                                    padding: '12px 16px',
+                                    borderRadius: 10,
+                                    border: mcpConnectionMode === 'DIRECT' ? '1.5px solid #FF682C' : '1px solid transparent',
+                                    background: mcpConnectionMode === 'DIRECT' ? 'linear-gradient(135deg, #fff7f3 0%, #ffedd5 100%)' : 'transparent',
+                                    color: mcpConnectionMode === 'DIRECT' ? '#c2410c' : '#64748b',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: 10,
+                                    transition: 'all 0.2s ease'
+                                }}
+                            >
+                                <span style={{ fontSize: 18 }}>🏢</span>
+                                <div style={{ textAlign: 'left' }}>
+                                    <div style={{ fontSize: 13, fontWeight: 700 }}>Direct SAP / SAProuter</div>
+                                    <div style={{ fontSize: 11, opacity: 0.85 }}>On-premise IP / Port or corporate SAProuter string</div>
+                                </div>
+                                {mcpConnectionMode === 'DIRECT' && (
+                                    <span style={{ marginLeft: 'auto', fontSize: 10, background: '#64748b', color: '#fff', padding: '3px 8px', borderRadius: 12, fontWeight: 700, letterSpacing: '0.04em' }}>
+                                        ACTIVE
+                                    </span>
+                                )}
+                            </button>
+                        </div>
+
+                        {/* ── BTP Cloud Connector Mode ── */}
+                        {mcpConnectionMode === 'BTP' && (
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                                {/* Panel 1: BTP Destination & Target */}
                                 <div style={{
-                                    padding: '14px 18px',
-                                    background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
-                                    borderBottom: '1px solid #e2e8f0',
-                                    display: 'flex', alignItems: 'center', gap: 10
+                                    background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14,
+                                    overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column'
                                 }}>
                                     <div style={{
-                                        width: 26, height: 26, borderRadius: 6, background: '#FF682C', color: '#fff',
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        fontSize: 12, fontWeight: 800
-                                    }}>1</div>
-                                    <span style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>System Parameters</span>
-                                </div>
-                                <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
-                                    <div>
-                                        <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>Description</label>
-                                        <input type="text" value={mcpDescription}
-                                            onChange={e => setMcpDescription(e.target.value)}
-                                            style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
-                                        />
-                                    </div>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                                        <div>
-                                            <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>System ID</label>
-                                            <input type="text" value={mcpSystemId}
-                                                onChange={e => setMcpSystemId(e.target.value.toUpperCase())}
-                                                maxLength={3}
-                                                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
-                                            />
+                                        padding: '14px 18px',
+                                        background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
+                                        borderBottom: '1px solid #e2e8f0',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+                                    }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                            <div style={{
+                                                width: 26, height: 26, borderRadius: 6, background: '#FF682C', color: '#fff',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                fontSize: 12, fontWeight: 800
+                                            }}>1</div>
+                                            <span style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>BTP Destination & Target</span>
                                         </div>
-                                        <div>
-                                            <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>Instance No.</label>
-                                            <input type="text" value={mcpInstanceNo}
-                                                onChange={e => {
-                                                    const val = e.target.value.replace(/\D/g, '').slice(0, 2)
-                                                    setMcpInstanceNo(val)
-                                                    if (val.length === 2) setMcpHttpsPort(`443${val}`)
-                                                }}
-                                                maxLength={2}
-                                                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
-                                            />
-                                        </div>
+                                        <span style={{ fontSize: 10, fontWeight: 700, color: '#FF682C', background: 'rgba(255,104,44,0.08)', padding: '3px 8px', borderRadius: 12, border: '1px solid rgba(255,104,44,0.2)' }}>
+                                            ON-PREMISE BRIDGE
+                                        </span>
                                     </div>
-                                    <div>
-                                        <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>Application Server (Host / IP)</label>
-                                        <input type="text" value={mcpAppServer}
-                                            onChange={e => setMcpAppServer(e.target.value)}
-                                            style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
-                                        />
-                                    </div>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                                    <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
                                         <div>
-                                            <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>Client</label>
-                                            <input type="text" value={mcpSapClient}
-                                                onChange={e => setMcpSapClient(e.target.value)}
-                                                maxLength={3}
-                                                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                                <label style={{ fontSize: 11, fontWeight: 600, color: '#1e293b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                                    Destination Name <span style={{ color: '#dc2626' }}>*</span>
+                                                </label>
+                                                <span style={{ fontSize: 10, color: '#dc2626', fontWeight: 600 }}>REQUIRED</span>
+                                            </div>
+                                            <input type="text" value={btpDestination}
+                                                placeholder="e.g. S4H_HMF_ADT"
+                                                onChange={e => setBtpDestination(e.target.value)}
+                                                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', fontWeight: 700, border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
                                             />
+                                            <p style={{ margin: '4px 0 0', fontSize: 11, color: '#94a3b8' }}>
+                                                Exact destination name created in BTP Cockpit pointing via Cloud Connector.
+                                            </p>
                                         </div>
-                                        <div>
-                                            <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>HTTPS Port</label>
-                                            <input type="text" value={mcpHttpsPort}
-                                                onChange={e => setMcpHttpsPort(e.target.value)}
-                                                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
 
-                            {/* Step 2: Logon Credentials */}
-                            <div style={{
-                                background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14,
-                                overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column'
-                            }}>
+                                        <div>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                                <label style={{ fontSize: 11, fontWeight: 600, color: '#1e293b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                                    BTP Service URL / Target Endpoint <span style={{ color: '#dc2626' }}>*</span>
+                                                </label>
+                                                <span style={{ fontSize: 10, color: '#dc2626', fontWeight: 600 }}>REQUIRED</span>
+                                            </div>
+                                            <input type="text" value={btpApiEndpoint}
+                                                placeholder="e.g. https://...cfapps.us10-001.hana.ondemand.com"
+                                                onChange={e => setBtpApiEndpoint(e.target.value)}
+                                                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                            />
+                                            <p style={{ margin: '4px 0 0', fontSize: 11, color: '#94a3b8' }}>
+                                                Your deployed BTP Cloud Foundry Service, AppRouter, or Destination Proxy URL.
+                                            </p>
+                                        </div>
+
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                                            <div>
+                                                <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>SAP Client</label>
+                                                <input type="text" value={btpSapClient}
+                                                    placeholder="300"
+                                                    onChange={e => setBtpSapClient(e.target.value)}
+                                                    maxLength={3}
+                                                    style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>System ID (Optional)</label>
+                                                <input type="text" value={mcpSystemId}
+                                                    placeholder="HMF"
+                                                    onChange={e => setMcpSystemId(e.target.value.toUpperCase())}
+                                                    maxLength={8}
+                                                    style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>Connection Label</label>
+                                            <input type="text" value={mcpDescription}
+                                                placeholder="e.g. MYGO S4HANA HMF ADT via Cloud Connector"
+                                                onChange={e => setMcpDescription(e.target.value)}
+                                                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Panel 2: BTP OAuth 2.0 Credentials */}
                                 <div style={{
-                                    padding: '14px 18px',
-                                    background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
-                                    borderBottom: '1px solid #e2e8f0',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+                                    background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14,
+                                    overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column'
                                 }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                        <div style={{
-                                            width: 26, height: 26, borderRadius: 6,
-                                            background: mcpTestResult?.success ? '#16a34a' : '#64748b',
-                                            color: '#fff', display: 'flex', alignItems: 'center',
-                                            justifyContent: 'center', fontSize: 12, fontWeight: 800
-                                        }}>{mcpTestResult?.success ? '✓' : '2'}</div>
-                                        <span style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>Logon Credentials</span>
-                                    </div>
-                                    <span style={{ fontSize: 10, fontWeight: 700, color: '#15803d', background: 'rgba(22,163,74,0.08)', padding: '3px 8px', borderRadius: 12, border: '1px solid rgba(22,163,74,0.2)' }}>
-                                        🔐 SESSION ONLY
-                                    </span>
-                                </div>
-                                <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14, flex: 1 }}>
-                                    <div>
-                                        <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>User ID</label>
-                                        <input type="text" value={mcpUsername}
-                                            onChange={e => setMcpUsername(e.target.value.toUpperCase())}
-                                            autoComplete="username"
-                                            style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, textTransform: 'uppercase', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>Password</label>
-                                        <div style={{ display: 'flex', gap: 6 }}>
-                                            <input
-                                                type={mcpShowPassword ? 'text' : 'password'}
-                                                value={mcpPassword}
-                                                onChange={e => { setMcpPassword(e.target.value); if (mcpTestResult) setMcpTestResult(null) }}
-                                                autoComplete="current-password"
-                                                style={{ flex: 1, padding: '9px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
-                                            />
-                                            <button type="button" onClick={() => setMcpShowPassword(!mcpShowPassword)}
-                                                style={{ padding: '0 12px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#64748b', cursor: 'pointer', fontSize: 13 }}
-                                            >{mcpShowPassword ? '🙈' : '👁️'}</button>
+                                    <div style={{
+                                        padding: '14px 18px',
+                                        background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
+                                        borderBottom: '1px solid #e2e8f0',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+                                    }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                            <div style={{
+                                                width: 26, height: 26, borderRadius: 6,
+                                                background: mcpTestResult?.success ? '#16a34a' : '#64748b',
+                                                color: '#fff', display: 'flex', alignItems: 'center',
+                                                justifyContent: 'center', fontSize: 12, fontWeight: 800
+                                            }}>{mcpTestResult?.success ? '✓' : '2'}</div>
+                                            <span style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>BTP OAuth Credentials</span>
                                         </div>
-                                        <p style={{ margin: '6px 0 0', fontSize: 11, color: '#94a3b8' }}>
-                                            Password is held in browser memory only and never persisted to the database.
-                                        </p>
+                                        <span style={{ fontSize: 10, fontWeight: 700, color: '#0369a1', background: 'rgba(3,105,161,0.08)', padding: '3px 8px', borderRadius: 12, border: '1px solid rgba(3,105,161,0.2)' }}>
+                                            🔑 XSUAA OAUTH 2.0
+                                        </span>
                                     </div>
+                                    <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
+                                        <div>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                                <label style={{ fontSize: 11, fontWeight: 600, color: '#1e293b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                                    OAuth Token URL <span style={{ color: '#dc2626' }}>*</span>
+                                                </label>
+                                                <span style={{ fontSize: 10, color: '#dc2626', fontWeight: 600 }}>REQUIRED</span>
+                                            </div>
+                                            <input type="text" value={btpTokenUrl}
+                                                placeholder="https://...authentication.us10.hana.ondemand.com/oauth/token"
+                                                onChange={e => setBtpTokenUrl(e.target.value)}
+                                                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                            />
+                                            <p style={{ margin: '4px 0 0', fontSize: 11, color: '#94a3b8' }}>
+                                                XSUAA oauth/token endpoint from your BTP service key.
+                                            </p>
+                                        </div>
 
-                                    {/* Action Buttons */}
-                                    <div style={{ marginTop: 'auto', display: 'flex', gap: 10 }}>
-                                        <button
-                                            type="button"
-                                            onClick={handleTestMcpConnection}
-                                            disabled={mcpTesting || !mcpUsername || !mcpPassword}
-                                            style={{
-                                                flex: 1, padding: '10px 16px', borderRadius: 8,
-                                                border: '1.5px solid rgba(255,104,44,0.5)',
-                                                background: (!mcpUsername || !mcpPassword) ? '#f8fafc' : '#fff5f0',
-                                                color: (!mcpUsername || !mcpPassword) ? '#94a3b8' : '#d64a13',
-                                                fontSize: 13, fontWeight: 700,
-                                                cursor: (!mcpUsername || !mcpPassword) ? 'not-allowed' : 'pointer',
-                                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                                                opacity: (!mcpUsername || !mcpPassword) ? 0.5 : 1
-                                            }}
-                                        >
-                                            {mcpTesting ? '🔍 Testing...' : '🔍 Test Connection'}
-                                        </button>
+                                        <div>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                                <label style={{ fontSize: 11, fontWeight: 600, color: '#1e293b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                                    Client ID <span style={{ color: '#dc2626' }}>*</span>
+                                                </label>
+                                                <span style={{ fontSize: 10, color: '#dc2626', fontWeight: 600 }}>REQUIRED</span>
+                                            </div>
+                                            <input type="text" value={btpClientId}
+                                                placeholder="e.g. sb-btp-service!t212186"
+                                                onChange={e => setBtpClientId(e.target.value)}
+                                                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                            />
+                                        </div>
 
-                                        <button
-                                            type="button"
-                                            onClick={async () => { if (!mcpTestResult?.success) return; await handleSaveMcpSettings() }}
-                                            disabled={mcpSaving || !mcpTestResult?.success}
-                                            style={{
-                                                flex: 1, padding: '10px 16px', borderRadius: 8, border: 'none',
-                                                background: mcpTestResult?.success ? 'linear-gradient(135deg, #FF682C 0%, #d64a13 100%)' : '#e2e8f0',
-                                                color: mcpTestResult?.success ? '#fff' : '#94a3b8',
-                                                fontSize: 13, fontWeight: 700,
-                                                cursor: mcpTestResult?.success ? 'pointer' : 'not-allowed',
-                                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                                                boxShadow: mcpTestResult?.success ? '0 4px 14px rgba(255,104,44,0.35)' : 'none'
-                                            }}
-                                        >
-                                            {mcpSaving ? '💾 Saving...' : '💾 Save'}
-                                        </button>
+                                        <div>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                                <label style={{ fontSize: 11, fontWeight: 600, color: '#1e293b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                                    Client Secret <span style={{ color: '#dc2626' }}>*</span>
+                                                </label>
+                                                <span style={{ fontSize: 10, color: '#dc2626', fontWeight: 600 }}>REQUIRED</span>
+                                            </div>
+                                            <div style={{ display: 'flex', gap: 6 }}>
+                                                <input
+                                                    type={btpShowSecret ? 'text' : 'password'}
+                                                    value={btpClientSecret}
+                                                    onChange={e => { setBtpClientSecret(e.target.value); if (mcpTestResult) setMcpTestResult(null) }}
+                                                    placeholder="BTP Service OAuth Client Secret"
+                                                    style={{ flex: 1, padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                                />
+                                                <button type="button" onClick={() => setBtpShowSecret(!btpShowSecret)}
+                                                    style={{ padding: '0 12px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#64748b', cursor: 'pointer', fontSize: 13 }}
+                                                >{btpShowSecret ? '🙈' : '👁️'}</button>
+                                            </div>
+                                        </div>
+
+                                        {/* Action Buttons */}
+                                        <div style={{ marginTop: 'auto', display: 'flex', gap: 10, paddingTop: 10 }}>
+                                            <button
+                                                type="button"
+                                                onClick={handleTestMcpConnection}
+                                                disabled={mcpTesting || !btpTokenUrl || !btpClientId || !btpClientSecret || !btpDestination}
+                                                style={{
+                                                    flex: 1, padding: '10px 16px', borderRadius: 8,
+                                                    border: '1.5px solid rgba(255,104,44,0.5)',
+                                                    background: (!btpTokenUrl || !btpClientId || !btpClientSecret || !btpDestination) ? '#f8fafc' : '#fff5f0',
+                                                    color: (!btpTokenUrl || !btpClientId || !btpClientSecret || !btpDestination) ? '#94a3b8' : '#d64a13',
+                                                    fontSize: 13, fontWeight: 700,
+                                                    cursor: (!btpTokenUrl || !btpClientId || !btpClientSecret || !btpDestination) ? 'not-allowed' : 'pointer',
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                                                    opacity: (!btpTokenUrl || !btpClientId || !btpClientSecret || !btpDestination) ? 0.5 : 1
+                                                }}
+                                            >
+                                                {mcpTesting ? '🔍 Testing...' : '🔍 Test Connection'}
+                                            </button>
+
+                                            <button
+                                                type="button"
+                                                onClick={async () => { if (!mcpTestResult?.success) return; await handleSaveMcpSettings() }}
+                                                disabled={mcpSaving || !mcpTestResult?.success}
+                                                style={{
+                                                    flex: 1, padding: '10px 16px', borderRadius: 8, border: 'none',
+                                                    background: mcpTestResult?.success ? 'linear-gradient(135deg, #FF682C 0%, #d64a13 100%)' : '#e2e8f0',
+                                                    color: mcpTestResult?.success ? '#fff' : '#94a3b8',
+                                                    fontSize: 13, fontWeight: 700,
+                                                    cursor: mcpTestResult?.success ? 'pointer' : 'not-allowed',
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                                                    boxShadow: mcpTestResult?.success ? '0 4px 14px rgba(255,104,44,0.35)' : 'none'
+                                                }}
+                                            >
+                                                {mcpSaving ? '💾 Saving...' : '💾 Save'}
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
+                        )}
+
+                        {/* ── Direct SAP / SAProuter Mode ── */}
+                        {mcpConnectionMode === 'DIRECT' && (
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                                
+                                {/* Step 1: System Parameters */}
+                                <div style={{
+                                    background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14,
+                                    overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column'
+                                }}>
+                                    <div style={{
+                                        padding: '14px 18px',
+                                        background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
+                                        borderBottom: '1px solid #e2e8f0',
+                                        display: 'flex', alignItems: 'center', gap: 10
+                                    }}>
+                                        <div style={{
+                                            width: 26, height: 26, borderRadius: 6, background: '#FF682C', color: '#fff',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                            fontSize: 12, fontWeight: 800
+                                        }}>1</div>
+                                        <span style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>System Parameters</span>
+                                    </div>
+                                    <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
+                                        <div>
+                                            <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>Description / Connection Name</label>
+                                            <input type="text" value={mcpDescription}
+                                                placeholder="e.g. My SAP S/4HANA System"
+                                                onChange={e => setMcpDescription(e.target.value)}
+                                                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>Application Server / Host URL *</label>
+                                            <input type="text" value={mcpAppServer}
+                                                placeholder="e.g. https://mygowebdisp.mygoconsulting.com:44330 or 192.168.171.43"
+                                                onChange={e => setMcpAppServer(e.target.value)}
+                                                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>SAProuter String (Optional)</label>
+                                            <input type="text" value={mcpSaprouterString}
+                                                placeholder="e.g. /H/50.198.15.124/H/ (leave empty if not required)"
+                                                onChange={e => setMcpSaprouterString(e.target.value)}
+                                                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                            />
+                                        </div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                                            <div>
+                                                <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>Client ID *</label>
+                                                <input type="text" value={mcpSapClient}
+                                                    placeholder="e.g. 300, 100"
+                                                    onChange={e => setMcpSapClient(e.target.value)}
+                                                    maxLength={3}
+                                                    style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>HTTPS Port (Optional)</label>
+                                                <input type="text" value={mcpHttpsPort}
+                                                    placeholder="e.g. 44330 (or in URL)"
+                                                    onChange={e => setMcpHttpsPort(e.target.value)}
+                                                    style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                                />
+                                            </div>
+                                        </div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                                            <div>
+                                                <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>System ID (Optional)</label>
+                                                <input type="text" value={mcpSystemId}
+                                                    placeholder="e.g. HMF"
+                                                    onChange={e => setMcpSystemId(e.target.value.toUpperCase())}
+                                                    maxLength={8}
+                                                    style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>Instance No. (Optional)</label>
+                                                <input type="text" value={mcpInstanceNo}
+                                                    placeholder="e.g. 00, 30"
+                                                    onChange={e => setMcpInstanceNo(e.target.value.replace(/\D/g, '').slice(0, 2))}
+                                                    maxLength={2}
+                                                    style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, fontFamily: 'monospace', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Step 2: Logon Credentials */}
+                                <div style={{
+                                    background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14,
+                                    overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column'
+                                }}>
+                                    <div style={{
+                                        padding: '14px 18px',
+                                        background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
+                                        borderBottom: '1px solid #e2e8f0',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+                                    }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                            <div style={{
+                                                width: 26, height: 26, borderRadius: 6,
+                                                background: mcpTestResult?.success ? '#16a34a' : '#64748b',
+                                                color: '#fff', display: 'flex', alignItems: 'center',
+                                                justifyContent: 'center', fontSize: 12, fontWeight: 800
+                                            }}>{mcpTestResult?.success ? '✓' : '2'}</div>
+                                            <span style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>Logon Credentials</span>
+                                        </div>
+                                        <span style={{ fontSize: 10, fontWeight: 700, color: '#15803d', background: 'rgba(22,163,74,0.08)', padding: '3px 8px', borderRadius: 12, border: '1px solid rgba(22,163,74,0.2)' }}>
+                                            🔐 SESSION ONLY
+                                        </span>
+                                    </div>
+                                    <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14, flex: 1 }}>
+                                        <div>
+                                            <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>User ID</label>
+                                            <input type="text" value={mcpUsername}
+                                                onChange={e => setMcpUsername(e.target.value.toUpperCase())}
+                                                autoComplete="username"
+                                                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: 13, textTransform: 'uppercase', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 4 }}>Password</label>
+                                            <div style={{ display: 'flex', gap: 6 }}>
+                                                <input
+                                                    type={mcpShowPassword ? 'text' : 'password'}
+                                                    value={mcpPassword}
+                                                    onChange={e => { setMcpPassword(e.target.value); if (mcpTestResult) setMcpTestResult(null) }}
+                                                    autoComplete="current-password"
+                                                    style={{ flex: 1, padding: '9px 12px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', color: '#1e293b', background: '#f8fafc' }}
+                                                />
+                                                <button type="button" onClick={() => setMcpShowPassword(!mcpShowPassword)}
+                                                    style={{ padding: '0 12px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#64748b', cursor: 'pointer', fontSize: 13 }}
+                                                >{mcpShowPassword ? '🙈' : '👁️'}</button>
+                                            </div>
+                                            <p style={{ margin: '6px 0 0', fontSize: 11, color: '#94a3b8' }}>
+                                                Password is held in browser memory only and never persisted to the database.
+                                            </p>
+                                        </div>
+
+                                        {/* Action Buttons */}
+                                        <div style={{ marginTop: 'auto', display: 'flex', gap: 10 }}>
+                                            <button
+                                                type="button"
+                                                onClick={handleTestMcpConnection}
+                                                disabled={mcpTesting || !mcpUsername || !mcpPassword}
+                                                style={{
+                                                    flex: 1, padding: '10px 16px', borderRadius: 8,
+                                                    border: '1.5px solid rgba(255,104,44,0.5)',
+                                                    background: (!mcpUsername || !mcpPassword) ? '#f8fafc' : '#fff5f0',
+                                                    color: (!mcpUsername || !mcpPassword) ? '#94a3b8' : '#d64a13',
+                                                    fontSize: 13, fontWeight: 700,
+                                                    cursor: (!mcpUsername || !mcpPassword) ? 'not-allowed' : 'pointer',
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                                                    opacity: (!mcpUsername || !mcpPassword) ? 0.5 : 1
+                                                }}
+                                            >
+                                                {mcpTesting ? '🔍 Testing...' : '🔍 Test Connection'}
+                                            </button>
+
+                                            <button
+                                                type="button"
+                                                onClick={async () => { if (!mcpTestResult?.success) return; await handleSaveMcpSettings() }}
+                                                disabled={mcpSaving || !mcpTestResult?.success}
+                                                style={{
+                                                    flex: 1, padding: '10px 16px', borderRadius: 8, border: 'none',
+                                                    background: mcpTestResult?.success ? 'linear-gradient(135deg, #FF682C 0%, #d64a13 100%)' : '#e2e8f0',
+                                                    color: mcpTestResult?.success ? '#fff' : '#94a3b8',
+                                                    fontSize: 13, fontWeight: 700,
+                                                    cursor: mcpTestResult?.success ? 'pointer' : 'not-allowed',
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                                                    boxShadow: mcpTestResult?.success ? '0 4px 14px rgba(255,104,44,0.35)' : 'none'
+                                                }}
+                                            >
+                                                {mcpSaving ? '💾 Saving...' : '💾 Save'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Test Status Banner */}
                         {mcpTestResult && (

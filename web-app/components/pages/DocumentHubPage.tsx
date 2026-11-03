@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import axios from 'axios'
 import GlobalAIAgentsDropdown from '@/components/GlobalAIAgentsDropdown'
 import SyncSourceModal from '@/components/modals/SyncSourceModal'
+import { usePageHeader } from '@/context/PageHeaderContext'
+import { htmlToPlainText } from '@/lib/htmlText'
 
 interface Document {
     id: string
@@ -17,6 +19,18 @@ interface Document {
     webUrl?: string
     documentId?: string
     documentTypeCode?: string
+    version?: number
+    isLatest?: boolean
+    displayId?: string
+}
+
+interface DocumentVersion {
+    documentId: string
+    name: string
+    version: number
+    isLatest: boolean
+    updatedBy?: string
+    updatedOn?: string
 }
 
 interface PaginationMeta {
@@ -33,6 +47,11 @@ const sourceColors: Record<string, { bg: string; text: string }> = {
     SharePoint: { bg: '#d1fae5', text: '#065f46' },
     Jira: { bg: '#fee2e2', text: '#991b1b' },
     Solman: { bg: '#ffedd5', text: '#9a3412' },
+    'File Upload': { bg: '#f1f5f9', text: '#475569' },
+    SAP_ADT: { bg: '#e0f2fe', text: '#0369a1' },
+    SAP_ADT_MCP: { bg: '#e0f2fe', text: '#0369a1' },
+    BTP: { bg: '#ede9fe', text: '#6d28d9' },
+    SAP: { bg: '#e0f2fe', text: '#0369a1' },
 }
 
 const documentTypeNames: Record<string, string> = {
@@ -42,6 +61,24 @@ const documentTypeNames: Record<string, string> = {
     SD: 'Solution Document',
     CD: 'Change Document',
     DP: 'Decision Paper',
+    TEST_CASE: 'Manual Test Case',
+    CLAS: 'ABAP Class',
+    INTF: 'ABAP Interface',
+    PROG: 'ABAP Program',
+    INCL: 'ABAP Include',
+    FUGR: 'Function Group',
+    DDLS: 'CDS View',
+    TABL: 'Database Table',
+    VIEW: 'Database View',
+    IWMO: 'OData Model',
+    IWSG: 'OData Service',
+    IWPR: 'OData Provider',
+    SRVB: 'Service Binding',
+    SRVD: 'Service Definition',
+    DEVC: 'SAP Package',
+    DOMA: 'Domain',
+    DTEL: 'Data Element',
+    MSAG: 'Message Class',
 }
 
 const formatDate = (dateStr: string | null | undefined): string => {
@@ -58,11 +95,13 @@ export default function DocumentHubPage() {
 
     // Server-side filters
     const [search, setSearch] = useState('')
+    const [categoryFilter, setCategoryFilter] = useState<'all' | 'documents' | 'code'>('all')
     const [sourceFilter, setSourceFilter] = useState('')
     const [typeFilter, setTypeFilter] = useState('')
     const [projectFilter, setProjectFilter] = useState('')
     const [dateFrom, setDateFrom] = useState('')
     const [dateTo, setDateTo] = useState('')
+    const [latestOnly, setLatestOnly] = useState(true)
     const [currentPage, setCurrentPage] = useState(1)
 
     // Filter option lists (populated from first unfiltered fetch)
@@ -74,11 +113,15 @@ export default function DocumentHubPage() {
     const [showSyncModal, setShowSyncModal] = useState(false)
 
     const [selectedDocumentIds, setSelectedDocumentIds] = useState<Set<string>>(new Set())
+    const [selectedRadioDocId, setSelectedRadioDocId] = useState<string | null>(null)
+    const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
     const [isDeleting, setIsDeleting] = useState(false)
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
-    const [viewerDoc, setViewerDoc] = useState<{ name: string; content: string } | null>(null)
+    const [viewerDoc, setViewerDoc] = useState<{ name: string; content: string; documentId?: string; version?: number } | null>(null)
     const [isLoadingContent, setIsLoadingContent] = useState(false)
+    const [documentVersions, setDocumentVersions] = useState<DocumentVersion[]>([])
+    const [isLoadingVersions, setIsLoadingVersions] = useState(false)
 
     // Debounce search input
     const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -87,6 +130,9 @@ export default function DocumentHubPage() {
         setIsLoading(true)
         try {
             const params = new URLSearchParams()
+            if (categoryFilter && categoryFilter !== 'all') {
+                params.set('category', categoryFilter)
+            }
             params.set('page', String(page))
             params.set('page_size', String(PAGE_SIZE))
             if (search) params.set('search', search)
@@ -95,6 +141,7 @@ export default function DocumentHubPage() {
             if (projectFilter) params.set('project', projectFilter)
             if (dateFrom) params.set('date_from', dateFrom)
             if (dateTo) params.set('date_to', dateTo)
+            if (!latestOnly) params.set('latest_only', 'false')
 
             const res = await axios.get(`/api/documents?${params.toString()}`)
             const { documents: rawDocs, total, total_pages, page: pg, page_size } = res.data
@@ -102,7 +149,7 @@ export default function DocumentHubPage() {
             const mappedDocs: Document[] = (rawDocs ?? []).map((doc: any) => {
                 const docId = doc.documentId || doc.document_id || doc.uuid || doc.id || doc.name || doc.filename
                 const docName = doc.title || doc.name || doc.metadata?.name || doc.filename
-                const docTypeCode = doc.documentTypeCode || doc.type || doc.metadata?.documentType
+                const docTypeCode = doc.documentTypeCode || doc.type || doc.doc_type || doc.metadata?.documentType || 'Document'
                 const docType = documentTypeNames[docTypeCode] || docTypeCode || 'Document'
                 const rawDate = doc.modifiedAt || doc.updatedOn || doc.metadata?.updatedAt || doc.metadata?.modifiedAt || null
                 const parsedTs = rawDate ? new Date(rawDate).getTime() : NaN
@@ -111,6 +158,7 @@ export default function DocumentHubPage() {
                     id: docId,
                     name: docName,
                     type: docType,
+                    documentTypeCode: docTypeCode,
                     source: doc.source || doc.metadata?.source || 'File Upload',
                     project: doc.project || doc.metadata?.project || 'N/A',
                     updatedBy: resolvedUpdatedBy || 'System',
@@ -118,6 +166,9 @@ export default function DocumentHubPage() {
                     updatedAt: isNaN(parsedTs) ? 0 : parsedTs,
                     webUrl: doc.webUrl || doc.metadata?.webUrl,
                     documentId: docId,
+                    version: doc.version ?? doc.metadata?.version ?? 1,
+                    isLatest: doc.isLatest ?? doc.metadata?.isLatest ?? true,
+                    displayId: doc.displayId || doc.metadata?.displayId || '',
                 }
             })
 
@@ -129,26 +180,30 @@ export default function DocumentHubPage() {
         } finally {
             setIsLoading(false)
         }
-    }, [search, sourceFilter, typeFilter, projectFilter, dateFrom, dateTo])
+    }, [search, categoryFilter, sourceFilter, typeFilter, projectFilter, dateFrom, dateTo, latestOnly])
+
+    const fetchFilterOptions = useCallback(() => {
+        axios.get('/api/documents?page=1&page_size=1000').then(res => {
+            const docs: any[] = res.data.documents ?? []
+            setSourceOptions(Array.from(new Set<string>(docs.map(d => d.source).filter(Boolean))).sort())
+            setTypeOptions(Array.from(new Set<string>(docs.map(d => d.type || d.doc_type).filter(Boolean))).sort())
+            setProjectOptions(Array.from(new Set<string>(docs.map(d => d.project).filter(p => p && p !== 'N/A'))).sort())
+        }).catch(() => {})
+    }, [])
 
     // Load filter options once on mount (unfiltered, large page)
     useEffect(() => {
         if (optionsLoaded.current) return
         optionsLoaded.current = true
-        axios.get('/api/documents?page=1&page_size=1000').then(res => {
-            const docs: any[] = res.data.documents ?? []
-            setSourceOptions([...new Set<string>(docs.map(d => d.source).filter(Boolean))].sort())
-            setTypeOptions([...new Set<string>(docs.map(d => d.type || d.doc_type).filter(Boolean))].sort())
-            setProjectOptions([...new Set<string>(docs.map(d => d.project).filter(p => p && p !== 'N/A'))].sort())
-        }).catch(() => {})
-    }, [])
+        fetchFilterOptions()
+    }, [fetchFilterOptions])
 
     // Re-fetch when filters change (reset to page 1)
     useEffect(() => {
         fetchDocuments(1)
         setSelectedDocumentIds(new Set())
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [sourceFilter, typeFilter, projectFilter, dateFrom, dateTo])
+    }, [categoryFilter, sourceFilter, typeFilter, projectFilter, dateFrom, dateTo, latestOnly])
 
     // Debounced search
     useEffect(() => {
@@ -161,7 +216,116 @@ export default function DocumentHubPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [search])
 
+    // Listen for AI agent invocation and parse the active/selected document
+    useEffect(() => {
+        const handler = async (e: Event) => {
+            const detail = (e as CustomEvent).detail
+            if (detail?.agentId) {
+                const targetDocId = selectedRadioDocId || (selectedDocumentIds.size === 1 ? Array.from(selectedDocumentIds)[0] : null)
+                if (!targetDocId) return // Let default layout handle global empty modal
 
+                detail.handled = true
+                e.stopPropagation()
+                e.stopImmediatePropagation()
+
+                const targetDoc = documents.find(d => d.id === targetDocId)
+                if (!targetDoc) return
+
+                setToastMessage({ text: `Parsing "${targetDoc.name}" into ${detail.agentId}...`, type: 'success' })
+                setTimeout(() => setToastMessage(null), 3500)
+
+                try {
+                    let plainContent = ''
+                    const isTestCase = targetDoc.type === 'Manual Test Case' || (targetDoc as any).documentTypeCode === 'TEST_CASE'
+
+                    if (isTestCase) {
+                        try {
+                            const tcRes = await axios.get(`/api/test-cases/${targetDocId}`)
+                            const tc = tcRes.data
+                            const parts = [
+                                `Test Case: ${tc.title || targetDoc.name}`,
+                                tc.description ? `Description: ${tc.description}` : '',
+                            ]
+                            if (tc.toActivities && tc.toActivities.length > 0) {
+                                parts.push('\nActivities & Steps:')
+                                tc.toActivities.forEach((act: any, idx: number) => {
+                                    parts.push(`${idx + 1}. ${act.title || ''}`)
+                                    if (act.toActions) {
+                                        act.toActions.forEach((actn: any, aIdx: number) => {
+                                            parts.push(`   - Step ${aIdx + 1}: ${actn.title || ''}`)
+                                            if (actn.description) parts.push(`     Description: ${actn.description}`)
+                                            if (actn.expectedResult) parts.push(`     Expected Result: ${actn.expectedResult}`)
+                                        })
+                                    }
+                                })
+                            }
+                            plainContent = parts.filter(Boolean).join('\n')
+                        } catch {
+                            plainContent = `Test Case: ${targetDoc.name}`
+                        }
+                    } else {
+                        const token = typeof window !== 'undefined' ? (localStorage.getItem('mygo-token') || localStorage.getItem('token') || '') : ''
+                        const headers: Record<string, string> = {}
+                        if (token) headers['Authorization'] = `Bearer ${token}`
+
+                        const cleanName = (targetDoc.name || '').replace(/\s*\([A-Za-z0-9_]+\)$/, '').trim()
+                        const res = await axios.get(`/api/documents/${encodeURIComponent(targetDocId)}/view`, {
+                            params: { name: cleanName, type: targetDoc.documentTypeCode || targetDoc.type, source: targetDoc.source },
+                            headers
+                        })
+                        const content = res.data?.content || ''
+                        plainContent = htmlToPlainText(content)
+                        if (plainContent.includes('placeholder for metadata purposes')) plainContent = ''
+                    }
+
+                    if (!plainContent) {
+                        setToastMessage({ text: `Could not retrieve content for "${targetDoc.name}".`, type: 'error' })
+                        setTimeout(() => setToastMessage(null), 3500)
+                        return
+                    }
+
+                    if (detail.agentId === 'code-advisor') {
+                        window.dispatchEvent(new CustomEvent('code-advisor-open', {
+                            detail: { code: plainContent, codeType: targetDoc.type }
+                        }))
+                    } else if (detail.agentId === 'explain-code') {
+                        window.dispatchEvent(new CustomEvent('explain-code-open', {
+                            detail: { code: plainContent, codeType: targetDoc.type, programName: targetDoc.name }
+                        }))
+                    } else if (detail.agentId === 'solution-advisor') {
+                        window.dispatchEvent(new CustomEvent('solution-advisor-open', {
+                            detail: { requirements: plainContent }
+                        }))
+                    } else if (detail.agentId === 'spec-assistant') {
+                        window.dispatchEvent(new CustomEvent('spec-assistant-open', {
+                            detail: { requirements: plainContent }
+                        }))
+                    } else if (detail.agentId === 'test-cases' || detail.agentId === 'test-case-generator') {
+                        window.dispatchEvent(new CustomEvent('test-case-generator-open', {
+                            detail: { code: plainContent, requirements: plainContent }
+                        }))
+                    } else if (detail.agentId === 'prompt-generator') {
+                        window.dispatchEvent(new CustomEvent('prompt-studio-open', {
+                            detail: { prompt: plainContent, language: 'Documentation', task: `Document analysis for ${targetDoc.name}` }
+                        }))
+                    } else if (detail.agentId === 'ask-yoda') {
+                        window.dispatchEvent(new CustomEvent('ask-yoda-open', {
+                            detail: { 
+                                query: `Please analyze this document (${targetDoc.name}):\n\n${plainContent.substring(0, 3000)}` 
+                            }
+                        }))
+                    }
+                } catch (err) {
+                    console.error('Failed to parse doc for agent:', err)
+                    setToastMessage({ text: `Failed to parse document for ${detail.agentId}.`, type: 'error' })
+                    setTimeout(() => setToastMessage(null), 3500)
+                }
+            }
+        }
+
+        window.addEventListener('agent-select', handler, { capture: true })
+        return () => window.removeEventListener('agent-select', handler, { capture: true })
+    }, [selectedRadioDocId, selectedDocumentIds, documents])
 
     const toggleDocumentSelection = (id: string) => {
         setSelectedDocumentIds(prev => {
@@ -202,11 +366,31 @@ export default function DocumentHubPage() {
         fetchDocuments(page)
     }
 
+    const loadDocumentContent = async (docId: string, docName: string, version?: number, docTypeCode?: string, source?: string) => {
+        const token = typeof window !== 'undefined' ? (localStorage.getItem('mygo-token') || localStorage.getItem('token') || '') : ''
+        const headers: Record<string, string> = {}
+        if (token) headers['Authorization'] = `Bearer ${token}`
+
+        const cleanName = (docName || '').replace(/\s*\([A-Za-z0-9_]+\)$/, '').trim()
+        const res = await axios.get(`/api/documents/${encodeURIComponent(docId)}/view`, {
+            params: { name: cleanName, type: docTypeCode, source },
+            headers
+        })
+        setViewerDoc({
+            name: docName,
+            content: res.data?.content || '',
+            documentId: docId,
+            version,
+        })
+    }
+
     const openDocumentViewer = async (doc: Document) => {
         const docId = doc.documentId || doc.id
         if (!docId) return
         setIsLoadingContent(true)
-        setViewerDoc({ name: doc.name, content: '' })
+        setIsLoadingVersions(true)
+        setDocumentVersions([])
+        setViewerDoc({ name: doc.name, content: '', documentId: docId, version: doc.version })
         try {
             // Check if this is a test case
             const isTestCase = doc.type === 'Manual Test Case' || (doc as any).documentTypeCode === 'TEST_CASE'
@@ -215,8 +399,6 @@ export default function DocumentHubPage() {
                 // Fetch test case details
                 const res = await axios.get(`/api/test-cases/${docId}`)
                 const testCase = res.data
-
-                console.log('Test case data:', testCase)
 
                 // Format test case as HTML for display with better styling
                 let html = `
@@ -331,53 +513,77 @@ export default function DocumentHubPage() {
 
                 html += '</div>'
 
-                setViewerDoc({ name: doc.name, content: html })
+                setViewerDoc({ name: doc.name, content: html, documentId: docId, version: doc.version })
             } else {
-                // Regular document (CALM or File Upload)
-                const res = await axios.get(`/api/documents/${encodeURIComponent(docId)}/view`)
-                setViewerDoc({ name: doc.name, content: res.data.content || '' })
+                await loadDocumentContent(docId, doc.name, doc.version, doc.documentTypeCode, doc.source)
+
+                if (doc.source === 'CALM') {
+                    try {
+                        const versionsRes = await axios.get(`/api/documents/${encodeURIComponent(docId)}/versions`)
+                        const versions = versionsRes.data.versions || []
+                        if (versions.length > 1) {
+                            setDocumentVersions(versions)
+                        }
+                    } catch {
+                        // Version history is optional
+                    }
+                }
             }
         } catch (err: any) {
             const errMsg = err?.response?.data?.error || 'Failed to load content.'
-            setViewerDoc({ name: doc.name, content: `<p style="color:red">${errMsg}</p>` })
+            setViewerDoc({ name: doc.name, content: `<p style="color:red">${errMsg}</p>`, documentId: docId, version: doc.version })
+        } finally {
+            setIsLoadingContent(false)
+            setIsLoadingVersions(false)
+        }
+    }
+
+    const switchDocumentVersion = async (version: DocumentVersion) => {
+        if (!version.documentId) return
+        setIsLoadingContent(true)
+        try {
+            await loadDocumentContent(version.documentId, version.name, version.version)
+        } catch (err: any) {
+            const errMsg = err?.response?.data?.error || 'Failed to load version.'
+            setViewerDoc(prev => prev ? { ...prev, content: `<p style="color:red">${errMsg}</p>`, version: version.version } : null)
         } finally {
             setIsLoadingContent(false)
         }
     }
 
-    return (
-        <div className="doc-hub-page">
-            {/* Page Header */}
-            <div className="doc-hub-header">
-                <div className="doc-hub-header-left">
-                    <div className="doc-hub-icon">
-                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#034354" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                            <polyline points="14 2 14 8 20 8" />
-                            <line x1="16" y1="13" x2="8" y2="13" />
-                            <line x1="16" y1="17" x2="8" y2="17" />
-                            <polyline points="10 9 9 9 8 9" />
-                        </svg>
-                    </div>
-                    <div>
-                        <h1 className="doc-hub-title">Document Hub</h1>
-                        <p className="doc-hub-subtitle">Manage and explore your project documents across all sources</p>
-                    </div>
-                </div>
-                <div className="flex gap-3">
-                    <button className="btn btn-primary" onClick={() => setShowSyncModal(true)}>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 8 }}>
-                            <path d="M21 2v6h-6" />
-                            <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-                            <path d="M3 22v-6h6" />
-                            <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-                        </svg>
-                        Sync Source
-                    </button>
-                    <GlobalAIAgentsDropdown />
-                </div>
+    usePageHeader({
+        title: 'Document Hub',
+        subtitle: 'Manage and explore your project documents across all sources',
+        icon: (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#034354" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+                <polyline points="10 9 9 9 8 9" />
+            </svg>
+        ),
+        actions: (
+            <div className="flex items-center gap-2.5">
+                <button
+                    className="btn btn-primary flex items-center gap-1.5 py-1.5 px-3.5 text-xs font-semibold"
+                    onClick={() => setShowSyncModal(true)}
+                >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 2v6h-6" />
+                        <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                        <path d="M3 22v-6h6" />
+                        <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                    </svg>
+                    Sync Source
+                </button>
+                <GlobalAIAgentsDropdown />
             </div>
+        )
+    }, [setShowSyncModal])
 
+    return (
+        <div className="doc-hub-page" style={{ paddingTop: 16 }}>
             {/* Search + Filters */}
             <div className="doc-hub-filters" style={{ flexWrap: 'wrap', gap: 8 }}>
                 <div className="doc-hub-filter-label">
@@ -404,6 +610,18 @@ export default function DocumentHubPage() {
                         <button onClick={() => setSearch('')} style={{ position: 'absolute', right: 7, border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 13, lineHeight: 1 }}>✕</button>
                     )}
                 </div>
+
+                <select 
+                    className="doc-hub-filter-select" 
+                    value={categoryFilter} 
+                    onChange={(e) => setCategoryFilter(e.target.value as any)}
+                    title="Workspace Category"
+                    style={{ fontWeight: 600, color: '#0284c7' }}
+                >
+                    <option value="all">📁 All Workspace Items</option>
+                    <option value="documents">📄 Documents &amp; Specs</option>
+                    <option value="code">💻 Code &amp; SAP Objects</option>
+                </select>
 
                 <select className="doc-hub-filter-select" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
                     <option value="">All Sources</option>
@@ -445,6 +663,16 @@ export default function DocumentHubPage() {
                             style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8', padding: '0 2px', fontSize: 14, lineHeight: 1 }}>✕</button>
                     )}
                 </div>
+
+                <label className="doc-hub-filter-select" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}>
+                    <input
+                        type="checkbox"
+                        checked={latestOnly}
+                        onChange={e => setLatestOnly(e.target.checked)}
+                        style={{ cursor: 'pointer' }}
+                    />
+                    <span style={{ fontSize: 13, color: '#475569' }}>Latest versions only</span>
+                </label>
             </div>
 
             {/* Document Count & Bulk Actions */}
@@ -475,6 +703,29 @@ export default function DocumentHubPage() {
                 )}
             </div>
 
+            {/* Toast & Active Selection Banners */}
+            {toastMessage && (
+                <div className={`mb-3 px-4 py-2 rounded-lg text-sm flex items-center gap-2 ${toastMessage.type === 'success' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-rose-100 text-rose-800 border border-rose-200'}`}>
+                    <span>{toastMessage.type === 'success' ? '⚡' : '⚠️'}</span>
+                    <span>{toastMessage.text}</span>
+                </div>
+            )}
+            {selectedRadioDocId && (
+                <div className="mb-3 px-4 py-2 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-between text-sm text-emerald-800 animate-in fade-in">
+                    <div className="flex items-center gap-2">
+                        <span className="font-bold">🎯 Selected for AI Agents:</span>
+                        <span className="font-mono">{documents.find(d => d.id === selectedRadioDocId)?.name}</span>
+                        <span className="text-xs text-emerald-600">({documents.find(d => d.id === selectedRadioDocId)?.type})</span>
+                    </div>
+                    <button 
+                        onClick={() => setSelectedRadioDocId(null)}
+                        className="text-xs text-emerald-700 hover:text-emerald-950 underline font-semibold"
+                    >
+                        Clear Selection
+                    </button>
+                </div>
+            )}
+
             {/* Document Table */}
             <div className="doc-hub-table-wrapper">
                 {isLoading ? (
@@ -483,7 +734,8 @@ export default function DocumentHubPage() {
                     <table className="doc-hub-table">
                         <thead>
                             <tr>
-                                <th style={{ width: 40, textAlign: 'center' }}>
+                                <th style={{ width: 36, textAlign: 'center' }} title="Select active document to parse into AI Agents">AI</th>
+                                <th style={{ width: 36, textAlign: 'center' }}>
                                     <input
                                         type="checkbox"
                                         checked={documents.length > 0 && selectedDocumentIds.size === documents.length}
@@ -495,6 +747,7 @@ export default function DocumentHubPage() {
                                 <th>SOURCE</th>
                                 <th>TYPE</th>
                                 <th>DOCUMENT NAME</th>
+                                <th>VERSION</th>
                                 <th>UPDATED BY</th>
                                 <th>UPDATED ON</th>
                                 <th>PROJECT</th>
@@ -502,7 +755,18 @@ export default function DocumentHubPage() {
                         </thead>
                         <tbody>
                             {documents.map((doc) => (
-                                <tr key={doc.id} style={selectedDocumentIds.has(doc.id) ? { backgroundColor: '#f0f7ff' } : {}}>
+                                <tr key={doc.id} className={selectedRadioDocId === doc.id ? 'bg-emerald-50/40' : selectedDocumentIds.has(doc.id) ? 'bg-blue-50/30' : ''}>
+                                    <td style={{ textAlign: 'center' }}>
+                                        <input
+                                            type="radio"
+                                            name="document-active-radio"
+                                            checked={selectedRadioDocId === doc.id}
+                                            onChange={() => setSelectedRadioDocId(doc.id)}
+                                            style={{ cursor: 'pointer' }}
+                                            title="Click radio to select this document for AI Agents"
+                                            className="text-emerald-600 focus:ring-emerald-500"
+                                        />
+                                    </td>
                                     <td style={{ textAlign: 'center' }}>
                                         <input
                                             type="checkbox"
@@ -528,7 +792,7 @@ export default function DocumentHubPage() {
                                             <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
                                             <polyline points="14 2 14 8 20 8" />
                                         </svg>
-                                        {(doc.source === 'CALM' || doc.source === 'File Upload') && (doc.documentId || doc.id) ? (
+                                        {(doc.source === 'CALM' || doc.source === 'File Upload' || (doc as any).documentTypeCode === 'TEST_CASE' || doc.type === 'Manual Test Case') && (doc.documentId || doc.id) ? (
                                             <button
                                                 onClick={() => openDocumentViewer(doc)}
                                                 className="hover:underline text-left text-blue-600 font-medium"
@@ -544,6 +808,21 @@ export default function DocumentHubPage() {
                                             <span className="overflow-hidden text-ellipsis whitespace-nowrap" title={doc.name}>{doc.name}</span>
                                         )}
                                     </td>
+                                    <td>
+                                        <span style={{ fontSize: 13, color: '#475569', fontWeight: 500 }}>
+                                            v{doc.version ?? 1}
+                                        </span>
+                                        {doc.isLatest === false && (
+                                            <span style={{ marginLeft: 6, fontSize: 11, padding: '2px 6px', borderRadius: 4, background: '#f1f5f9', color: '#64748b' }}>
+                                                archived
+                                            </span>
+                                        )}
+                                        {doc.isLatest !== false && doc.source === 'CALM' && (
+                                            <span style={{ marginLeft: 6, fontSize: 11, padding: '2px 6px', borderRadius: 4, background: '#dbeafe', color: '#1e40af' }}>
+                                                latest
+                                            </span>
+                                        )}
+                                    </td>
                                     <td>{doc.updatedBy}</td>
                                     <td>{doc.updatedOn}</td>
                                     <td>{doc.project}</td>
@@ -551,7 +830,7 @@ export default function DocumentHubPage() {
                             ))}
                             {documents.length === 0 && (
                                 <tr>
-                                    <td colSpan={7} className="text-center p-8 text-gray-400">
+                                    <td colSpan={9} className="text-center p-8 text-gray-400">
                                         No documents found. Try adjusting filters or syncing a source.
                                     </td>
                                 </tr>
@@ -621,7 +900,7 @@ export default function DocumentHubPage() {
 
             {/* Document Viewer Modal */}
             {viewerDoc && (
-                <div className="settings-modal-overlay" onClick={() => setViewerDoc(null)}>
+                <div className="settings-modal-overlay" onClick={() => { setViewerDoc(null); setDocumentVersions([]) }}>
                     <div
                         className="settings-modal"
                         style={{ maxWidth: 860, width: '90vw', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
@@ -631,11 +910,42 @@ export default function DocumentHubPage() {
                             <div style={{ flex: 1, minWidth: 0 }}>
                                 <h3 className="settings-modal-title" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {viewerDoc.name}
+                                    {viewerDoc.version ? ` (v${viewerDoc.version})` : ''}
                                 </h3>
                                 <p className="settings-modal-desc">Document content</p>
                             </div>
-                            <button className="settings-modal-close" onClick={() => setViewerDoc(null)}>×</button>
+                            <button className="settings-modal-close" onClick={() => { setViewerDoc(null); setDocumentVersions([]) }}>×</button>
                         </div>
+                        {documentVersions.length > 1 && (
+                            <div style={{ padding: '12px 1.5rem', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
+                                <div style={{ fontSize: 12, fontWeight: 600, color: '#64748b', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                    Version History
+                                </div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                    {documentVersions.map(v => (
+                                        <button
+                                            key={v.documentId}
+                                            onClick={() => switchDocumentVersion(v)}
+                                            disabled={isLoadingContent}
+                                            style={{
+                                                padding: '6px 12px',
+                                                borderRadius: 6,
+                                                border: viewerDoc.documentId === v.documentId ? '1px solid #034354' : '1px solid #e2e8f0',
+                                                background: viewerDoc.documentId === v.documentId ? '#034354' : 'white',
+                                                color: viewerDoc.documentId === v.documentId ? 'white' : '#475569',
+                                                fontSize: 13,
+                                                cursor: isLoadingContent ? 'not-allowed' : 'pointer',
+                                            }}
+                                        >
+                                            v{v.version}{v.isLatest ? ' (latest)' : ''}
+                                        </button>
+                                    ))}
+                                </div>
+                                {isLoadingVersions && (
+                                    <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 8, marginBottom: 0 }}>Loading version history...</p>
+                                )}
+                            </div>
+                        )}
                         <div
                             className="settings-modal-body"
                             style={{ flex: 1, overflowY: 'auto', padding: '1.5rem' }}
@@ -654,7 +964,7 @@ export default function DocumentHubPage() {
                             )}
                         </div>
                         <div className="settings-modal-footer">
-                            <button className="btn btn-secondary" onClick={() => setViewerDoc(null)}>Close</button>
+                            <button className="btn btn-secondary" onClick={() => { setViewerDoc(null); setDocumentVersions([]) }}>Close</button>
                         </div>
                     </div>
                 </div>
@@ -692,7 +1002,10 @@ export default function DocumentHubPage() {
             <SyncSourceModal
                 isOpen={showSyncModal}
                 onClose={() => setShowSyncModal(false)}
-                onSyncComplete={fetchDocuments}
+                onSyncComplete={() => {
+                    fetchFilterOptions()
+                    fetchDocuments(1)
+                }}
             />
         </div>
     )

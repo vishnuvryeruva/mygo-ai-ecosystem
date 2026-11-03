@@ -9,6 +9,7 @@ SAProuter Support:
     This allows EC2 to reach internal SAP systems behind corporate firewalls.
 """
 
+import os
 import re
 import socket
 import urllib.parse
@@ -57,21 +58,25 @@ def _is_private_ip(host: str) -> bool:
 
 
 class DirectADTClient:
-    def __init__(self, api_endpoint: str, client: str = "300", username: str = "", password: str = "", sap_router: Optional[str] = None):
+    def __init__(self, api_endpoint: str, client: str = "300", username: str = "", password: str = "",
+                 sap_router: Optional[str] = None, btp_proxy_config: Optional[Dict[str, Any]] = None):
         """
         Initialize the ADT Client.
         
         Args:
-            api_endpoint: Full URL (e.g. 'https://192.168.171.43:44300') or hostname
+            api_endpoint: Full URL (e.g. 'https://192.168.171.43:44300', 'http://mygohanafun2:8000') or hostname
             client: SAP Client ID (e.g. '300')
             username: SAP developer username
             password: SAP developer password
             sap_router: Optional SAProuter string (e.g. '/H/50.198.15.124/H/')
+            btp_proxy_config: Optional BTP Cloud Connector / Connectivity Proxy credentials dict
         """
         self.client = client.strip() or '300'
         self.username = username.strip()
         self.password = password
         self.sap_router = sap_router.strip() if sap_router else None
+        self.btp_proxy_config = btp_proxy_config or {}
+        self.connectivity_token = None
         
         # Parse host, port, use_ssl from api_endpoint
         url = api_endpoint.strip()
@@ -87,34 +92,15 @@ class DirectADTClient:
         if not self.port:
             self.port = 443 if self.use_ssl else 80
 
-        # ── Smart Auto-Routing Logic ─────────────────────────────────────────
-        # 1. If on VPN, direct TCP connection to private IP works instantly.
-        # 2. If direct TCP connection is unreachable (e.g. from EC2 outside VPN)
-        #    AND a SAProuter string is provided, fall back to the SAProuter public IP.
         router_public_ip = _extract_saprouter_public_ip(self.sap_router or '')
         target_host_is_private = _is_private_ip(self.host)
-        
-        can_reach_directly = False
-        if target_host_is_private:
-            try:
-                import socket as _socket
-                _s = _socket.create_connection((self.host, self.port), timeout=1.5)
-                _s.close()
-                can_reach_directly = True
-            except Exception:
-                can_reach_directly = False
-        
-        if target_host_is_private and not can_reach_directly and router_public_ip:
-            # Running outside VPN (e.g. EC2): Route through SAProuter public IP
-            self.effective_host = router_public_ip
-            self.routing_note = f"Via SAProuter {router_public_ip} -> {self.host}:{self.port}"
-        else:
-            # Running on VPN (Local) or public SAP host: Direct connection
-            self.effective_host = self.host
-            self.routing_note = f"Direct -> {self.host}:{self.port}"
+
+        # Always use the user-configured host for HTTP/HTTPS ADT communication.
+        self.effective_host = self.host
+        self.routing_note = f"Direct -> {self.host}:{self.port}"
 
         protocol = "https" if self.use_ssl else "http"
-        # base_url uses the EFFECTIVE host (public router IP when routing through SAProuter)
+        # base_url uses the user-configured host
         self.base_url = f"{protocol}://{self.effective_host}:{self.port}/sap/bc/adt"
         self.original_target = f"{protocol}://{self.host}:{self.port}/sap/bc/adt"
 
@@ -124,12 +110,63 @@ class DirectADTClient:
         self.session.verify = False
         if self.client:
             self.session.cookies.set("sap-usercontext", f"sap-client={self.client}")
-        # When routing through SAProuter, SAP expects the Host header to be the private target
         if router_public_ip and target_host_is_private:
             self.session.headers.update({"Host": f"{self.host}:{self.port}"})
         
+        # Setup BTP Cloud Connector / Connectivity Proxy if configured
+        proxy_host = (self.btp_proxy_config.get("connectivity_host") or os.getenv("BTP_CONNECTIVITY_HOST", "")).strip()
+        proxy_port = (self.btp_proxy_config.get("connectivity_port") or os.getenv("BTP_CONNECTIVITY_PORT", "20003")).strip()
+        scc_loc_id = (self.btp_proxy_config.get("scc_location_id") or os.getenv("BTP_SCC_LOCATION_ID", "")).strip()
+        
+        if proxy_host:
+            self.is_btp_proxy = True
+            token = self._refresh_connectivity_token()
+            proxy_url = f"http://{proxy_host}:{proxy_port}"
+            self.session.proxies = {
+                "http": proxy_url,
+                "https": proxy_url
+            }
+            if token:
+                self.session.headers["Proxy-Authorization"] = f"Bearer {token}"
+            if scc_loc_id:
+                self.session.headers["SAP-Connectivity-SCC-Location_ID"] = scc_loc_id
+            self.routing_note = f"BTP Cloud Connector Tunnel -> {proxy_url} -> {self.host}:{self.port}"
+        else:
+            self.is_btp_proxy = False
+            
         self.csrf_token = None
         print(f"DEBUG ADTClient: Initialized. client={self.client}, user={self.username}, routing={self.routing_note}, base_url={self.base_url}")
+
+    def _refresh_connectivity_token(self) -> Optional[str]:
+        """Fetch or refresh OAuth token from BTP Connectivity Service XSUAA."""
+        token_url = (self.btp_proxy_config.get("connectivity_token_url") or os.getenv("BTP_CONNECTIVITY_TOKEN_URL", "")).strip()
+        client_id = (self.btp_proxy_config.get("connectivity_client_id") or os.getenv("BTP_CONNECTIVITY_CLIENT_ID", "")).strip()
+        client_secret = (self.btp_proxy_config.get("connectivity_client_secret") or os.getenv("BTP_CONNECTIVITY_CLIENT_SECRET", "")).strip()
+
+        if not (token_url and client_id and client_secret):
+            return None
+
+        # Ensure token_url has /oauth/token if raw instance URL was provided
+        if not token_url.endswith("/oauth/token"):
+            token_url = token_url.rstrip("/") + "/oauth/token"
+
+        try:
+            print(f"DEBUG ADTClient: Fetching BTP Connectivity OAuth token from {token_url}...")
+            resp = requests.post(
+                token_url,
+                auth=(client_id, client_secret),
+                data={"grant_type": "client_credentials"},
+                timeout=15
+            )
+            resp.raise_for_status()
+            self.connectivity_token = resp.json().get("access_token")
+            if self.connectivity_token and hasattr(self, "session"):
+                self.session.headers["Proxy-Authorization"] = f"Bearer {self.connectivity_token}"
+            return self.connectivity_token
+        except Exception as e:
+            print(f"ERROR ADTClient: Failed to fetch BTP Connectivity token: {e}")
+            return None
+
 
     def connect(self) -> bool:
         """
@@ -158,22 +195,20 @@ class DirectADTClient:
             
             print(f"DEBUG ADTClient: Response status={response.status_code}")
             
-            if response.status_code in (200, 401):
-                # 401 = server is reachable, just needs correct credentials
+            if response.status_code == 200:
                 self.csrf_token = response.headers.get("X-CSRF-Token")
-                if response.status_code == 200:
-                    print(f"DEBUG ADTClient: Successfully authenticated. CSRF Token: {self.csrf_token}")
-                    return True
-                else:
-                    print(f"DEBUG ADTClient: Server reachable but credentials rejected (HTTP 401). Check username/password/client.")
-                    return False
+                print(f"DEBUG ADTClient: Successfully authenticated. CSRF Token: {self.csrf_token}")
+                return True
+            elif response.status_code == 401:
+                print(f"DEBUG ADTClient: Server reachable but credentials rejected (HTTP 401). Check username/password/client.")
+                raise Exception(f"SAP credentials rejected (HTTP 401 Unauthorized) for user '{self.username}' on client {self.client}. Please check username, password, or client ID.")
             else:
                 print(f"DEBUG ADTClient: Unexpected response (status {response.status_code}). Body: {response.text[:300]}")
-                return False
+                raise Exception(f"SAP server returned HTTP {response.status_code}: {response.text[:200]}")
         except requests.exceptions.ConnectTimeout:
             raise Exception(
                 f"Connection timed out reaching {self.effective_host}:{self.port}. "
-                f"{'SAProuter at ' + (self.sap_router or '') + ' may be unreachable or blocking this connection.' if self.sap_router else 'Ensure SAP Application Server is reachable from EC2.'}"
+                f"Ensure the SAP server host and port are reachable over your VPN."
             )
         except requests.exceptions.ReadTimeout:
             raise Exception(
@@ -363,18 +398,34 @@ class DirectADTClient:
     # Helper: resolve ADT REST path for a given object type
     # ──────────────────────────────────────────────────────────────────────────
 
+    CODE_BEARING_TYPES = {
+        "CLAS", "INTF", "PROG", "INCL", "FUGR", "TABL", "VIEW",
+        "DTEL", "DOMA", "DDLS", "MSAG", "SRVD", "BDEF"
+    }
+
+    NON_CODE_TYPES = {
+        "DEVC", "LRCC", "WDCC", "IWMO", "IWSG", "SRVB", "OA2S",
+        "HTTP", "SICF", "WAPA", "TRAN", "SUSO", "SUSH", "TOBJ"
+    }
+
     def _object_type_to_source_path(self, object_name: str, object_type: str) -> str:
         """
         Return the ADT REST source path for the given object type.
         object_type uses SAP short codes: CLAS, INTF, PROG, INCL, FUGR, TABL,
         VIEW, DTEL, DOMA, MSAG, DDLS (CDS), SRVD, BDEF.
         """
+        t = (object_type or "").strip().upper()
         n = object_name.strip().lower()
+
+        # Immediately return empty for known non-code metadata types
+        if t in self.NON_CODE_TYPES:
+            return ""
+
         type_map = {
             "CLAS": f"/oo/classes/{n}/source/main",
             "INTF": f"/oo/interfaces/{n}/source/main",
             "PROG": f"/programs/programs/{n}/source",
-            "INCL": f"/programs/includes/{n}/source",
+            "INCL": f"/programs/includes/{n}/source/main",
             "FUGR": f"/functions/groups/{n}/includes/main/source",
             "TABL": f"/ddic/tables/{n}/source/main",
             "VIEW": f"/ddic/views/{n}/source/main",
@@ -383,25 +434,28 @@ class DirectADTClient:
             "DDLS": f"/ddic/ddl/sources/{n}/source/main",   # CDS view
             "MSAG": f"/messageclass/{n}/source/main",
         }
-        # Auto-detect common prefixes if type not specified
-        if object_type not in type_map:
-            name_upper = object_name.strip().upper()
-            if name_upper.startswith(("ZCL_", "CL_")):
-                return f"/oo/classes/{n}/source/main"
-            elif name_upper.startswith(("ZIF_", "IF_")):
-                return f"/oo/interfaces/{n}/source/main"
-            else:
-                return f"/programs/programs/{n}/source"
-        return type_map[object_type]
+        if t in type_map:
+            return type_map[t]
 
-    # ──────────────────────────────────────────────────────────────────────────
+        # Auto-detect common prefixes
+        name_upper = object_name.strip().upper()
+        if name_upper.startswith(("ZCL_", "CL_")):
+            return f"/oo/classes/{n}/source/main"
+        elif name_upper.startswith(("ZIF_", "IF_")):
+            return f"/oo/interfaces/{n}/source/main"
+        elif t in self.CODE_BEARING_TYPES:
+            return f"/programs/programs/{n}/source"
+
+        # Not a known code-bearing type
+        return ""
+
+    # --------------------------------------------------------------------------
     # Package / Repository Browsing
-    # ──────────────────────────────────────────────────────────────────────────
+    # --------------------------------------------------------------------------
 
-    def fetch_package_contents(self, package_name: str) -> Dict[str, Any]:
+    def fetch_package_contents(self, package_name: str, max_depth: int = 2) -> Dict[str, Any]:
         """
-        Browse all ABAP objects inside a package via the ADT nodestructure endpoint.
-        Tries GET with parameters, and falls back to POST or alternative parent_name formats ($TMP / TMP).
+        Fetch all objects inside an ABAP package using the ADT nodestructure API.
         """
         if not self.csrf_token:
             self.connect()
@@ -420,65 +474,105 @@ class DirectADTClient:
         headers = {
             "sap-client": self.client,
             "X-sap-client": self.client,
-            "Accept": "application/xml, text/xml, */*"
+            "Accept": "application/xml, text/xml, */*",
+            "Content-Type": "application/vnd.sap.adt.repository.nodestructure.v1+xml"
         }
         if self.csrf_token:
             headers["X-CSRF-Token"] = self.csrf_token
 
+        xml_body = """<?xml version="1.0" encoding="UTF-8"?><asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DATA></DATA></asx:values></asx:abap>"""
+
+        import xml.etree.ElementTree as ET
+
         for variant in pkg_variants:
-            params = {
-                "parent_name": variant,
-                "parent_tech_name": variant,
-                "parent_type": "DEVC/K",
-                "sap-client": self.client
-            }
+            query_url = f"{url}?parent_name={variant}&parent_type=DEVC/K&parent_tech_name={variant}&sap-client={self.client}"
             try:
-                print(f"DEBUG ADTClient: Fetching package contents for variant {variant} via {url}")
-                response = self.session.get(url, params=params, headers=headers, timeout=30)
+                print(f"DEBUG ADTClient: Fetching package contents for variant {variant} via {query_url}")
+                response = self.session.post(query_url, data=xml_body, headers=headers, timeout=30)
 
-                if response.status_code != 200:
-                    post_headers = {**headers, "Content-Type": "application/vnd.sap.adt.repository.nodestructure.v1+xml"}
-                    xml_body = f"""<?xml version="1.0" encoding="UTF-8"?><asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DATA><PARENT_NAME>{variant}</PARENT_NAME><PARENT_TYPE>DEVC/K</PARENT_TYPE></DATA></asx:values></asx:abap>"""
-                    response = self.session.post(url, data=xml_body, headers=post_headers, timeout=30)
-
-                if response.status_code == 200:
-                    import xml.etree.ElementTree as ET
+                if response.status_code == 200 and len(response.text) > 0:
                     try:
                         root = ET.fromstring(response.text)
-                        for elem in root.iter():
-                            tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
-                            if tag in ('objectReference', 'adtcore:objectReference', 'node'):
-                                obj_name = (
-                                    elem.get('name') or
-                                    elem.get('{http://www.sap.com/adt/core}name') or ''
-                                ).strip().upper()
-                                obj_type = (
-                                    elem.get('type') or
-                                    elem.get('{http://www.sap.com/adt/core}type') or ''
-                                ).strip().upper()
-                                obj_desc = (
-                                    elem.get('description') or
-                                    elem.get('{http://www.sap.com/adt/core}description') or ''
-                                ).strip()
-                                if obj_name and obj_type:
-                                    objects.append({
-                                        "name": obj_name,
-                                        "type": obj_type,
-                                        "description": obj_desc
-                                    })
-                        print(f"DEBUG ADTClient: Found {len(objects)} objects for variant {variant}")
-                        return {
-                            "success": True,
-                            "package": pkg_clean,
-                            "objects": objects,
-                            "total": len(objects)
-                        }
+                        # 1. Primary S/4HANA format: <SEU_ADT_REPOSITORY_OBJ_NODE>
+                        for node in root.findall(".//SEU_ADT_REPOSITORY_OBJ_NODE"):
+                            obj_name = (node.findtext("OBJECT_NAME") or node.findtext("TECH_NAME") or '').strip().upper()
+                            raw_type = (node.findtext("OBJECT_TYPE") or '').strip().upper()
+                            if not obj_name or obj_name == variant:
+                                continue
+
+                            # Normalize short type code
+                            if raw_type == 'PROG/I':
+                                type_code = 'INCL'
+                            elif '/' in raw_type:
+                                type_code = raw_type.split('/')[0]
+                            else:
+                                type_code = raw_type
+
+                            obj_desc = (node.findtext("DESCRIPTION") or '').strip()
+                            obj_uri = (node.findtext("OBJECT_URI") or '').strip()
+                            objects.append({
+                                "name": obj_name,
+                                "type": type_code,
+                                "raw_type": raw_type,
+                                "description": obj_desc,
+                                "package": variant,
+                                "uri": obj_uri
+                            })
+
+                        # 2. Alternative ADT core format: <objectReference> or <node>
+                        if not objects:
+                            for elem in root.iter():
+                                tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                                if tag in ('objectReference', 'adtcore:objectReference', 'node'):
+                                    obj_name = (
+                                        elem.get('name') or
+                                        elem.get('{http://www.sap.com/adt/core}name') or ''
+                                    ).strip().upper()
+                                    raw_type = (
+                                        elem.get('type') or
+                                        elem.get('{http://www.sap.com/adt/core}type') or ''
+                                    ).strip().upper()
+                                    obj_desc = (
+                                        elem.get('description') or
+                                        elem.get('{http://www.sap.com/adt/core}description') or ''
+                                    ).strip()
+                                    type_code = raw_type.split('/')[0] if '/' in raw_type else raw_type
+                                    if obj_name and obj_name != variant:
+                                        objects.append({
+                                            "name": obj_name,
+                                            "type": type_code,
+                                            "raw_type": raw_type,
+                                            "description": obj_desc,
+                                            "package": variant
+                                        })
+
+                        if objects:
+                            print(f"DEBUG ADTClient: Found {len(objects)} objects for variant {variant}")
+                            return {
+                                "success": True,
+                                "package": pkg_clean,
+                                "objects": objects,
+                                "total": len(objects)
+                            }
                     except ET.ParseError as pe:
                         print(f"DEBUG ADTClient: XML parse warning: {pe}")
                 else:
                     last_error = f"SAP returned status {response.status_code}"
             except Exception as e:
                 last_error = str(e)
+
+        # 3. Fallback: If 0 objects found via nodestructure, search SAP repository for matching pattern
+        if not objects and pkg_clean:
+            print(f"DEBUG ADTClient: Nodestructure returned 0 objects, falling back to search for '{pkg_clean}*'")
+            search_res = self.search_objects(f"{pkg_clean}*", max_results=100)
+            if search_res.get("success") and search_res.get("objects"):
+                return {
+                    "success": True,
+                    "package": pkg_clean,
+                    "objects": search_res.get("objects", []),
+                    "total": len(search_res.get("objects", [])),
+                    "searchFallback": True
+                }
 
         return {
             "success": True,
@@ -488,6 +582,132 @@ class DirectADTClient:
             "notice": last_error if not objects else None
         }
 
+    def list_all_packages(self) -> List[Dict[str, str]]:
+        """
+        List all development packages from the SAP system via root nodestructure.
+        Returns a list of dicts with 'name' and 'type', prioritizing custom (Z*/Y*) packages.
+        """
+        if not self.csrf_token:
+            self.connect()
+
+        url = f"{self.base_url}/repository/nodestructure"
+        headers = {
+            "sap-client": self.client,
+            "X-sap-client": self.client,
+            "Accept": "application/xml, text/xml, */*",
+            "Content-Type": "application/vnd.sap.adt.repository.nodestructure.v1+xml"
+        }
+        if self.csrf_token:
+            headers["X-CSRF-Token"] = self.csrf_token
+
+        xml_body = """<?xml version="1.0" encoding="UTF-8"?><asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DATA></DATA></asx:values></asx:abap>"""
+        packages = []
+        try:
+            res = self.session.post(url, data=xml_body, headers=headers, timeout=25)
+            if res.status_code == 200:
+                import xml.etree.ElementTree as ET
+                root = ET.fromstring(res.text)
+                seen = set()
+                custom_pkgs = []
+                standard_pkgs = []
+                for node in root.findall(".//SEU_ADT_REPOSITORY_OBJ_NODE"):
+                    name = (node.findtext("OBJECT_NAME") or "").strip().upper()
+                    desc = (node.findtext("DESCRIPTION") or "").strip()
+                    if name and name not in seen:
+                        seen.add(name)
+                        item = {"name": name, "description": desc}
+                        if name.startswith(("Z", "Y")):
+                            custom_pkgs.append(item)
+                        else:
+                            standard_pkgs.append(item)
+                packages = sorted(custom_pkgs, key=lambda x: x["name"]) + sorted(standard_pkgs, key=lambda x: x["name"])
+        except Exception as e:
+            print(f"DEBUG ADTClient: list_all_packages error: {e}")
+
+        return packages
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Repository Information System / Search
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def search_objects(self, query: str, max_results: int = 20) -> Dict[str, Any]:
+        """
+        Search for ABAP development objects across the SAP system using ADT quickSearch.
+        Supports wildcards (e.g. 'Z*', 'CL_*', 'ORDER*', '*VBAK*').
+
+        Args:
+            query: Search pattern or keyword
+            max_results: Maximum objects to return (default 20)
+
+        Returns:
+            {"success": True, "query": query, "objects": [...], "total": int}
+        """
+        if not self.csrf_token:
+            self.connect()
+
+        url = f"{self.base_url}/repository/informationsystem/search"
+        params = {
+            "operation": "quickSearch",
+            "query": query.strip(),
+            "maxResults": str(max_results),
+            "sap-client": self.client
+        }
+        headers = {
+            "sap-client": self.client,
+            "X-sap-client": self.client,
+            "Accept": "application/xml, text/xml, */*"
+        }
+
+        try:
+            print(f"DEBUG ADTClient: quickSearch '{query}' via {url}")
+            response = self.session.get(url, params=params, headers=headers, timeout=20)
+            if response.status_code == 200:
+                import xml.etree.ElementTree as ET
+                objects = []
+                try:
+                    root = ET.fromstring(response.text)
+                    for elem in root.iter():
+                        tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                        if tag in ('objectReference', 'adtcore:objectReference'):
+                            name = (elem.get('name') or elem.get('{http://www.sap.com/adt/core}name') or '').strip().upper()
+                            raw_type = (elem.get('type') or elem.get('{http://www.sap.com/adt/core}type') or '').strip().upper()
+                            pkg = (elem.get('packageName') or elem.get('{http://www.sap.com/adt/core}packageName') or '').strip().upper()
+                            desc = (elem.get('description') or elem.get('{http://www.sap.com/adt/core}description') or '').strip()
+                            uri = (elem.get('uri') or elem.get('{http://www.sap.com/adt/core}uri') or '').strip()
+
+                            # Simplify type shortcode (e.g. CLAS/OC -> CLAS, PROG/P -> PROG)
+                            type_code = raw_type.split('/')[0] if '/' in raw_type else raw_type
+
+                            if name:
+                                objects.append({
+                                    "name": name,
+                                    "type": type_code,
+                                    "raw_type": raw_type,
+                                    "package": pkg,
+                                    "description": desc,
+                                    "uri": uri
+                                })
+                    print(f"DEBUG ADTClient: quickSearch found {len(objects)} objects for '{query}'")
+                    return {
+                        "success": True,
+                        "query": query,
+                        "objects": objects,
+                        "total": len(objects)
+                    }
+                except Exception as pe:
+                    print(f"DEBUG ADTClient: XML parse error in search: {pe}")
+                    return {"success": False, "error": f"Failed to parse search XML: {pe}", "query": query, "objects": []}
+            else:
+                return {
+                    "success": False,
+                    "error": f"SAP returned status {response.status_code}",
+                    "query": query,
+                    "objects": []
+                }
+        except Exception as e:
+            print(f"ERROR ADTClient: search_objects failed: {e}")
+            return {"success": False, "error": str(e), "query": query, "objects": []}
+
 
     # ──────────────────────────────────────────────────────────────────────────
     # Source Code Read (type-aware, any ABAP object)
@@ -496,8 +716,8 @@ class DirectADTClient:
     def fetch_source_code(self, object_name: str, object_type: str = "CLAS") -> Dict[str, Any]:
         """
         Fetch full ABAP source text for any object type.
-        This is the unified replacement for both fetch_abap_class_code
-        and fetch_abap_program_code — extended to cover all ADT-readable types.
+        Supports ADT REST endpoints with automatic include/program cross-fallback,
+        and secondary fallback to SAP Gateway OData sourcecodeSet service.
 
         Args:
             object_name: SAP object name (e.g. ZCL_SALES_ORDER)
@@ -506,8 +726,29 @@ class DirectADTClient:
         Returns:
             {"success": True, "source_code": "<abap text>", "object_name": "...", "object_type": "..."}
         """
-        path = self._object_type_to_source_path(object_name, object_type)
-        url = self.base_url + path
+        import html
+
+        # 1. Clean object_name (strip any appended type suffix like " (DDLS)" or " (CLAS)")
+        clean_name = re.sub(r'\s*\([A-Z0-9_]+\)$', '', object_name or '').strip().upper()
+        
+        # 2. Normalize object_type
+        type_labels = {
+            'ABAP CLASS': 'CLAS', 'CLASS': 'CLAS',
+            'ABAP INTERFACE': 'INTF', 'INTERFACE': 'INTF',
+            'ABAP PROGRAM': 'PROG', 'PROGRAM': 'PROG', 'REPORT': 'PROG',
+            'ABAP INCLUDE': 'INCL', 'INCLUDE': 'INCL',
+            'FUNCTION GROUP': 'FUGR', 'FUNCTION MODULE': 'FUNC',
+            'CDS VIEW': 'DDLS',
+            'DATABASE TABLE': 'TABL', 'TABLE': 'TABL',
+            'DATABASE VIEW': 'VIEW',
+            'DATA ELEMENT': 'DTEL', 'DOMAIN': 'DOMA',
+            'MESSAGE CLASS': 'MSAG',
+            'SERVICE DEFINITION': 'SRVD', 'BEHAVIOR DEFINITION': 'BDEF',
+            'PACKAGE': 'DEVC'
+        }
+        clean_type = type_labels.get((object_type or '').strip().upper(), (object_type or 'CLAS').strip().upper())
+
+        path = self._object_type_to_source_path(clean_name, clean_type)
         headers = {
             "sap-client": self.client,
             "X-sap-client": self.client,
@@ -516,36 +757,142 @@ class DirectADTClient:
         }
         params = {"sap-client": self.client} if self.client else {}
 
-        try:
-            print(f"DEBUG ADTClient: fetch_source_code {object_name} ({object_type}) → {url}")
-            response = self.session.get(url, params=params, headers=headers, timeout=20)
+        # 3. Attempt ADT REST primary path
+        if path:
+            url = self.base_url + path
+            try:
+                print(f"DEBUG ADTClient: fetch_source_code {clean_name} ({clean_type}) -> {url}")
+                response = self.session.get(url, params=params, headers=headers, timeout=20)
+                if response.status_code == 200 and response.text.strip():
+                    source = response.text
+                    print(f"DEBUG ADTClient: Got {len(source)} chars for {clean_name} via ADT REST")
+                    return {
+                        "success": True,
+                        "source_code": source,
+                        "object_name": clean_name,
+                        "object_type": clean_type,
+                        "url": url,
+                        "source": "SAP_ADT"
+                    }
+                elif response.status_code == 404:
+                    # Alternative ADT path for PROG <-> INCL
+                    alt_path = None
+                    n_lower = clean_name.lower()
+                    if clean_type == 'PROG':
+                        alt_path = f"/programs/includes/{n_lower}/source/main"
+                    elif clean_type == 'INCL':
+                        alt_path = f"/programs/programs/{n_lower}/source"
 
-            if response.status_code == 200:
-                source = response.text
-                print(f"DEBUG ADTClient: Got {len(source)} chars for {object_name}")
-                return {
-                    "success": True,
-                    "source_code": source,
-                    "object_name": object_name.strip().upper(),
-                    "object_type": object_type,
-                    "url": url
-                }
-            else:
-                print(f"DEBUG ADTClient: fetch_source_code failed. status={response.status_code}, body={response.text[:200]}")
-                return {
-                    "success": False,
-                    "error": f"SAP returned status {response.status_code}",
-                    "details": response.text[:300]
-                }
-        except Exception as e:
-            print(f"ERROR ADTClient: fetch_source_code exception: {e}")
-            return {"success": False, "error": str(e)}
+                    if alt_path:
+                        alt_url = self.base_url + alt_path
+                        print(f"DEBUG ADTClient: Retrying alternative ADT path -> {alt_url}")
+                        alt_res = self.session.get(alt_url, params=params, headers=headers, timeout=20)
+                        if alt_res.status_code == 200 and alt_res.text.strip():
+                            source = alt_res.text
+                            print(f"DEBUG ADTClient: Got {len(source)} chars via alternative ADT path")
+                            return {
+                                "success": True,
+                                "source_code": source,
+                                "object_name": clean_name,
+                                "object_type": clean_type,
+                                "url": alt_url,
+                                "source": "SAP_ADT"
+                            }
+            except Exception as e:
+                print(f"DEBUG ADTClient: ADT REST fetch exception: {e}")
+
+        # 4. Fallback to SAP Gateway OData sourcecodeSet
+        protocol = "https" if self.use_ssl else "http"
+        odata_base = f"{protocol}://{self.effective_host}:{self.port}/sap/opu/odata/sap/ZABAP_GIT_OBJECTS_SRV"
+        odata_headers = {
+            "sap-client": self.client,
+            "X-sap-client": self.client,
+            "X-Client": self.client,
+            "Accept": "application/json"
+        }
+
+        # Attempt 4a: OData Entity single read
+        try:
+            entity_url = f"{odata_base}/sourcecodeSet(ObjectType='{clean_type}',ObjectName='{clean_name}')?$format=json"
+            print(f"DEBUG ADTClient: Attempting SAP OData entity read -> {entity_url}")
+            odata_res = self.session.get(entity_url, params=params, headers=odata_headers, timeout=15)
+            if odata_res.status_code == 200:
+                payload = odata_res.json()
+                line = payload.get('d', {}).get('Line')
+                if line:
+                    print(f"DEBUG ADTClient: Got source code for {clean_name} via SAP OData Entity")
+                    return {
+                        "success": True,
+                        "source_code": line,
+                        "object_name": clean_name,
+                        "object_type": clean_type,
+                        "url": entity_url,
+                        "source": "SAP_ODATA"
+                    }
+        except Exception as odata_err:
+            print(f"DEBUG ADTClient: OData entity read error: {odata_err}")
+
+        # Attempt 4b: OData EntitySet query with filter
+        try:
+            filter_url = f"{odata_base}/sourcecodeSet?$filter=ObjectType eq '{clean_type}' and ObjectName eq '{clean_name}'&$format=json"
+            print(f"DEBUG ADTClient: Attempting SAP OData entityset filter -> {filter_url}")
+            odata_res2 = self.session.get(filter_url, params=params, headers=odata_headers, timeout=15)
+            if odata_res2.status_code == 200:
+                payload2 = odata_res2.json()
+                results = payload2.get('d', {}).get('results', [])
+                if results:
+                    lines = [str(r.get('Line') or r.get('line') or r.get('Content') or '') for r in results]
+                    combined = '\n'.join(lines)
+                    if combined.strip():
+                        print(f"DEBUG ADTClient: Got {len(lines)} lines for {clean_name} via SAP OData Filter")
+                        return {
+                            "success": True,
+                            "source_code": combined,
+                            "object_name": clean_name,
+                            "object_type": clean_type,
+                            "url": filter_url,
+                            "source": "SAP_ODATA"
+                        }
+        except Exception as odata_err2:
+            print(f"DEBUG ADTClient: OData filter read error: {odata_err2}")
+
+        # Attempt 4c: OData EntitySet query with ObjectName only
+        try:
+            filter_url2 = f"{odata_base}/sourcecodeSet?$filter=ObjectName eq '{clean_name}'&$format=json"
+            odata_res3 = self.session.get(filter_url2, params=params, headers=odata_headers, timeout=15)
+            if odata_res3.status_code == 200:
+                payload3 = odata_res3.json()
+                results3 = payload3.get('d', {}).get('results', [])
+                if results3:
+                    lines = [str(r.get('Line') or r.get('line') or r.get('Content') or '') for r in results3]
+                    combined = '\n'.join(lines)
+                    if combined.strip():
+                        print(f"DEBUG ADTClient: Got {len(lines)} lines for {clean_name} via SAP OData ObjectName Filter")
+                        return {
+                            "success": True,
+                            "source_code": combined,
+                            "object_name": clean_name,
+                            "object_type": clean_type,
+                            "url": filter_url2,
+                            "source": "SAP_ODATA"
+                        }
+        except Exception:
+            pass
+
+        return {
+            "success": False,
+            "source_code": None,
+            "error": f"Source code for '{clean_name}' ({clean_type}) not found in SAP ADT or OData.",
+            "object_name": clean_name,
+            "object_type": clean_type
+        }
 
     # ──────────────────────────────────────────────────────────────────────────
     # Source Code Write (PUT to ADT REST)
     # ──────────────────────────────────────────────────────────────────────────
 
-    def write_source_code(self, object_name: str, object_type: str, source_code: str) -> Dict[str, Any]:
+    def write_source_code(self, object_name: str, object_type: str, source_code: str,
+                          transport_request: str = "") -> dict:
         """
         Write (PUT) ABAP source code back to the SAP system via ADT REST.
         Requires a valid CSRF token — call connect() first.
@@ -554,6 +901,7 @@ class DirectADTClient:
             object_name:  SAP object name (e.g. ZCL_SALES_ORDER)
             object_type:  SAP object type short code (CLAS, PROG, TABL, DDLS …)
             source_code:  Full ABAP / DDL source text to write
+            transport_request: Optional CTS transport request number
 
         Returns:
             {"success": True, "object_name": "...", "bytes_written": N}
@@ -572,9 +920,11 @@ class DirectADTClient:
             "Accept": "*/*"
         }
         params = {"sap-client": self.client} if self.client else {}
+        if transport_request:
+            params["corrNr"] = transport_request
 
         try:
-            print(f"DEBUG ADTClient: write_source_code {object_name} ({object_type}) → PUT {url}")
+            print(f"DEBUG ADTClient: write_source_code {object_name} ({object_type}) -> PUT {url}")
             response = self.session.put(
                 url,
                 data=source_code.encode("utf-8"),
@@ -843,6 +1193,27 @@ class DirectADTClient:
             response = self.session.post(url, data=payload.encode("utf-8"), headers=headers, params=params, timeout=30)
 
             if response.status_code in (200, 201):
+                # Check for syntax error messages inside the activation response XML
+                if '<adtcore:message' in response.text and ('type="E"' in response.text or 'severity="E"' in response.text or 'type="error"' in response.text.lower()):
+                    import xml.etree.ElementTree as ET
+                    err_msgs = []
+                    try:
+                        root = ET.fromstring(response.text)
+                        for elem in root.iter():
+                            if elem.tag.endswith('message'):
+                                msg_text = elem.attrib.get('text') or elem.text or ''
+                                if msg_text:
+                                    err_msgs.append(msg_text)
+                    except:
+                        pass
+                    msg_summary = "; ".join(err_msgs) if err_msgs else "Syntax error during SAP activation"
+                    print(f"DEBUG ADTClient: Activation contains compiler errors: {msg_summary}")
+                    return {
+                        "success": False,
+                        "error": msg_summary,
+                        "details": response.text[:400]
+                    }
+
                 print(f"DEBUG ADTClient: Activation successful for {object_uris}")
                 return {"success": True, "activated": object_uris, "response": response.text[:300]}
             else:

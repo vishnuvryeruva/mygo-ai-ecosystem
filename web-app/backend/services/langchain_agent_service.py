@@ -57,6 +57,7 @@ class LangGraphExecutionEngine:
         system_prompt: str = "",
         user_id: str = "default_user",
         llm_provider: str = "openai",
+        model_name: Optional[str] = None,
         execution_fn: Optional[Callable[[], Any]] = None
     ) -> Any:
         """
@@ -162,19 +163,37 @@ class LangGraphExecutionEngine:
                 {"remaining_balance": credit_info["remaining_balance"]}
             ))
 
-            # Record LangGraph Trace
+            # Resolve actual model name
+            import os
+            resolved_model = model_name
+            if not resolved_model:
+                prov_lower = (llm_provider or "gemini").lower()
+                if prov_lower == "gemini":
+                    resolved_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+                elif prov_lower == "claude":
+                    resolved_model = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-20241022")
+                else:
+                    resolved_model = os.getenv("OPENAI_MODEL", "gpt-4o")
+
+            # Record LangGraph Trace in DB
             ObservabilityService.record_trace({
                 "trace_id": trace_id,
                 "agent_name": agent_name,
                 "user_id": user_id,
+                "llm_provider": llm_provider,
+                "model_name": resolved_model,
                 "status": "SUCCESS",
                 "prompt_tokens": state["prompt_tokens"],
                 "completion_tokens": state["completion_tokens"],
+                "total_tokens": state["prompt_tokens"] + state["completion_tokens"],
                 "credits_deducted": state["credits_deducted"],
                 "latency_ms": state["latency_ms"],
+                "execution_time_ms": state["latency_ms"],
                 "nodes": state["node_steps"],
-                "input_preview": user_prompt,
-                "output_preview": output_str
+                "input_text": user_prompt,
+                "output_text": output_str,
+                "input_preview": user_prompt[:200],
+                "output_preview": output_str[:200]
             })
 
             return output
@@ -191,17 +210,32 @@ class LangGraphExecutionEngine:
                 {"error": str(e)}
             ))
 
+            import os
+            prov_lower = (llm_provider or "gemini").lower()
+            resolved_model = model_name or (
+                os.getenv("GEMINI_MODEL", "gemini-2.5-flash") if prov_lower == "gemini" else
+                os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-20241022") if prov_lower == "claude" else
+                os.getenv("OPENAI_MODEL", "gpt-4o")
+            )
+
             ObservabilityService.record_trace({
                 "trace_id": trace_id,
                 "agent_name": agent_name,
                 "user_id": user_id,
+                "llm_provider": llm_provider,
+                "model_name": resolved_model,
                 "status": "ERROR",
                 "prompt_tokens": state["prompt_tokens"],
                 "completion_tokens": 0,
+                "total_tokens": state["prompt_tokens"],
                 "credits_deducted": 0.0,
                 "latency_ms": state["latency_ms"],
+                "execution_time_ms": state["latency_ms"],
                 "nodes": state["node_steps"],
-                "input_preview": user_prompt,
+                "input_text": user_prompt,
+                "output_text": f"Error: {str(e)}",
+                "error_message": str(e),
+                "input_preview": user_prompt[:200],
                 "output_preview": f"Error: {str(e)}"
             })
 

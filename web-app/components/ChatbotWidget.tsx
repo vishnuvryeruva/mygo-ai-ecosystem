@@ -414,6 +414,18 @@ export default function ChatbotWidget({
         scrollToBottom()
     }, [messages, scrollToBottom])
 
+    // Listen for chatbot-query events to pre-fill prompt from Code Hub or Document Hub
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent).detail
+            if (detail?.query) {
+                setInput(detail.query)
+            }
+        }
+        window.addEventListener('chatbot-query', handler)
+        return () => window.removeEventListener('chatbot-query', handler)
+    }, [])
+
     // ── Handle action button clicks ──────────────
     const handleAction = async (action: ChatAction) => {
         if (action.id === 'open-modal') {

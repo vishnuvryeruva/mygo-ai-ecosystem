@@ -23,9 +23,9 @@ interface SyncSourceModalProps {
     preSelectedSourceId?: string | null
 }
 
-const isCloudAlmSource = (source: Source) => {
+const isSyncableSource = (source: Source) => {
     const sourceType = String(source?.type || '').trim().toUpperCase()
-    return sourceType === 'CALM' || sourceType === 'SAP CLOUD ALM'
+    return sourceType === 'CALM' || sourceType === 'SAP CLOUD ALM' || sourceType === 'SAP_ADT' || sourceType === 'SAP_ADT_MCP'
 }
 
 // Map SAP document type codes to human-readable names
@@ -36,6 +36,12 @@ const documentTypeNames: Record<string, string> = {
     SD: 'Solution Document',
     CD: 'Change Document',
     DP: 'Decision Paper',
+    CLAS: 'ABAP Class',
+    INTF: 'ABAP Interface',
+    PROG: 'ABAP Program',
+    FUGR: 'Function Group',
+    DDLS: 'CDS View',
+    TABL: 'Database Table'
 }
 
 export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSelectedSourceId }: SyncSourceModalProps) {
@@ -44,13 +50,18 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
     const [selectedSource, setSelectedSource] = useState('')
     const [projects, setProjects] = useState<Project[]>([])
     const [selectedProject, setSelectedProject] = useState('')
+    const [customPackage, setCustomPackage] = useState('')
     const [docsToSync, setDocsToSync] = useState<any[]>([])
     const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set())
     const [syncStatus, setSyncStatus] = useState<Record<string, boolean>>({})
     const [isSyncing, setIsSyncing] = useState(false)
+    const [syncProgressText, setSyncProgressText] = useState('')
     const [isLoadingProjects, setIsLoadingProjects] = useState(false)
     const [projectLoadError, setProjectLoadError] = useState<string | null>(null)
     const [syncResult, setSyncResult] = useState<{ message: string; count: number; updated: number; added: number } | null>(null)
+
+    const selectedSourceObj = sources.find(s => s.id === selectedSource)
+    const isAdtSelected = Boolean(selectedSourceObj && (selectedSourceObj.type === 'SAP_ADT' || selectedSourceObj.type === 'SAP_ADT_MCP'))
 
     useEffect(() => {
         if (isOpen) {
@@ -62,43 +73,44 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
 
     // Pre-select source if provided
     useEffect(() => {
-        if (preSelectedSourceId && sources.length > 0) {
-            setSelectedSource(preSelectedSourceId)
-            // Automatically advance to step 2 if source is pre-selected
-            setSyncStep(2)
+        if (selectedSource) {
+            loadProjects(selectedSource)
         }
-    }, [preSelectedSourceId, sources])
-
-    useEffect(() => {
-        if (selectedSource && syncStep === 2) {
-            fetchProjects(selectedSource)
-        }
-    }, [selectedSource, syncStep])
+    }, [selectedSource])
 
     const fetchSources = async () => {
         try {
             const res = await axios.get('/api/sources')
-            const calmSources = (res.data.sources || []).filter(isCloudAlmSource)
-            setSources(calmSources)
-            if (calmSources.length === 0) {
-                setSelectedSource('')
+            const allSources: Source[] = res.data.sources || []
+            const syncable = allSources.filter(isSyncableSource)
+            setSources(syncable)
+
+            // Auto-select if preSelectedSourceId matches or only 1 source
+            if (preSelectedSourceId && syncable.some(s => s.id === preSelectedSourceId)) {
+                setSelectedSource(preSelectedSourceId)
+                setSyncStep(2)
+            } else if (syncable.length === 1) {
+                setSelectedSource(syncable[0].id)
             }
         } catch (err) {
-            console.error('Failed to fetch sources:', err)
+            console.error('Failed to load sources:', err)
         }
     }
+    const loadSources = fetchSources
 
-    const fetchProjects = async (sourceId: string) => {
-        setProjects([]) // Clear previous
-        setProjectLoadError(null)
+    const loadProjects = async (sourceId: string) => {
         setIsLoadingProjects(true)
+        setProjectLoadError(null)
         try {
             const res = await axios.get(`/api/calm/${sourceId}/projects`)
-            setProjects(res.data.projects || [])
+            const projs = res.data.projects || []
+            setProjects(projs)
+            if (projs.length === 1) {
+                setSelectedProject(projs[0].id)
+            }
         } catch (err: any) {
-            console.error('Failed to fetch projects:', err)
-            setProjects([])
-            setProjectLoadError(err?.response?.data?.error || 'Failed to load projects.')
+            console.error('Failed to load projects:', err)
+            setProjectLoadError(err?.response?.data?.error || 'Failed to load projects/packages for this source')
         } finally {
             setIsLoadingProjects(false)
         }
@@ -107,12 +119,17 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
     const handleSyncNext = async () => {
         if (syncStep === 1 && selectedSource) {
             setSyncStep(2)
-        } else if (syncStep === 2 && selectedProject) {
+        } else if (syncStep === 2 && (selectedProject || customPackage)) {
+            const targetPkg = (customPackage.trim() || selectedProject)
+            if (isAdtSelected && customPackage.trim()) {
+                setSelectedProject(customPackage.trim().toUpperCase())
+            }
             setSyncStep(3)
             // Fetch potential docs and test cases to sync
             setIsSyncing(true)
+            setSyncProgressText('Fetching objects from SAP S/4HANA...')
             try {
-                const res = await axios.get(`/api/calm/${selectedSource}/documents?projectId=${selectedProject}&includeTestCases=true`)
+                const res = await axios.get(`/api/calm/${selectedSource}/documents?projectId=${encodeURIComponent(targetPkg)}&includeTestCases=true`)
                 const docs = res.data.documents || []
                 const testCases = res.data.testCases || []
 
@@ -120,19 +137,25 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                 const allItems = [...docs, ...testCases]
                 setDocsToSync(allItems)
 
-                // Check sync status for all items
+                // Select all items by default immediately so UI is always responsive
                 const itemIds = allItems.map((item: any) => item.uuid || item.id)
-                const statusRes = await axios.post('/api/sync/check', {
-                    documentIds: itemIds
-                })
-                setSyncStatus(statusRes.data.syncStatus || {})
-
-                // Select all items by default
                 setSelectedDocIds(new Set(itemIds))
-            } catch (err) {
+
+                // Check sync status for all items in background
+                try {
+                    const statusRes = await axios.post('/api/sync/check', {
+                        documentIds: itemIds
+                    })
+                    setSyncStatus(statusRes.data?.syncStatus || {})
+                } catch (checkErr) {
+                    console.warn('Sync status check warning (non-fatal):', checkErr)
+                }
+            } catch (err: any) {
                 console.error('Failed to fetch docs from source:', err)
+                alert(err?.response?.data?.error || 'Failed to fetch documents from source.')
             } finally {
                 setIsSyncing(false)
+                setSyncProgressText('')
             }
         } else if (syncStep === 3) {
             // Perform actual sync (only selected documents)
@@ -156,49 +179,63 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                     if (raw) syncedBy = JSON.parse(raw)?.name || undefined
                 } catch { /* ignore */ }
 
-                const res = await axios.post('/api/sync', {
-                    sourceId: selectedSource,
-                    ...(syncedBy ? { syncedBy } : {}),
-                    documents: selectedDocs.map(doc => ({
-                        ...doc,
-                        id: doc.uuid || doc.id,
-                        name: doc.title || doc.name,
-                        type: doc.documentTypeCode || doc.documentType || doc.type,
-                        metadata: {
+                // Batch sync in chunks of 15 items for instantaneous response & no proxy timeout
+                const CHUNK_SIZE = 15
+                let allResults: any[] = []
+
+                for (let i = 0; i < selectedDocs.length; i += CHUNK_SIZE) {
+                    const chunk = selectedDocs.slice(i, i + CHUNK_SIZE)
+                    const end = Math.min(i + CHUNK_SIZE, selectedDocs.length)
+                    setSyncProgressText(`Syncing documents (${end} of ${selectedDocs.length})...`)
+
+                    const res = await axios.post('/api/sync', {
+                        sourceId: selectedSource,
+                        ...(syncedBy ? { syncedBy } : {}),
+                        documents: chunk.map(doc => ({
                             ...doc,
-                            uuid: doc.uuid,
-                            title: doc.title,
-                            displayId: doc.displayId,
-                            documentTypeCode: doc.documentTypeCode,
-                            projectId: doc.projectId,
-                            scopeId: doc.scopeId,
-                            statusCode: doc.statusCode,
-                            createdAt: doc.createdAt,
-                            modifiedAt: doc.modifiedAt,
-                            source: sources.find(s => s.id === selectedSource)?.type || 'CALM',
-                            project: projects.find(p => p.id === selectedProject)?.name || 'Unknown Project'
-                        }
-                    }))
-                })
+                            id: doc.uuid || doc.id,
+                            name: doc.title || doc.name,
+                            type: doc.documentTypeCode || doc.documentType || doc.type,
+                            metadata: {
+                                ...doc,
+                                uuid: doc.uuid,
+                                title: doc.title,
+                                displayId: doc.displayId,
+                                documentTypeCode: doc.documentTypeCode,
+                                projectId: doc.projectId,
+                                scopeId: doc.scopeId,
+                                statusCode: doc.statusCode,
+                                createdAt: doc.createdAt,
+                                modifiedAt: doc.modifiedAt,
+                                source: sources.find(s => s.id === selectedSource)?.type || 'CALM',
+                                project: projects.find(p => p.id === selectedProject)?.name || 'Unknown Project'
+                            }
+                        }))
+                    })
+
+                    if (res.data?.results) {
+                        allResults = allResults.concat(res.data.results)
+                    }
+                }
 
                 // Count updated vs newly added
-                const results = res.data.results || []
-                const updated = results.filter((r: any) => r.wasExisting).length
-                const added = results.filter((r: any) => !r.wasExisting && r.status === 'success').length
+                const updated = allResults.filter((r: any) => r.wasExisting).length
+                const added = allResults.filter((r: any) => !r.wasExisting && (r.status === 'success' || r.status === 'updated')).length
 
                 setSyncResult({
-                    message: res.data.message,
-                    count: results.length,
+                    message: `Successfully processed ${allResults.length} items`,
+                    count: allResults.length,
                     updated: updated,
                     added: added
                 })
                 setSyncStep(4)
                 if (onSyncComplete) onSyncComplete()
-            } catch (err) {
+            } catch (err: any) {
                 console.error('Sync failed:', err)
-                alert('Sync failed. Check console.')
+                alert(err?.response?.data?.error || err?.response?.data?.message || 'Sync failed. Please check server logs.')
             } finally {
                 setIsSyncing(false)
+                setSyncProgressText('')
             }
         }
     }
@@ -214,6 +251,7 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
         setDocsToSync([])
         setSelectedDocIds(new Set())
         setSyncStatus({})
+        setSyncProgressText('')
     }
 
     const toggleDocSelection = (docId: string) => {
@@ -286,27 +324,46 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
 
                     {syncStep === 2 && (
                         <div className="settings-form-group">
-                            <label>Select Project</label>
+                            <label>{isAdtSelected ? 'Select SAP Package' : 'Select Project'}</label>
                             {isLoadingProjects ? (
-                                <p>Loading projects...</p>
+                                <p>Loading {isAdtSelected ? 'packages' : 'projects'}...</p>
                             ) : projectLoadError ? (
                                 <div>
-                                    <p className="text-sm text-red-600 mb-2">Failed to load projects.</p>
+                                    <p className="text-sm text-red-600 mb-2">Failed to load {isAdtSelected ? 'packages' : 'projects'}.</p>
                                     <p className="text-xs text-red-500">{projectLoadError}</p>
                                 </div>
-                            ) : projects.length === 0 ? (
-                                <p className="text-sm text-gray-500">No projects found for this source.</p>
                             ) : (
-                                <select
-                                    value={selectedProject}
-                                    onChange={e => setSelectedProject(e.target.value)}
-                                    className="w-full p-2 border rounded-lg"
-                                >
-                                    <option value="">-- Choose a project --</option>
-                                    {projects.map(p => (
-                                        <option key={p.id} value={p.id}>{p.name}</option>
-                                    ))}
-                                </select>
+                                <>
+                                    <select
+                                        value={selectedProject}
+                                        onChange={e => {
+                                            setSelectedProject(e.target.value)
+                                            setCustomPackage('')
+                                        }}
+                                        className="w-full p-2 border rounded-lg"
+                                    >
+                                        <option value="">{isAdtSelected ? '-- Choose a package preset --' : '-- Choose a project --'}</option>
+                                        {projects.map(p => (
+                                            <option key={p.id} value={p.id}>{p.name}</option>
+                                        ))}
+                                    </select>
+                                    {isAdtSelected && (
+                                        <div className="mt-4">
+                                            <label className="text-sm text-gray-600 font-medium">Or enter custom package name:</label>
+                                            <input
+                                                type="text"
+                                                placeholder="e.g. $TMP, ZFIORI_SALES, ZMY_PACKAGE"
+                                                value={customPackage}
+                                                onChange={e => {
+                                                    setCustomPackage(e.target.value.toUpperCase())
+                                                    if (e.target.value) setSelectedProject('')
+                                                }}
+                                                className="w-full p-2 border rounded-lg mt-1 font-mono text-sm"
+                                            />
+                                            <p className="text-xs text-gray-500 mt-1">Default is $TMP for local development objects.</p>
+                                        </div>
+                                    )}
+                                </>
                             )}
                         </div>
                     )}
@@ -316,7 +373,7 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                             {isSyncing ? (
                                 <div className="text-center p-4">
                                     <div className="animate-spin h-8 w-8 border-4 border-blue-500 rounded-full border-t-transparent mx-auto mb-4"></div>
-                                    <p>Fetching documents...</p>
+                                    <p className="text-sm text-gray-600 font-medium">{syncProgressText || 'Fetching documents...'}</p>
                                 </div>
                             ) : (
                                 <>
@@ -349,8 +406,8 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
                                             const aTime = a.modifiedAt ? new Date(a.modifiedAt).getTime() : 0
                                             const bTime = b.modifiedAt ? new Date(b.modifiedAt).getTime() : 0
                                             return bTime - aTime
-                                        }).map(doc => {
-                                            const docId = doc.uuid || doc.id
+                                        }).map((doc, docIdx) => {
+                                            const docId = doc.uuid || doc.id || `doc_${docIdx}`
                                             const isTestCase = doc.itemType === 'test_case'
                                             const typeCode = doc.documentTypeCode || doc.documentType || doc.type
                                             const typeName = isTestCase ? 'Test Case' : (documentTypeNames[typeCode] || typeCode || 'Document')
@@ -359,7 +416,7 @@ export default function SyncSourceModal({ isOpen, onClose, onSyncComplete, preSe
 
                                             return (
                                                 <div
-                                                    key={docId}
+                                                    key={`${docId}_${docIdx}`}
                                                     className="text-sm py-2 px-2 border-b last:border-0 flex items-center gap-3 hover:bg-gray-100 cursor-pointer"
                                                     onClick={() => toggleDocSelection(docId)}
                                                 >

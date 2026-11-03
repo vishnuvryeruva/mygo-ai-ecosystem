@@ -76,7 +76,7 @@ export default function FetchCodeModal({
                     {/* First Row: Source & Package */}
                     <div className="grid grid-cols-2 gap-6">
                         <div>
-                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.15em] mb-2.5 block">BTP Source</label>
+                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.15em] mb-2.5 block">Source System (SAP ADT / BTP)</label>
                             <select 
                                 className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3.5 px-5 text-sm font-bold text-[#034354] outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all cursor-pointer shadow-sm"
                                 value={sourceId}
@@ -84,7 +84,7 @@ export default function FetchCodeModal({
                             >
                                 <option value="">Select Instance</option>
                                 {sources.map(s => (
-                                    <option key={s.id} value={s.id}>{s.name}</option>
+                                    <option key={s.id} value={s.id}>{s.name} ({s.type})</option>
                                 ))}
                             </select>
                         </div>
@@ -92,7 +92,7 @@ export default function FetchCodeModal({
                             <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.15em] mb-2.5 block">Package</label>
                             <input 
                                 className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3.5 px-5 text-sm font-bold text-[#034354] outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all placeholder:text-slate-300 shadow-sm"
-                                placeholder="e.g. ZCOMMON"
+                                placeholder="e.g. $TMP or ZCOMMON"
                                 value={packageName}
                                 onChange={(e) => setPackageName(e.target.value)}
                             />

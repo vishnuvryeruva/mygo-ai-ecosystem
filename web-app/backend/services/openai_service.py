@@ -36,9 +36,9 @@ class OpenAIService:
         if self.claude_model in ("claude-sonnet-4-6", "claude-4-6"):
             self.claude_model = "claude-3-5-sonnet-20241022"
 
-        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-        if self.gemini_model in ("gemini-2.5-flash", "gemini-2.5"):
-            self.gemini_model = "gemini-1.5-flash"
+        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        if self.gemini_model in ("gemini-1.5-flash", "gemini-1.5", "gemini-1.5-pro"):
+            self.gemini_model = "gemini-2.5-flash"
 
         self.openai_client = None
         openai_key = os.getenv("OPENAI_API_KEY")
@@ -58,8 +58,9 @@ class OpenAIService:
         self._resolved_gemini_model = None
 
     def _normalize_provider(self, provider: Optional[str]) -> str:
-        normalized = (provider or "openai").strip().lower()
-        return normalized if normalized in self.VALID_PROVIDERS else "openai"
+        default_p = os.getenv("DEFAULT_LLM_PROVIDER", "gemini" if self.has_gemini else "openai").strip().lower()
+        normalized = (provider or default_p).strip().lower()
+        return normalized if normalized in self.VALID_PROVIDERS else default_p
 
     def _log_model_selection(self, provider: str, model: str):
         print(f"LLM_ROUTER: provider={provider} model={model}")
@@ -202,13 +203,22 @@ class OpenAIService:
             messages.append({"role": "user", "content": prompt})
             return self.chat_completion(messages, temperature, max_tokens, provider=provider)
 
+        resolved_provider = self._normalize_provider(provider)
+        if resolved_provider == "gemini":
+            active_model = self._resolve_gemini_model()
+        elif resolved_provider == "claude":
+            active_model = self.claude_model
+        else:
+            active_model = self.openai_model
+
         try:
             from services.langchain_agent_service import LangGraphExecutionEngine
             return LangGraphExecutionEngine.execute_agent_workflow(
                 agent_name=agent_name,
                 user_prompt=prompt,
                 system_prompt=system_prompt or "",
-                llm_provider=provider,
+                llm_provider=resolved_provider,
+                model_name=active_model,
                 execution_fn=_execute
             )
         except Exception as e:
